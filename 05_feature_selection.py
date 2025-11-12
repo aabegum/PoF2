@@ -77,6 +77,14 @@ print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
+# Verify Equipment_Class_Primary exists (created by 02_data_transformation.py v2.0+)
+if 'Equipment_Class_Primary' not in df.columns:
+    print("\n⚠ WARNING: Equipment_Class_Primary column not found!")
+    print("This column should be created by 02_data_transformation.py and passed through 03_feature_engineering.py")
+    print("Proceeding without Equipment_Class_Primary...")
+else:
+    print("✓ Equipment_Class_Primary column verified")
+
 original_feature_count = df.shape[1]
 
 # ============================================================================

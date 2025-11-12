@@ -73,6 +73,14 @@ log_print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 log_print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
+# Verify Equipment_Class_Primary exists (created by 02_data_transformation.py v2.0+)
+if 'Equipment_Class_Primary' not in df.columns:
+    log_print("\n⚠ WARNING: Equipment_Class_Primary column not found!")
+    log_print("This column should be created by 02_data_transformation.py and passed through 03_feature_engineering.py")
+    log_print("Some visualizations may be limited without this column.")
+else:
+    log_print("✓ Equipment_Class_Primary column verified (from transformation script)")
+
 # Display column names
 log_print(f"\n--- Available Features ({df.shape[1]}) ---")
 for i, col in enumerate(df.columns, 1):
