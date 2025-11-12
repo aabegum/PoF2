@@ -154,6 +154,72 @@ if best_class_col:
         report_lines.append(f"{str(val):<20} {count:>6,}")
 
 # ============================================================================
+# 3b. EQUIPMENT SPECIFICATIONS (OPTIONAL - Future Enhancements)
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 3b: EQUIPMENT SPECIFICATIONS (Optional)")
+print("="*100)
+
+spec_columns = {
+    'voltage_level': 'Voltage Level (LV/MV/HV)',
+    'kVa_rating': 'Transformer Capacity Rating (kVA)',
+    'component voltage': 'Component Voltage',
+    'MARKA': 'Equipment Brand',
+    'MARKA_MODEL': 'Equipment Model'
+}
+
+print(f"\nEquipment Specification Columns:")
+found_specs = False
+
+for col, description in spec_columns.items():
+    if col in df.columns:
+        found_specs = True
+        coverage = df[col].notna().sum()
+        pct = coverage / len(df) * 100
+        unique = df[col].nunique()
+
+        status = "✅" if pct > 90 else ("✓" if pct > 70 else "⚠")
+        print(f"  {status} {col:20s} → {pct:5.1f}% coverage ({unique:,} unique values)")
+
+        # Show value distribution for key columns
+        if col in ['voltage_level', 'component voltage'] and coverage > 0 and unique < 20:
+            print(f"     Distribution:")
+            val_counts = df[col].value_counts().head(5)
+            for val, count in val_counts.items():
+                val_pct = count / len(df) * 100
+                print(f"       • {str(val)[:30]:30s}: {count:>6,} ({val_pct:>5.1f}%)")
+
+        if col == 'kVa_rating' and coverage > 0:
+            valid_ratings = df[col].dropna()
+            if pd.api.types.is_numeric_dtype(valid_ratings):
+                print(f"     Statistics:")
+                print(f"       Mean:   {valid_ratings.mean():>8.1f} kVA")
+                print(f"       Median: {valid_ratings.median():>8.1f} kVA")
+                print(f"       Range:  {valid_ratings.min():>8.1f} - {valid_ratings.max():>8.1f} kVA")
+    else:
+        print(f"  ❌ {col:20s} → NOT FOUND (may be added in future)")
+
+if not found_specs:
+    print("\n  ⚠️  No equipment specification columns found")
+    print("     These columns are optional but helpful for advanced analysis:")
+    print("       • voltage_level: For voltage-based segmentation")
+    print("       • kVa_rating: For transformer capacity analysis")
+    print("       • component voltage: Alternative voltage information")
+else:
+    # Add to report
+    report_lines.append(f"\nEQUIPMENT SPECIFICATIONS:")
+    for col, description in spec_columns.items():
+        if col in df.columns:
+            coverage = df[col].notna().sum()
+            pct = coverage / len(df) * 100
+            report_lines.append(f"  {col}: {pct:.1f}% coverage")
+
+print("\n💡 Note: voltage_level and kVa_rating can be added to enhance:")
+print("   • Equipment segmentation by voltage class")
+print("   • Transformer-specific failure analysis")
+print("   • Capacity-based risk modeling")
+
+# ============================================================================
 # 4. EQUIPMENT AGE ANALYSIS
 # ============================================================================
 print("\n" + "="*100)
@@ -476,6 +542,51 @@ print("-" * 52)
 print(f"{'TOTAL QUALITY SCORE':<25} {quality_score}/10")
 print("-" * 52)
 
+# Optional/Bonus Checks (Future Enhancements)
+optional_checks = []
+
+# Voltage Level (optional)
+if 'voltage_level' in df.columns:
+    voltage_coverage = df['voltage_level'].notna().sum() / len(df) * 100
+    optional_checks.append(('Voltage Level', voltage_coverage > 80, voltage_coverage))
+elif 'component voltage' in df.columns:
+    voltage_coverage = df['component voltage'].notna().sum() / len(df) * 100
+    optional_checks.append(('Component Voltage', voltage_coverage > 80, voltage_coverage))
+
+# kVa Rating (optional)
+if 'kVa_rating' in df.columns:
+    kva_coverage = df['kVa_rating'].notna().sum() / len(df) * 100
+    optional_checks.append(('kVa Rating', kva_coverage > 80, kva_coverage))
+
+# Equipment Brand/Model (optional)
+if 'MARKA' in df.columns or 'MARKA_MODEL' in df.columns:
+    brand_coverage = 0
+    if 'MARKA' in df.columns:
+        brand_coverage = max(brand_coverage, df['MARKA'].notna().sum() / len(df) * 100)
+    if 'MARKA_MODEL' in df.columns:
+        brand_coverage = max(brand_coverage, df['MARKA_MODEL'].notna().sum() / len(df) * 100)
+    optional_checks.append(('Equipment Brand/Model', brand_coverage > 70, brand_coverage))
+
+if len(optional_checks) > 0:
+    optional_score = sum(1 for _, passed, _ in optional_checks if passed)
+
+    print(f"\n{'OPTIONAL CHECKS (Bonus)':<25} {'Status':<10} {'Score':>15}")
+    print("-" * 52)
+
+    for criterion, passed, score in optional_checks:
+        status = "✅ PASS" if passed else "⚠️  N/A"
+        score_str = f"{score:.1f}%"
+        print(f"{criterion:<25} {status:<10} {score_str:>15}")
+
+    print("-" * 52)
+    print(f"{'OPTIONAL SCORE':<25} {optional_score}/{len(optional_checks)}")
+    print("-" * 52)
+    print(f"\n💡 Optional checks provide enhanced analysis capabilities")
+    print(f"   These are not required for core PoF modeling")
+else:
+    print(f"\n💡 OPTIONAL CHECKS: None found (voltage_level, kVa_rating can be added later)")
+    print(f"   These enhance analysis but are not required for core PoF modeling")
+
 if quality_score >= 9:
     rating = "✅ EXCELLENT"
     message = "Data is ready for PoF modeling!"
@@ -493,6 +604,13 @@ print(f"\n{rating}: {message}")
 
 report_lines.append(f"\nDATA QUALITY SCORE: {quality_score}/10")
 report_lines.append(f"Rating: {rating}")
+
+# Add optional checks to report
+if len(optional_checks) > 0:
+    report_lines.append(f"\nOPTIONAL SPECIFICATIONS:")
+    for criterion, passed, score in optional_checks:
+        status = "✅" if passed else "⚠️"
+        report_lines.append(f"  {status} {criterion}: {score:.1f}% coverage")
 
 # ============================================================================
 # 9. MISSING DATA ANALYSIS
@@ -618,6 +736,26 @@ print(f"   • Fault Timestamp: started at, ended at")
 
 if 'started at' in df.columns and df['started at'].notna().sum() > 0:
     print(f"   • Temporal Span: {df['started at'].min().year} to {df['started at'].max().year}")
+
+# Optional columns status
+optional_found = []
+if 'voltage_level' in df.columns:
+    optional_found.append('voltage_level')
+elif 'component voltage' in df.columns:
+    optional_found.append('component voltage')
+if 'kVa_rating' in df.columns:
+    optional_found.append('kVa_rating')
+if 'MARKA' in df.columns or 'MARKA_MODEL' in df.columns:
+    optional_found.append('Equipment Brand/Model')
+
+if len(optional_found) > 0:
+    print(f"\n🌟 OPTIONAL SPECIFICATIONS FOUND:")
+    for col in optional_found:
+        print(f"   • {col}")
+else:
+    print(f"\n💡 OPTIONAL SPECIFICATIONS (Can be added later):")
+    print(f"   • voltage_level - For voltage-based segmentation")
+    print(f"   • kVa_rating - For transformer capacity analysis")
 
 print(f"\n📂 REPORTS GENERATED:")
 print(f"   • {report_path}")
