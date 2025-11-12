@@ -86,6 +86,15 @@ print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
+# Verify Equipment_Class_Primary exists (created by 02_data_transformation.py)
+if 'Equipment_Class_Primary' not in df.columns:
+    print("\n❌ ERROR: Equipment_Class_Primary column not found!")
+    print("This column should be created by 02_data_transformation.py (v2.0+)")
+    print("Please run 02_data_transformation.py first!")
+    exit(1)
+
+print("✓ Equipment_Class_Primary column verified (from transformation script)")
+
 original_feature_count = df.shape[1]
 
 # ============================================================================
@@ -122,35 +131,17 @@ def get_expected_life(equipment_class):
 
 print("\n--- Calculating Expected Life per Equipment ---")
 
-# Apply expected life lookup
-# Smart equipment class selection: Equipment_Type → Ekipman_Sınıfı
-print("\n--- Smart Equipment Class Selection ---")
+# Note: Equipment_Class_Primary is provided by 02_data_transformation.py (v2.0+)
+# Priority: Equipment_Type → Ekipman_Sınıfı → Kesinti Ekipman Sınıfı → Ekipman Sınıf
 
-def get_equipment_class_smart(row):
-    """
-    Get equipment class with smart fallback
-    Priority: Equipment_Type → Ekipman_Sınıfı → Kesinti Ekipman Sınıfı
-    """
-    if pd.notna(row.get('Equipment_Type')):
-        return row['Equipment_Type']
-    elif pd.notna(row.get('Ekipman_Sınıfı')):
-        return row['Ekipman_Sınıfı']
-    elif pd.notna(row.get('Kesinti Ekipman Sınıfı')):
-        return row['Kesinti Ekipman Sınıfı']
-    return None
+# Show Equipment_Class_Primary coverage
+class_coverage = df['Equipment_Class_Primary'].notna().sum()
+class_pct = class_coverage / len(df) * 100
+print(f"\n✓ Equipment_Class_Primary available for {class_coverage:,} equipment ({class_pct:.1f}%)")
 
-df['Equipment_Class_Primary'] = df.apply(get_equipment_class_smart, axis=1)
-
-class_sources = pd.Series({
-    'Equipment_Type': (df['Equipment_Type'].notna() & df['Equipment_Class_Primary'].notna()).sum(),
-    'Ekipman_Sınıfı': (df['Equipment_Type'].isna() & df['Ekipman_Sınıfı'].notna() & df['Equipment_Class_Primary'].notna()).sum(),
-    'Kesinti Ekipman Sınıfı': (df['Equipment_Type'].isna() & df['Ekipman_Sınıfı'].isna() & df['Kesinti Ekipman Sınıfı'].notna()).sum(),
-})
-
-print(f"Equipment Class Source Distribution:")
-for source, count in class_sources.items():
-    pct = count / len(df) * 100
-    print(f"  {source}: {count:,} ({pct:.1f}%)")
+# Show unique equipment types
+unique_classes = df['Equipment_Class_Primary'].nunique()
+print(f"✓ {unique_classes} unique equipment types identified")
 
 # Apply expected life lookup using primary class
 df['Beklenen_Ömür_Yıl'] = df['Equipment_Class_Primary'].apply(get_expected_life)
@@ -373,11 +364,10 @@ print("\n" + "="*100)
 print("STEP 7: CREATING EQUIPMENT CLASS AGGREGATIONS")
 print("="*100)
 
-if 'Ekipman_Sınıfı' in df.columns:
+if 'Equipment_Class_Primary' in df.columns:
     print("\n--- Calculating class-level benchmarks ---")
-    
-    # Group by equipment class
-    # Group by equipment class (using primary class column)
+
+    # Group by equipment class (using unified Equipment_Class_Primary)
     class_stats = df.groupby('Equipment_Class_Primary').agg({
         'Arıza_Sayısı_12ay': 'mean',
         'MTBF_Gün': 'mean',
@@ -624,12 +614,19 @@ if 'Risk_Category' in df.columns:
             print(f"  {eq_class:<30} {count:>4,} ({pct:>5.1f}%)")
         
         # Save high-risk equipment list
-        high_risk_output = high_risk[[
-            'Ekipman_ID', 'Ekipman_Sınıfı', 'Ekipman_Yaşı_Yıl', 
-            'Yas_Beklenen_Omur_Orani', 'Arıza_Sayısı_12ay',
-            'Composite_PoF_Risk_Score', 'Risk_Category',
-            'KOORDINAT_X', 'KOORDINAT_Y', 'İlçe'
-        ]].sort_values('Composite_PoF_Risk_Score', ascending=False)
+        output_cols = ['Ekipman_ID', 'Equipment_Class_Primary', 'Ekipman_Yaşı_Yıl',
+                      'Yas_Beklenen_Omur_Orani', 'Arıza_Sayısı_12ay',
+                      'Composite_PoF_Risk_Score', 'Risk_Category']
+
+        # Add optional columns if they exist
+        if 'KOORDINAT_X' in high_risk.columns:
+            output_cols.append('KOORDINAT_X')
+        if 'KOORDINAT_Y' in high_risk.columns:
+            output_cols.append('KOORDINAT_Y')
+        if 'İlçe' in high_risk.columns:
+            output_cols.append('İlçe')
+
+        high_risk_output = high_risk[output_cols].sort_values('Composite_PoF_Risk_Score', ascending=False)
         
         high_risk_output.to_csv('data/high_risk_equipment.csv', index=False)
         print(f"\n✅ High-risk equipment list saved to: data/high_risk_equipment.csv")
