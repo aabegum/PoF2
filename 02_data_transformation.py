@@ -1,19 +1,27 @@
 """
-DATA TRANSFORMATION: FAULT-LEVEL → EQUIPMENT-LEVEL
+DATA TRANSFORMATION: FAULT-LEVEL → EQUIPMENT-LEVEL v2.0
 Turkish EDAŞ PoF Prediction Project
 
-This script transforms your fault records into equipment-level data ready for PoF modeling.
+This script transforms fault records into equipment-level data ready for PoF modeling.
 
 Key Features:
+✓ Smart Equipment ID (cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu)
+✓ Unified Equipment Classification (Equipment_Type → Ekipman Sınıfı → fallbacks)
+✓ Age source tracking (TESIS_TARIHI vs EDBS_IDATE)
 ✓ Handles invalid dates (1900-01-01, 00:00:00, nulls)
-✓ Smart age calculation (TESIS_TARIHI → EDBS_IDATE fallback)
 ✓ Failure history aggregation (3/6/12 months)
 ✓ MTBF calculation
 ✓ Recurring fault detection (30/90 days)
-✓ Temporal feature engineering
+✓ Customer impact columns (all MV/LV categories)
+✓ Optional specifications (voltage_level, kVa_rating) - future-proof
 
-Input:  data/combined_data.xlsx (1,629 fault records)
-Output: data/equipment_level_data.csv (~1,300 equipment records)
+Priority Logic (aligned with 01_data_profiling.py):
+- Equipment ID: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu
+- Equipment Class: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı
+- Installation Date: TESIS_TARIHI → EDBS_IDATE
+
+Input:  data/combined_data.xlsx (fault records)
+Output: data/equipment_level_data.csv (equipment records with ~30+ features)
 """
 
 import pandas as pd
@@ -102,19 +110,23 @@ print("\n" + "="*100)
 print("STEP 5: EQUIPMENT IDENTIFICATION")
 print("="*100)
 
-# PRIMARY STRATEGY: cbs_id → HEPSI_ID (domain expert recommendation)
+# PRIMARY STRATEGY: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu
 print("\n--- Smart Equipment ID Selection ---")
 
 # Create unified equipment ID with fallback logic
 def get_equipment_id(row):
     """
     Get equipment ID with smart fallback
-    Priority: cbs_id → HEPSI_ID
+    Priority: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu
     """
     if pd.notna(row.get('cbs_id')):
         return row['cbs_id']
+    elif pd.notna(row.get('Ekipman ID')):
+        return row['Ekipman ID']
     elif pd.notna(row.get('HEPSI_ID')):
         return row['HEPSI_ID']
+    elif pd.notna(row.get('Ekipman Kodu')):
+        return row['Ekipman Kodu']
     return None
 
 df['Equipment_ID_Primary'] = df.apply(get_equipment_id, axis=1)
@@ -125,37 +137,125 @@ unique_equipment = df['Equipment_ID_Primary'].nunique()
 
 print(f"✓ Primary Equipment ID Strategy:")
 print(f"  Priority 1: cbs_id")
-print(f"  Priority 2: HEPSI_ID")
+print(f"  Priority 2: Ekipman ID")
+print(f"  Priority 3: HEPSI_ID")
+print(f"  Priority 4: Ekipman Kodu")
 print(f"  Combined coverage: {primary_coverage:,} ({primary_coverage/len(df)*100:.1f}%)")
 print(f"  Unique equipment: {unique_equipment:,}")
 print(f"  Average faults per equipment: {len(df)/unique_equipment:.1f}")
 
 # Use this as grouping key
 equipment_id_col = 'Equipment_ID_Primary'
+
+# ============================================================================
+# STEP 5b: CREATE UNIFIED EQUIPMENT CLASSIFICATION
+# ============================================================================
+print("\n--- Smart Equipment Classification Selection ---")
+
+# Create unified equipment class with fallback logic
+def get_equipment_class(row):
+    """
+    Get equipment class with smart fallback
+    Priority: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı → Ekipman Sınıf
+    """
+    if pd.notna(row.get('Equipment_Type')):
+        return row['Equipment_Type']
+    elif pd.notna(row.get('Ekipman Sınıfı')):
+        return row['Ekipman Sınıfı']
+    elif pd.notna(row.get('Kesinti Ekipman Sınıfı')):
+        return row['Kesinti Ekipman Sınıfı']
+    elif pd.notna(row.get('Ekipman Sınıf')):
+        return row['Ekipman Sınıf']
+    return None
+
+df['Equipment_Class_Primary'] = df.apply(get_equipment_class, axis=1)
+
+class_coverage = df['Equipment_Class_Primary'].notna().sum()
+print(f"✓ Unified Equipment Class created:")
+print(f"  Priority: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı")
+print(f"  Coverage: {class_coverage:,} ({class_coverage/len(df)*100:.1f}%)")
+print(f"  Unique types: {df['Equipment_Class_Primary'].nunique()}")
+
+# Track age source
+def get_age_source(row):
+    """Track which column provided installation date"""
+    if pd.notna(row.get('TESIS_TARIHI_clean')):
+        return 'TESIS_TARIHI'
+    elif pd.notna(row.get('EDBS_IDATE_clean')):
+        return 'EDBS_IDATE'
+    return 'MISSING'
+
+df['Age_Source'] = df.apply(get_age_source, axis=1)
 # STEP 6: AGGREGATE TO EQUIPMENT LEVEL
 print("\nSTEP 6: Aggregating to equipment level...")
 
+# Build aggregation dictionary dynamically based on available columns
 agg_dict = {
-    'Ekipman Sınıfı': 'first',
-    'Equipment_Type': 'first',
-    'Kesinti Ekipman Sınıfı': 'first',
+    # Equipment identification & classification
+    'Equipment_Class_Primary': 'first',  # NEW: Unified classification
+    'Ekipman Sınıfı': 'first',          # Keep for reference
+    'Equipment_Type': 'first',           # Keep for reference
+    'Kesinti Ekipman Sınıfı': 'first',  # Keep for reference
+
+    # Geographic data
     'KOORDINAT_X': 'first',
     'KOORDINAT_Y': 'first',
     'İl': 'first',
     'İlçe': 'first',
     'Mahalle': 'first',
+
+    # Age data
     'Installation_Date': 'first',
     'Installation_Year': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
+    'Age_Source': 'first',  # NEW: Track which date column used
+
+    # Fault history
     'started at': ['count', 'min', 'max'],
     'Fault_Last_3M': 'sum',
     'Fault_Last_6M': 'sum',
     'Fault_Last_12M': 'sum',
-    'total customer count': ['mean', 'max'],
+
+    # Temporal features
     'Summer_Peak_Flag': 'sum',
     'Winter_Peak_Flag': 'sum',
     'Time_To_Repair_Hours': ['mean', 'max']
 }
+
+# Add customer impact columns if available
+customer_impact_cols = [
+    'urban mv+suburban mv',
+    'urban lv+suburban lv',
+    'urban mv',
+    'urban lv',
+    'suburban mv',
+    'suburban lv',
+    'rural mv',
+    'rural lv',
+    'total customer count'
+]
+
+print("  Checking for customer impact columns...")
+for col in customer_impact_cols:
+    if col in df.columns:
+        agg_dict[col] = ['mean', 'max']
+        print(f"  ✓ Found: {col}")
+
+# Add optional specification columns if available
+optional_spec_cols = {
+    'voltage_level': 'first',
+    'kVa_rating': 'first',
+    'component voltage': 'first',
+    'MARKA': 'first',
+    'MARKA_MODEL': 'first',
+    'FIRMA': 'first'
+}
+
+print("  Checking for optional specification columns...")
+for col, agg_func in optional_spec_cols.items():
+    if col in df.columns:
+        agg_dict[col] = agg_func
+        print(f"  ✓ Found: {col}")
 
 equipment_df = df.groupby(equipment_id_col).agg(agg_dict).reset_index()
 equipment_df.columns = ['_'.join(col).strip('_') if col[1] else col[0] for col in equipment_df.columns.values]
@@ -165,8 +265,10 @@ print(f"✓ Created {len(equipment_df):,} equipment records from {original_fault
 # STEP 7: RENAME COLUMNS
 print("\nSTEP 7: Creating final features...")
 
+# Base rename dictionary
 rename_dict = {
-    'Equipment_ID_Primary': 'Ekipman_ID',  # ← NEW: Using smart ID
+    'Equipment_ID_Primary': 'Ekipman_ID',
+    'Equipment_Class_Primary_first': 'Equipment_Class_Primary',  # NEW: Unified classification
     'Ekipman Sınıfı_first': 'Ekipman_Sınıfı',
     'Equipment_Type_first': 'Equipment_Type',
     'Kesinti Ekipman Sınıfı_first': 'Kesinti Ekipman Sınıfı',
@@ -178,15 +280,26 @@ rename_dict = {
     'Installation_Date_first': 'Installation_Date',
     'Installation_Year_first': 'Installation_Year',
     'Ekipman_Yaşı_Yıl_first': 'Ekipman_Yaşı_Yıl',
+    'Age_Source_first': 'Age_Source',  # NEW: Track date source
     'started at_count': 'Toplam_Arıza_Sayisi_Lifetime',
     'started at_min': 'İlk_Arıza_Tarihi',
     'started at_max': 'Son_Arıza_Tarihi',
     'Fault_Last_3M_sum': 'Arıza_Sayısı_3ay',
     'Fault_Last_6M_sum': 'Arıza_Sayısı_6ay',
     'Fault_Last_12M_sum': 'Arıza_Sayısı_12ay',
-    'total customer count_mean': 'Avg_Customer_Count',
-    'total customer count_max': 'Max_Customer_Count',
 }
+
+# Add customer impact columns dynamically
+for col in customer_impact_cols:
+    if f'{col}_mean' in equipment_df.columns:
+        rename_dict[f'{col}_mean'] = f'{col.replace(" ", "_")}_Avg'
+    if f'{col}_max' in equipment_df.columns:
+        rename_dict[f'{col}_max'] = f'{col.replace(" ", "_")}_Max'
+
+# Add optional specification columns dynamically
+for col in optional_spec_cols.keys():
+    if f'{col}_first' in equipment_df.columns:
+        rename_dict[f'{col}_first'] = col
 
 equipment_df.rename(columns=rename_dict, inplace=True)
 
@@ -235,9 +348,47 @@ feature_docs.to_csv('data/feature_documentation.csv', index=False)
 print("\n" + "="*100)
 print("TRANSFORMATION COMPLETE!")
 print("="*100)
-print(f"\n✅ Output: {len(equipment_df):,} equipment records")
-print(f"✅ Features: {len(equipment_df.columns)} columns")
-print(f"✅ Files saved:")
-print(f"   • data/equipment_level_data.csv")
-print(f"   • data/feature_documentation.csv")
-print("\n🚀 Ready for PoF modeling!")
+
+print(f"\n📊 TRANSFORMATION SUMMARY:")
+print(f"   • Input: {original_fault_count:,} fault records")
+print(f"   • Output: {len(equipment_df):,} equipment records")
+print(f"   • Reduction: {original_fault_count/len(equipment_df):.1f}x (faults per equipment)")
+print(f"   • Total Features: {len(equipment_df.columns)} columns")
+
+print(f"\n🎯 KEY FEATURES CREATED:")
+print(f"   • Equipment ID Strategy: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu")
+print(f"   • Equipment Classification: Equipment_Class_Primary (unified)")
+print(f"   • Age Source Tracking: {equipment_df['Age_Source'].value_counts().to_dict() if 'Age_Source' in equipment_df.columns else 'N/A'}")
+print(f"   • Failure History: 3M, 6M, 12M fault counts")
+print(f"   • MTBF: {equipment_df['MTBF_Gün'].notna().sum():,} equipment with valid MTBF")
+print(f"   • Recurring Faults: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
+
+# Customer impact summary
+customer_cols_found = [col for col in customer_impact_cols if any(col.replace(" ", "_") in c for c in equipment_df.columns)]
+if customer_cols_found:
+    print(f"\n👥 CUSTOMER IMPACT COLUMNS:")
+    for col in customer_cols_found:
+        print(f"   ✓ {col}")
+else:
+    print(f"\n👥 CUSTOMER IMPACT COLUMNS: Using 'total customer count' only")
+
+# Optional specifications summary
+optional_cols_found = [col for col in optional_spec_cols.keys() if col in equipment_df.columns]
+if optional_cols_found:
+    print(f"\n🌟 OPTIONAL SPECIFICATIONS INCLUDED:")
+    for col in optional_cols_found:
+        coverage = equipment_df[col].notna().sum()
+        pct = coverage / len(equipment_df) * 100
+        print(f"   ✓ {col}: {coverage:,} ({pct:.1f}% coverage)")
+else:
+    print(f"\n💡 OPTIONAL SPECIFICATIONS: None found")
+    print(f"   Can add later: voltage_level, kVa_rating, component voltage")
+
+print(f"\n✅ FILES SAVED:")
+print(f"   • data/equipment_level_data.csv ({len(equipment_df):,} records)")
+print(f"   • data/feature_documentation.csv ({len(equipment_df.columns)} features)")
+
+print(f"\n🚀 READY FOR NEXT PHASE:")
+print(f"   → Run: 03_feature_engineering.py")
+print(f"   → Create advanced features (age ratios, reliability scores, etc.)")
+print("="*100)
