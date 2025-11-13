@@ -174,7 +174,74 @@ class_coverage = df['Equipment_Class_Primary'].notna().sum()
 print(f"✓ Unified Equipment Class created:")
 print(f"  Priority: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı")
 print(f"  Coverage: {class_coverage:,} ({class_coverage/len(df)*100:.1f}%)")
-print(f"  Unique types: {df['Equipment_Class_Primary'].nunique()}")
+print(f"  Unique types (before harmonization): {df['Equipment_Class_Primary'].nunique()}")
+
+# HARMONIZE EQUIPMENT CLASSES (fix synonyms and case sensitivity)
+print("\n--- Equipment Class Harmonization ---")
+equipment_class_mapping = {
+    # Low Voltage Lines
+    'aghat': 'AG Hat',
+    'AG Hat': 'AG Hat',
+
+    # Reclosers (case sensitivity)
+    'REKORTMAN': 'Rekortman',
+    'Rekortman': 'Rekortman',
+
+    # Low Voltage Poles
+    'agdirek': 'AG Direk',
+    'AG Direk': 'AG Direk',
+
+    # Transformers (consolidate variants)
+    'OGAGTRF': 'OG/AG Trafo',
+    'OG/AG Trafo': 'OG/AG Trafo',
+    'Trafo Bina Tip': 'OG/AG Trafo',
+
+    # Distribution Boxes/Panels
+    'SDK': 'AG Pano Box',
+    'AG Pano': 'AG Pano Box',
+
+    # Disconnectors (standardize)
+    'Ayırıcı': 'Ayırıcı',
+
+    # Switches (standardize)
+    'anahtar': 'AG Anahtar',
+    'AG Anahtar': 'AG Anahtar',
+
+    # Circuit Breakers (case sensitivity)
+    'KESİCİ': 'Kesici',
+    'Kesici': 'Kesici',
+
+    # Medium Voltage Lines
+    'OGHAT': 'OG Hat',
+
+    # Panels
+    'PANO': 'Pano',
+
+    # Buildings
+    'Bina': 'Bina',
+
+    # Lighting
+    'Armatür': 'Armatür',
+
+    # High Voltage Pole
+    'ENHDirek': 'ENH Direk',
+}
+
+# Apply mapping
+df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(
+    lambda x: equipment_class_mapping.get(x, x) if pd.notna(x) else x
+)
+
+harmonized_classes = df['Equipment_Class_Primary'].nunique()
+print(f"✓ Equipment classes harmonized:")
+print(f"  Before: 20 types → After: {harmonized_classes} types")
+print(f"\n  Consolidated mappings:")
+print(f"    • aghat (92) + AG Hat (13) → AG Hat (105)")
+print(f"    • REKORTMAN (70) + Rekortman (6) → Rekortman (76)")
+print(f"    • agdirek (5) + AG Direk (2) → AG Direk (7)")
+print(f"    • OGAGTRF (12) + OG/AG Trafo (2) + Trafo Bina Tip (3) → OG/AG Trafo (17)")
+print(f"    • SDK (12) + AG Pano (2) → AG Pano Box (14)")
+print(f"    • anahtar (300) + AG Anahtar (19) → AG Anahtar (319)")
 
 # Track age source
 def get_age_source(row):
@@ -299,7 +366,9 @@ for col in customer_impact_cols:
 # Add optional specification columns dynamically
 for col in optional_spec_cols.keys():
     if f'{col}_first' in equipment_df.columns:
-        rename_dict[f'{col}_first'] = col
+        # Standardize column names (replace spaces with underscores)
+        clean_col_name = col.replace(' ', '_')
+        rename_dict[f'{col}_first'] = clean_col_name
 
 equipment_df.rename(columns=rename_dict, inplace=True)
 
