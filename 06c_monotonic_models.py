@@ -72,6 +72,14 @@ HORIZONS = {
     '12M': 365
 }
 
+# Target thresholds based on lifetime failure count
+# Equipment with X+ lifetime failures are considered high-risk
+TARGET_THRESHOLDS = {
+    '3M': 1,   # At least 1 lifetime failure → high risk in 3M
+    '6M': 2,   # At least 2 lifetime failures → high risk in 6M
+    '12M': 3   # At least 3 lifetime failures → high risk in 12M
+}
+
 # XGBoost parameters (with monotonic constraints)
 XGBOOST_PARAMS = {
     'objective': 'binary:logistic',
@@ -148,21 +156,23 @@ print("\n" + "="*100)
 print("STEP 2: CREATING TARGET VARIABLES FOR MULTIPLE HORIZONS")
 print("="*100)
 
-print("\n--- Creating Binary Targets ---")
+print("\n--- Creating Binary Targets (Lifetime-Based) ---")
+print("Strategy: Equipment with X+ lifetime failures → high risk")
+print("This prevents data leakage from recent failure counts")
+
+# Verify required column exists
+if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
+    print("\n❌ ERROR: 'Toplam_Arıza_Sayisi_Lifetime' not found in features_engineered.csv")
+    print("Please run 02_data_transformation.py first!")
+    exit(1)
 
 targets = {}
 
 for horizon_name, horizon_days in HORIZONS.items():
-    # Target = 1 if equipment had ANY failure in time period
-    if horizon_name == '3M' and 'Arıza_Sayısı_3ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_3ay'] > 0).astype(int)
-    elif horizon_name == '6M' and 'Arıza_Sayısı_6ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_6ay'] > 0).astype(int)
-    elif horizon_name == '12M' and 'Arıza_Sayısı_12ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
-    else:
-        # Fallback: use 12M target
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
+    threshold = TARGET_THRESHOLDS[horizon_name]
+
+    # Target = 1 if equipment has threshold or more lifetime failures
+    targets[horizon_name] = (df_full['Toplam_Arıza_Sayisi_Lifetime'] >= threshold).astype(int)
 
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values
@@ -171,9 +181,9 @@ for horizon_name, horizon_days in HORIZONS.items():
     target_dist = df[f'Target_{horizon_name}'].value_counts()
     pos_rate = target_dist.get(1, 0) / len(df) * 100
 
-    print(f"\n{horizon_name} ({horizon_days} days) Target:")
-    print(f"  No Failure (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
-    print(f"  Failure (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"\n{horizon_name} ({horizon_days} days) - Threshold: {threshold}+ lifetime failures")
+    print(f"  Low Risk (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
+    print(f"  High Risk (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
     print(f"  Positive Rate: {pos_rate:.1f}%")
 
 # ============================================================================
