@@ -640,6 +640,515 @@ else:
     log_print("\n⚠️  Predictions directory not found. Run 06_model_training.py first.")
 
 # ============================================================================
+# STEP 11: VOLTAGE-LEVEL ANALYSIS (NEW - From Step 9B)
+# ============================================================================
+log_print("\n" + "="*100)
+log_print("STEP 11: VOLTAGE-LEVEL ANALYSIS")
+log_print("="*100)
+
+if 'Voltage_Class' in df.columns and df['Voltage_Class'].notna().any():
+    log_print("\n--- Voltage Class Distribution ---")
+    voltage_dist = df['Voltage_Class'].value_counts()
+    log_print(f"\nTotal Voltage Classes: {len(voltage_dist)}")
+    for v_class, count in voltage_dist.items():
+        if pd.notna(v_class):
+            pct = count / len(df) * 100
+            log_print(f"  {v_class}: {count:,} equipment ({pct:.1f}%)")
+
+    # Voltage-level failure patterns
+    log_print("\n--- Failure Patterns by Voltage Level ---")
+    for v_class in ['AG', 'OG', 'YG']:
+        mask = df['Voltage_Class'] == v_class
+        if mask.sum() > 0:
+            avg_age = df.loc[mask, 'Ekipman_Yaşı_Yıl'].mean() if 'Ekipman_Yaşı_Yıl' in df.columns else 0
+            avg_faults_12m = df.loc[mask, 'Arıza_Sayısı_12ay'].mean() if 'Arıza_Sayısı_12ay' in df.columns else 0
+            recurring_pct = df.loc[mask, 'Tekrarlayan_Arıza_90gün_Flag'].sum() / mask.sum() * 100 if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns else 0
+            risk_score = df.loc[mask, 'Composite_PoF_Risk_Score'].mean() if 'Composite_PoF_Risk_Score' in df.columns else 0
+
+            log_print(f"\n  {v_class}:")
+            log_print(f"    Equipment count: {mask.sum():,}")
+            log_print(f"    Avg age: {avg_age:.1f} years")
+            log_print(f"    Avg 12M failures: {avg_faults_12m:.2f}")
+            log_print(f"    Recurring faults: {recurring_pct:.1f}%")
+            log_print(f"    Avg PoF risk score: {risk_score:.1f}")
+
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+    # 1. Failure rate by voltage
+    if 'Arıza_Sayısı_12ay' in df.columns:
+        ax = axes[0, 0]
+        voltage_failures = df.groupby('Voltage_Class')['Arıza_Sayısı_12ay'].mean().sort_values(ascending=False)
+        colors = ['#e74c3c' if v == 'OG' else '#3498db' if v == 'AG' else '#95a5a6' for v in voltage_failures.index]
+        ax.bar(voltage_failures.index, voltage_failures.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Voltage Class', fontsize=11)
+        ax.set_ylabel('Average 12M Failures', fontsize=11)
+        ax.set_title('Average Failure Rate by Voltage Level', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (idx, val) in enumerate(voltage_failures.items()):
+            ax.text(i, val + 0.02, f'{val:.2f}', ha='center', va='bottom', fontweight='bold')
+
+    # 2. Age distribution by voltage
+    if 'Ekipman_Yaşı_Yıl' in df.columns:
+        ax = axes[0, 1]
+        voltage_classes = df['Voltage_Class'].dropna().unique()
+        age_data = [df[df['Voltage_Class'] == vc]['Ekipman_Yaşı_Yıl'].dropna() for vc in voltage_classes if pd.notna(vc)]
+        bp = ax.boxplot(age_data, labels=[vc for vc in voltage_classes if pd.notna(vc)], patch_artist=True)
+
+        # Color boxes
+        for patch, vc in zip(bp['boxes'], voltage_classes):
+            if vc == 'OG':
+                patch.set_facecolor('#e74c3c')
+            elif vc == 'AG':
+                patch.set_facecolor('#3498db')
+            else:
+                patch.set_facecolor('#95a5a6')
+            patch.set_alpha(0.7)
+
+        ax.set_xlabel('Voltage Class', fontsize=11)
+        ax.set_ylabel('Equipment Age (Years)', fontsize=11)
+        ax.set_title('Age Distribution by Voltage Level', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+    # 3. Recurring faults by voltage
+    if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns:
+        ax = axes[1, 0]
+        recurring_by_voltage = df.groupby('Voltage_Class')['Tekrarlayan_Arıza_90gün_Flag'].apply(
+            lambda x: x.sum() / len(x) * 100 if len(x) > 0 else 0
+        ).sort_values(ascending=False)
+        colors = ['#e74c3c' if v == 'OG' else '#3498db' if v == 'AG' else '#95a5a6' for v in recurring_by_voltage.index]
+        ax.bar(recurring_by_voltage.index, recurring_by_voltage.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Voltage Class', fontsize=11)
+        ax.set_ylabel('Recurring Fault Rate (%)', fontsize=11)
+        ax.set_title('Recurring Faults (90-day) by Voltage Level', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (idx, val) in enumerate(recurring_by_voltage.items()):
+            ax.text(i, val + 0.5, f'{val:.1f}%', ha='center', va='bottom', fontweight='bold')
+
+    # 4. Risk score by voltage
+    if 'Composite_PoF_Risk_Score' in df.columns:
+        ax = axes[1, 1]
+        voltage_classes = df['Voltage_Class'].dropna().unique()
+        risk_data = [df[df['Voltage_Class'] == vc]['Composite_PoF_Risk_Score'].dropna() for vc in voltage_classes if pd.notna(vc)]
+
+        parts = ax.violinplot(risk_data, positions=range(len(voltage_classes)), showmeans=True, showmedians=True)
+        for pc, vc in zip(parts['bodies'], voltage_classes):
+            if vc == 'OG':
+                pc.set_facecolor('#e74c3c')
+            elif vc == 'AG':
+                pc.set_facecolor('#3498db')
+            else:
+                pc.set_facecolor('#95a5a6')
+            pc.set_alpha(0.7)
+
+        ax.set_xticks(range(len(voltage_classes)))
+        ax.set_xticklabels([vc for vc in voltage_classes if pd.notna(vc)])
+        ax.set_xlabel('Voltage Class', fontsize=11)
+        ax.set_ylabel('PoF Risk Score', fontsize=11)
+        ax.set_title('Risk Score Distribution by Voltage Level', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig('outputs/eda/11_voltage_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    log_print("\n✓ Saved: outputs/eda/11_voltage_analysis.png")
+else:
+    log_print("\n⚠️  Voltage_Class column not found or empty")
+
+# ============================================================================
+# STEP 12: URBAN/RURAL ANALYSIS (NEW - From Step 9B)
+# ============================================================================
+log_print("\n" + "="*100)
+log_print("STEP 12: URBAN/RURAL (GEOGRAPHIC TYPE) ANALYSIS")
+log_print("="*100)
+
+if 'Bölge_Tipi' in df.columns and df['Bölge_Tipi'].notna().any():
+    log_print("\n--- Geographic Type Distribution ---")
+    region_dist = df['Bölge_Tipi'].value_counts()
+    log_print(f"\nTotal Regions: {len(region_dist)}")
+    for region, count in region_dist.items():
+        if pd.notna(region):
+            pct = count / len(df) * 100
+            log_print(f"  {region}: {count:,} equipment ({pct:.1f}%)")
+
+    # Regional failure patterns
+    log_print("\n--- Failure Patterns by Region ---")
+    for region in ['Kentsel', 'Kırsal']:
+        mask = df['Bölge_Tipi'] == region
+        if mask.sum() > 0:
+            avg_age = df.loc[mask, 'Ekipman_Yaşı_Yıl'].mean() if 'Ekipman_Yaşı_Yıl' in df.columns else 0
+            avg_faults_12m = df.loc[mask, 'Arıza_Sayısı_12ay'].mean() if 'Arıza_Sayısı_12ay' in df.columns else 0
+            avg_customers = df.loc[mask, 'total_customer_count_Avg'].mean() if 'total_customer_count_Avg' in df.columns else 0
+            risk_score = df.loc[mask, 'Composite_PoF_Risk_Score'].mean() if 'Composite_PoF_Risk_Score' in df.columns else 0
+
+            log_print(f"\n  {region}:")
+            log_print(f"    Equipment count: {mask.sum():,}")
+            log_print(f"    Avg age: {avg_age:.1f} years")
+            log_print(f"    Avg 12M failures: {avg_faults_12m:.2f}")
+            log_print(f"    Avg customers affected: {avg_customers:.1f}")
+            log_print(f"    Avg PoF risk score: {risk_score:.1f}")
+
+    # District breakdown
+    if 'İlçe' in df.columns:
+        log_print("\n--- District Breakdown ---")
+        district_dist = df['İlçe'].value_counts().head(10)
+        for district, count in district_dist.items():
+            region = df[df['İlçe'] == district]['Bölge_Tipi'].mode()[0] if len(df[df['İlçe'] == district]) > 0 else 'Unknown'
+            pct = count / len(df) * 100
+            log_print(f"  {district}: {count:,} equipment ({pct:.1f}%) - {region}")
+
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+    # 1. Failure rate by region
+    if 'Arıza_Sayısı_12ay' in df.columns:
+        ax = axes[0, 0]
+        region_failures = df.groupby('Bölge_Tipi')['Arıza_Sayısı_12ay'].mean().sort_values(ascending=False)
+        colors = ['#e67e22' if r == 'Kırsal' else '#27ae60' for r in region_failures.index]
+        ax.bar(region_failures.index, region_failures.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Region Type', fontsize=11)
+        ax.set_ylabel('Average 12M Failures', fontsize=11)
+        ax.set_title('Average Failure Rate by Region', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (idx, val) in enumerate(region_failures.items()):
+            ax.text(i, val + 0.02, f'{val:.2f}', ha='center', va='bottom', fontweight='bold')
+
+    # 2. Age distribution by region
+    if 'Ekipman_Yaşı_Yıl' in df.columns:
+        ax = axes[0, 1]
+        regions = df['Bölge_Tipi'].dropna().unique()
+        age_data = [df[df['Bölge_Tipi'] == r]['Ekipman_Yaşı_Yıl'].dropna() for r in regions if pd.notna(r)]
+        bp = ax.boxplot(age_data, labels=[r for r in regions if pd.notna(r)], patch_artist=True)
+
+        # Color boxes
+        for patch, r in zip(bp['boxes'], regions):
+            if r == 'Kırsal':
+                patch.set_facecolor('#e67e22')
+            elif r == 'Kentsel':
+                patch.set_facecolor('#27ae60')
+            patch.set_alpha(0.7)
+
+        ax.set_xlabel('Region Type', fontsize=11)
+        ax.set_ylabel('Equipment Age (Years)', fontsize=11)
+        ax.set_title('Age Distribution by Region', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+    # 3. Customer impact by region
+    if 'total_customer_count_Avg' in df.columns:
+        ax = axes[1, 0]
+        region_customers = df.groupby('Bölge_Tipi')['total_customer_count_Avg'].mean().sort_values(ascending=False)
+        colors = ['#e67e22' if r == 'Kırsal' else '#27ae60' for r in region_customers.index]
+        ax.bar(region_customers.index, region_customers.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Region Type', fontsize=11)
+        ax.set_ylabel('Average Customers Affected', fontsize=11)
+        ax.set_title('Customer Impact by Region', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (idx, val) in enumerate(region_customers.items()):
+            ax.text(i, val + 2, f'{val:.0f}', ha='center', va='bottom', fontweight='bold')
+
+    # 4. Equipment count by district
+    if 'İlçe' in df.columns:
+        ax = axes[1, 1]
+        district_counts = df['İlçe'].value_counts().head(10)
+        colors = []
+        for district in district_counts.index:
+            region = df[df['İlçe'] == district]['Bölge_Tipi'].mode()[0] if len(df[df['İlçe'] == district]) > 0 else 'Unknown'
+            colors.append('#e67e22' if region == 'Kırsal' else '#27ae60')
+
+        ax.barh(range(len(district_counts)), district_counts.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_yticks(range(len(district_counts)))
+        ax.set_yticklabels(district_counts.index)
+        ax.set_xlabel('Equipment Count', fontsize=11)
+        ax.set_ylabel('District', fontsize=11)
+        ax.set_title('Top 10 Districts by Equipment Count', fontsize=13, fontweight='bold')
+        ax.grid(axis='x', alpha=0.3)
+
+        # Add value labels
+        for i, val in enumerate(district_counts.values):
+            ax.text(val + 5, i, f'{val:,}', va='center', fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('outputs/eda/12_urban_rural_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    log_print("\n✓ Saved: outputs/eda/12_urban_rural_analysis.png")
+else:
+    log_print("\n⚠️  Bölge_Tipi column not found or empty")
+
+# ============================================================================
+# STEP 13: SEASONAL ANALYSIS (NEW - From Step 9B)
+# ============================================================================
+log_print("\n" + "="*100)
+log_print("STEP 13: SEASONAL FAILURE PATTERN ANALYSIS")
+log_print("="*100)
+
+if 'Son_Arıza_Mevsim' in df.columns and df['Son_Arıza_Mevsim'].notna().any():
+    log_print("\n--- Seasonal Distribution of Last Faults ---")
+    season_dist = df['Son_Arıza_Mevsim'].value_counts()
+    total_with_season = df['Son_Arıza_Mevsim'].notna().sum()
+
+    log_print(f"\nEquipment with seasonal data: {total_with_season:,} ({total_with_season/len(df)*100:.1f}%)")
+    log_print(f"\nSeason breakdown:")
+    for season in ['Yaz', 'Kış', 'İlkbahar', 'Sonbahar']:
+        count = season_dist.get(season, 0)
+        if count > 0:
+            pct = count / total_with_season * 100
+            log_print(f"  {season}: {count:,} equipment ({pct:.1f}%)")
+
+    # Seasonal failure analysis
+    log_print("\n--- Failure Characteristics by Season ---")
+    for season in ['Yaz', 'Kış', 'İlkbahar', 'Sonbahar']:
+        mask = df['Son_Arıza_Mevsim'] == season
+        if mask.sum() > 0:
+            avg_faults = df.loc[mask, 'Toplam_Arıza_Sayisi_Lifetime'].mean() if 'Toplam_Arıza_Sayisi_Lifetime' in df.columns else 0
+            recurring_pct = df.loc[mask, 'Tekrarlayan_Arıza_90gün_Flag'].sum() / mask.sum() * 100 if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns else 0
+
+            log_print(f"\n  {season}:")
+            log_print(f"    Equipment count: {mask.sum():,}")
+            log_print(f"    Avg lifetime failures: {avg_faults:.2f}")
+            log_print(f"    Recurring fault rate: {recurring_pct:.1f}%")
+
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+    # 1. Seasonal distribution (pie chart)
+    ax = axes[0, 0]
+    colors_season = {'Yaz': '#e74c3c', 'Kış': '#3498db', 'İlkbahar': '#2ecc71', 'Sonbahar': '#f39c12'}
+    season_colors = [colors_season.get(s, '#95a5a6') for s in season_dist.index]
+    wedges, texts, autotexts = ax.pie(season_dist.values, labels=season_dist.index, autopct='%1.1f%%',
+                                        colors=season_colors, startangle=90)
+    for autotext in autotexts:
+        autotext.set_color('white')
+        autotext.set_fontweight('bold')
+    ax.set_title('Last Fault Distribution by Season', fontsize=13, fontweight='bold')
+
+    # 2. Seasonal failure counts (bar chart)
+    if 'Toplam_Arıza_Sayisi_Lifetime' in df.columns:
+        ax = axes[0, 1]
+        season_failures = df.groupby('Son_Arıza_Mevsim')['Toplam_Arıza_Sayisi_Lifetime'].mean()
+        season_order = ['Yaz', 'Kış', 'İlkbahar', 'Sonbahar']
+        season_failures = season_failures.reindex([s for s in season_order if s in season_failures.index])
+        colors = [colors_season.get(s, '#95a5a6') for s in season_failures.index]
+
+        ax.bar(season_failures.index, season_failures.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Season', fontsize=11)
+        ax.set_ylabel('Average Lifetime Failures', fontsize=11)
+        ax.set_title('Average Failure Count by Season', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (idx, val) in enumerate(season_failures.items()):
+            ax.text(i, val + 0.05, f'{val:.2f}', ha='center', va='bottom', fontweight='bold')
+
+    # 3. Equipment class × Season heatmap
+    if 'Equipment_Class_Primary' in df.columns:
+        ax = axes[1, 0]
+
+        # Get top 8 equipment classes
+        top_classes = df['Equipment_Class_Primary'].value_counts().head(8).index
+        df_top = df[df['Equipment_Class_Primary'].isin(top_classes)]
+
+        # Create crosstab
+        season_class_ct = pd.crosstab(df_top['Equipment_Class_Primary'], df_top['Son_Arıza_Mevsim'])
+        season_order = ['Yaz', 'Kış', 'İlkbahar', 'Sonbahar']
+        season_class_ct = season_class_ct[[s for s in season_order if s in season_class_ct.columns]]
+
+        # Normalize by row (equipment class)
+        season_class_pct = season_class_ct.div(season_class_ct.sum(axis=1), axis=0) * 100
+
+        im = ax.imshow(season_class_pct.values, cmap='YlOrRd', aspect='auto')
+        ax.set_xticks(range(len(season_class_pct.columns)))
+        ax.set_yticks(range(len(season_class_pct.index)))
+        ax.set_xticklabels(season_class_pct.columns)
+        ax.set_yticklabels(season_class_pct.index)
+        ax.set_xlabel('Season', fontsize=11)
+        ax.set_ylabel('Equipment Class', fontsize=11)
+        ax.set_title('Equipment Class × Season Heatmap (%)', fontsize=13, fontweight='bold')
+
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Percentage', rotation=270, labelpad=15)
+
+        # Add text annotations
+        for i in range(len(season_class_pct.index)):
+            for j in range(len(season_class_pct.columns)):
+                text = ax.text(j, i, f'{season_class_pct.iloc[i, j]:.0f}',
+                              ha="center", va="center", color="black", fontsize=8)
+
+    # 4. Recurring faults by season
+    if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns:
+        ax = axes[1, 1]
+        recurring_by_season = df.groupby('Son_Arıza_Mevsim')['Tekrarlayan_Arıza_90gün_Flag'].apply(
+            lambda x: x.sum() / len(x) * 100 if len(x) > 0 else 0
+        )
+        season_order = ['Yaz', 'Kış', 'İlkbahar', 'Sonbahar']
+        recurring_by_season = recurring_by_season.reindex([s for s in season_order if s in recurring_by_season.index])
+        colors = [colors_season.get(s, '#95a5a6') for s in recurring_by_season.index]
+
+        ax.bar(recurring_by_season.index, recurring_by_season.values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Season', fontsize=11)
+        ax.set_ylabel('Recurring Fault Rate (%)', fontsize=11)
+        ax.set_title('Recurring Faults (90-day) by Season', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (idx, val) in enumerate(recurring_by_season.items()):
+            ax.text(i, val + 0.3, f'{val:.1f}%', ha='center', va='bottom', fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('outputs/eda/13_seasonal_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    log_print("\n✓ Saved: outputs/eda/13_seasonal_analysis.png")
+else:
+    log_print("\n⚠️  Son_Arıza_Mevsim column not found or empty")
+
+# ============================================================================
+# STEP 14: CUSTOMER RATIOS & LOADING ANALYSIS (NEW - From Step 9B)
+# ============================================================================
+log_print("\n" + "="*100)
+log_print("STEP 14: CUSTOMER RATIOS & LOADING INTENSITY ANALYSIS")
+log_print("="*100)
+
+# Customer ratios analysis
+customer_ratio_cols = ['Kentsel_Müşteri_Oranı', 'Kırsal_Müşteri_Oranı', 'OG_Müşteri_Oranı']
+has_customer_ratios = any(col in df.columns for col in customer_ratio_cols)
+
+if has_customer_ratios:
+    log_print("\n--- Customer Type Ratios Statistics ---")
+    for col in customer_ratio_cols:
+        if col in df.columns:
+            col_data = df[col].dropna()
+            if len(col_data) > 0:
+                log_print(f"\n{col}:")
+                log_print(f"  Mean: {col_data.mean():.2%}")
+                log_print(f"  Median: {col_data.median():.2%}")
+                log_print(f"  Min: {col_data.min():.2%}")
+                log_print(f"  Max: {col_data.max():.2%}")
+                log_print(f"  Std Dev: {col_data.std():.2%}")
+
+# Loading intensity analysis
+if 'Ekipman_Yoğunluk_Skoru' in df.columns:
+    log_print("\n--- Equipment Loading Score Statistics ---")
+    loading_data = df['Ekipman_Yoğunluk_Skoru'].replace([np.inf, -np.inf], np.nan).dropna()
+    if len(loading_data) > 0:
+        log_print(f"  Mean: {loading_data.mean():.4f}")
+        log_print(f"  Median: {loading_data.median():.4f}")
+        log_print(f"  Min: {loading_data.min():.4f}")
+        log_print(f"  Max: {loading_data.max():.4f}")
+        log_print(f"  95th percentile: {loading_data.quantile(0.95):.4f}")
+
+# Customer-weighted risk
+if 'Müşteri_Başına_Risk' in df.columns:
+    log_print("\n--- Customer-Weighted Risk Statistics ---")
+    risk_data = df['Müşteri_Başına_Risk'].dropna()
+    if len(risk_data) > 0:
+        log_print(f"  Mean: {risk_data.mean():.3f}")
+        log_print(f"  Median: {risk_data.median():.3f}")
+        log_print(f"  Min: {risk_data.min():.3f}")
+        log_print(f"  Max: {risk_data.max():.3f}")
+
+# Visualization
+fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+# 1. Customer ratios distribution
+ax = axes[0, 0]
+customer_ratio_data = []
+customer_ratio_labels = []
+for col in customer_ratio_cols:
+    if col in df.columns:
+        data = df[col].replace([np.inf, -np.inf], np.nan).dropna()
+        if len(data) > 0:
+            customer_ratio_data.append(data)
+            customer_ratio_labels.append(col.replace('_', ' '))
+
+if customer_ratio_data:
+    bp = ax.boxplot(customer_ratio_data, labels=customer_ratio_labels, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('#3498db')
+        patch.set_alpha(0.7)
+    ax.set_ylabel('Ratio', fontsize=11)
+    ax.set_title('Customer Type Ratio Distributions', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    ax.tick_params(axis='x', rotation=15)
+
+# 2. Loading score distribution
+if 'Ekipman_Yoğunluk_Skoru' in df.columns:
+    ax = axes[0, 1]
+    loading_data = df['Ekipman_Yoğunluk_Skoru'].replace([np.inf, -np.inf], np.nan).dropna()
+    if len(loading_data) > 0:
+        # Cap at 95th percentile for visualization
+        p95 = loading_data.quantile(0.95)
+        loading_capped = loading_data[loading_data <= p95]
+
+        ax.hist(loading_capped, bins=50, edgecolor='black', alpha=0.7, color='#e74c3c')
+        ax.set_xlabel('Loading Score (Recency-Based)', fontsize=11)
+        ax.set_ylabel('Number of Equipment', fontsize=11)
+        ax.set_title('Equipment Loading Score Distribution (capped at 95th percentile)', fontsize=13, fontweight='bold')
+        ax.axvline(loading_capped.median(), color='blue', linestyle='--', label=f'Median: {loading_capped.median():.4f}')
+        ax.axvline(loading_capped.mean(), color='red', linestyle='--', label=f'Mean: {loading_capped.mean():.4f}')
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+
+# 3. Customer-weighted risk
+if 'Müşteri_Başına_Risk' in df.columns:
+    ax = axes[1, 0]
+    risk_data = df['Müşteri_Başına_Risk'].dropna()
+    if len(risk_data) > 0:
+        ax.hist(risk_data, bins=50, edgecolor='black', alpha=0.7, color='#9b59b6')
+        ax.set_xlabel('Customer-Weighted Risk', fontsize=11)
+        ax.set_ylabel('Number of Equipment', fontsize=11)
+        ax.set_title('Customer-Weighted Risk Distribution', fontsize=13, fontweight='bold')
+        ax.axvline(risk_data.median(), color='blue', linestyle='--', label=f'Median: {risk_data.median():.2f}')
+        ax.axvline(risk_data.mean(), color='red', linestyle='--', label=f'Mean: {risk_data.mean():.2f}')
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+
+# 4. Correlation: Loading score vs failures
+if 'Ekipman_Yoğunluk_Skoru' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
+    ax = axes[1, 1]
+
+    # Prepare data
+    plot_df = df[['Ekipman_Yoğunluk_Skoru', 'Arıza_Sayısı_12ay']].copy()
+    plot_df['Ekipman_Yoğunluk_Skoru'] = plot_df['Ekipman_Yoğunluk_Skoru'].replace([np.inf, -np.inf], np.nan)
+    plot_df = plot_df.dropna()
+
+    if len(plot_df) > 0:
+        # Cap loading score at 95th percentile for visualization
+        p95 = plot_df['Ekipman_Yoğunluk_Skoru'].quantile(0.95)
+        plot_df_capped = plot_df[plot_df['Ekipman_Yoğunluk_Skoru'] <= p95]
+
+        ax.scatter(plot_df_capped['Ekipman_Yoğunluk_Skoru'], plot_df_capped['Arıza_Sayısı_12ay'],
+                  alpha=0.5, s=30, color='#e74c3c')
+
+        # Add trend line
+        z = np.polyfit(plot_df_capped['Ekipman_Yoğunluk_Skoru'], plot_df_capped['Arıza_Sayısı_12ay'], 1)
+        p = np.poly1d(z)
+        ax.plot(plot_df_capped['Ekipman_Yoğunluk_Skoru'],
+               p(plot_df_capped['Ekipman_Yoğunluk_Skoru']),
+               "r--", linewidth=2, label='Trend')
+
+        # Calculate correlation
+        corr = plot_df_capped['Ekipman_Yoğunluk_Skoru'].corr(plot_df_capped['Arıza_Sayısı_12ay'])
+
+        ax.set_xlabel('Loading Score (Recency-Based)', fontsize=11)
+        ax.set_ylabel('12M Failures', fontsize=11)
+        ax.set_title(f'Loading Score vs Failures (r={corr:.3f})', fontsize=13, fontweight='bold')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('outputs/eda/14_customer_loading_analysis.png', dpi=300, bbox_inches='tight')
+plt.close()
+log_print("\n✓ Saved: outputs/eda/14_customer_loading_analysis.png")
+
+# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
 log_print("\n" + "="*100)
@@ -667,6 +1176,10 @@ log_print(f"   3. Equipment age vs failure relationship")
 log_print(f"   4. Geographic cluster patterns")
 log_print(f"   5. Risk category distribution")
 log_print(f"   6. Feature correlations and relationships")
+log_print(f"   7. Voltage-level failure patterns (MV vs LV) [NEW]")
+log_print(f"   8. Urban vs Rural infrastructure analysis [NEW]")
+log_print(f"   9. Seasonal failure patterns [NEW]")
+log_print(f"   10. Customer ratios and loading intensity [NEW]")
 
 log_print("\n" + "="*100)
 log_print("EDA PIPELINE COMPLETE")
