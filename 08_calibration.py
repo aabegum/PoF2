@@ -64,13 +64,14 @@ TEST_SIZE = 0.30
 N_BINS = 10  # Number of bins for calibration curve
 
 # Prediction horizons
-HORIZONS = ['3M', '6M', '12M']
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
+HORIZONS = ['6M', '12M']
 
 # Target thresholds based on lifetime failure count
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
 TARGET_THRESHOLDS = {
-    '3M': 1,   # At least 1 lifetime failure → high risk in 3M
-    '6M': 2,   # At least 2 lifetime failures → high risk in 6M
-    '12M': 3   # At least 3 lifetime failures → high risk in 12M
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
 }
 
 # Calibration methods
@@ -87,6 +88,8 @@ print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Calibration Bins: {N_BINS}")
 print(f"   Calibration Methods: Isotonic + Platt (Sigmoid)")
 print(f"   Horizons: {HORIZONS}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
+print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
