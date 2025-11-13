@@ -57,7 +57,7 @@ sns.set_palette("husl")
 
 print("="*100)
 print(" "*30 + "POF LOGISTIC REGRESSION BASELINE")
-print(" "*28 + "Interpretable Models | 3/6/12 Months")
+print(" "*28 + "Interpretable Models | 6/12 Months")
 print("="*100)
 
 # ============================================================================
@@ -75,18 +75,18 @@ GRIDSEARCH_VERBOSE = 1
 GRIDSEARCH_N_JOBS = -1
 
 # Prediction horizons (days)
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
 HORIZONS = {
-    '3M': 90,
     '6M': 180,
     '12M': 365
 }
 
 # Target creation thresholds (based on lifetime failures)
 # Equipment with >= threshold lifetime failures is considered "failure-prone"
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
 TARGET_THRESHOLDS = {
-    '3M': 1,   # At least 1 lifetime failure (most lenient for short horizon)
-    '6M': 2,   # At least 2 lifetime failures
-    '12M': 3   # At least 3 lifetime failures (most strict for long horizon)
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
 }
 
 # Logistic Regression base parameters
@@ -126,6 +126,8 @@ print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
+print(f"   Class Weight Strategy: Balanced")
 print(f"   Hyperparameter Tuning: {'GridSearchCV (ENABLED)' if USE_GRIDSEARCH else 'DISABLED (using defaults)'}")
 if USE_GRIDSEARCH:
     logistic_combinations = np.prod([len(v) for v in LOGISTIC_PARAM_GRID.values()])
@@ -134,8 +136,8 @@ if USE_GRIDSEARCH:
     print(f"   Logistic Grid Size: {logistic_combinations} combinations")
     print(f"   Ridge Grid Size: {ridge_combinations} combinations")
     print(f"   Lasso Grid Size: {lasso_combinations} combinations")
-print(f"   Class Weight Strategy: Balanced")
-print(f"⚠️  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
+print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
+print(f"✓  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
