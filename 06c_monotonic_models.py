@@ -53,7 +53,7 @@ sns.set_palette("husl")
 
 print("="*100)
 print(" "*25 + "POF MONOTONIC CONSTRAINT MODELS")
-print(" "*20 + "XGBoost + CatBoost with Business Logic | 3/6/12 Months")
+print(" "*20 + "XGBoost + CatBoost with Business Logic | 6/12 Months")
 print("="*100)
 
 # ============================================================================
@@ -66,18 +66,18 @@ TEST_SIZE = 0.30
 N_FOLDS = 5
 
 # Prediction horizons (days)
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
 HORIZONS = {
-    '3M': 90,
     '6M': 180,
     '12M': 365
 }
 
 # Target thresholds based on lifetime failure count
 # Equipment with X+ lifetime failures are considered high-risk
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
 TARGET_THRESHOLDS = {
-    '3M': 1,   # At least 1 lifetime failure → high risk in 3M
-    '6M': 2,   # At least 2 lifetime failures → high risk in 6M
-    '12M': 3   # At least 3 lifetime failures → high risk in 12M
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
 }
 
 # XGBoost parameters (with monotonic constraints)
@@ -122,8 +122,10 @@ print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
 print(f"   Class Weight Strategy: Balanced")
-print(f"\n⚠️  MONOTONIC CONSTRAINTS ENABLED:")
+print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
+print(f"\n✓  MONOTONIC CONSTRAINTS ENABLED:")
 print(f"   Features constrained to follow domain knowledge")
 print(f"   Prevents counterintuitive predictions")
 
