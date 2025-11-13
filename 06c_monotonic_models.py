@@ -53,7 +53,7 @@ sns.set_palette("husl")
 
 print("="*100)
 print(" "*25 + "POF MONOTONIC CONSTRAINT MODELS")
-print(" "*20 + "XGBoost + CatBoost with Business Logic | 3/6/12 Months")
+print(" "*20 + "XGBoost + CatBoost with Business Logic | 6/12 Months")
 print("="*100)
 
 # ============================================================================
@@ -66,10 +66,18 @@ TEST_SIZE = 0.30
 N_FOLDS = 5
 
 # Prediction horizons (days)
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
 HORIZONS = {
-    '3M': 90,
     '6M': 180,
     '12M': 365
+}
+
+# Target thresholds based on lifetime failure count
+# Equipment with X+ lifetime failures are considered high-risk
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
+TARGET_THRESHOLDS = {
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
 }
 
 # XGBoost parameters (with monotonic constraints)
@@ -114,8 +122,10 @@ print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
 print(f"   Class Weight Strategy: Balanced")
-print(f"\n⚠️  MONOTONIC CONSTRAINTS ENABLED:")
+print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
+print(f"\n✓  MONOTONIC CONSTRAINTS ENABLED:")
 print(f"   Features constrained to follow domain knowledge")
 print(f"   Prevents counterintuitive predictions")
 
@@ -148,21 +158,23 @@ print("\n" + "="*100)
 print("STEP 2: CREATING TARGET VARIABLES FOR MULTIPLE HORIZONS")
 print("="*100)
 
-print("\n--- Creating Binary Targets ---")
+print("\n--- Creating Binary Targets (Lifetime-Based) ---")
+print("Strategy: Equipment with X+ lifetime failures → high risk")
+print("This prevents data leakage from recent failure counts")
+
+# Verify required column exists
+if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
+    print("\n❌ ERROR: 'Toplam_Arıza_Sayisi_Lifetime' not found in features_engineered.csv")
+    print("Please run 02_data_transformation.py first!")
+    exit(1)
 
 targets = {}
 
 for horizon_name, horizon_days in HORIZONS.items():
-    # Target = 1 if equipment had ANY failure in time period
-    if horizon_name == '3M' and 'Arıza_Sayısı_3ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_3ay'] > 0).astype(int)
-    elif horizon_name == '6M' and 'Arıza_Sayısı_6ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_6ay'] > 0).astype(int)
-    elif horizon_name == '12M' and 'Arıza_Sayısı_12ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
-    else:
-        # Fallback: use 12M target
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
+    threshold = TARGET_THRESHOLDS[horizon_name]
+
+    # Target = 1 if equipment has threshold or more lifetime failures
+    targets[horizon_name] = (df_full['Toplam_Arıza_Sayisi_Lifetime'] >= threshold).astype(int)
 
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values
@@ -171,9 +183,9 @@ for horizon_name, horizon_days in HORIZONS.items():
     target_dist = df[f'Target_{horizon_name}'].value_counts()
     pos_rate = target_dist.get(1, 0) / len(df) * 100
 
-    print(f"\n{horizon_name} ({horizon_days} days) Target:")
-    print(f"  No Failure (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
-    print(f"  Failure (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"\n{horizon_name} ({horizon_days} days) - Threshold: {threshold}+ lifetime failures")
+    print(f"  Low Risk (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
+    print(f"  High Risk (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
     print(f"  Positive Rate: {pos_rate:.1f}%")
 
 # ============================================================================

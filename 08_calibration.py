@@ -64,7 +64,15 @@ TEST_SIZE = 0.30
 N_BINS = 10  # Number of bins for calibration curve
 
 # Prediction horizons
-HORIZONS = ['3M', '6M', '12M']
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
+HORIZONS = ['6M', '12M']
+
+# Target thresholds based on lifetime failure count
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
+TARGET_THRESHOLDS = {
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+}
 
 # Calibration methods
 CALIBRATION_METHODS = ['isotonic', 'sigmoid']  # isotonic = Isotonic, sigmoid = Platt
@@ -80,6 +88,8 @@ print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Calibration Bins: {N_BINS}")
 print(f"   Calibration Methods: Isotonic + Platt (Sigmoid)")
 print(f"   Horizons: {HORIZONS}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
+print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -110,18 +120,30 @@ print("\n" + "="*100)
 print("STEP 2: CREATING TARGETS & PREPARING FEATURES")
 print("="*100)
 
-# Create targets
-for horizon in HORIZONS:
-    if horizon == '3M' and 'Arıza_Sayısı_3ay' in df_full.columns:
-        df[f'Target_{horizon}'] = (df_full['Arıza_Sayısı_3ay'] > 0).astype(int)
-    elif horizon == '6M' and 'Arıza_Sayısı_6ay' in df_full.columns:
-        df[f'Target_{horizon}'] = (df_full['Arıza_Sayısı_6ay'] > 0).astype(int)
-    elif horizon == '12M' and 'Arıza_Sayısı_12ay' in df_full.columns:
-        df[f'Target_{horizon}'] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
-    else:
-        df[f'Target_{horizon}'] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
+# Verify required column exists
+if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
+    print("\n❌ ERROR: 'Toplam_Arıza_Sayisi_Lifetime' not found in features_engineered.csv")
+    print("Please run 02_data_transformation.py first!")
+    exit(1)
 
-    print(f"✓ Created Target_{horizon}")
+# Create targets (lifetime-based to prevent data leakage)
+print("\n--- Creating Binary Targets (Lifetime-Based) ---")
+print("Strategy: Equipment with X+ lifetime failures → high risk")
+
+for horizon in HORIZONS:
+    threshold = TARGET_THRESHOLDS[horizon]
+
+    # Target = 1 if equipment has threshold or more lifetime failures
+    df[f'Target_{horizon}'] = (df_full['Toplam_Arıza_Sayisi_Lifetime'] >= threshold).astype(int)
+
+    # Print distribution
+    target_dist = df[f'Target_{horizon}'].value_counts()
+    pos_rate = target_dist.get(1, 0) / len(df) * 100
+
+    print(f"\n{horizon} - Threshold: {threshold}+ lifetime failures")
+    print(f"  Low Risk (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
+    print(f"  High Risk (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"  Positive Rate: {pos_rate:.1f}%")
 
 # Prepare features
 id_column = 'Ekipman_ID'

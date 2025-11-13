@@ -74,13 +74,18 @@ print("\n2. LEAKY - Future-Looking Features:")
 print("   • Risk scores calculated FROM target period failures")
 print("   • Any feature derived from 'looking ahead' at failures")
 
-print("\n3. SAFE - Historical Patterns:")
-print("   • Toplam_Arıza_Sayisi_Lifetime (entire history)")
-print("   • MTBF_Gün (mean time between failures)")
-print("   • Failure_Rate_Per_Year (lifetime average)")
-print("   • Son_Arıza_Gun_Sayisi (days since last failure)")
+print("\n3. SAFE - Historical Patterns (NOT lifetime-based):")
+print("   • Son_Arıza_Gun_Sayisi (days since last failure - RECENCY only)")
+print("   • Failure patterns (seasonality, peak flags)")
 
-print("\n4. SAFE - Static Attributes:")
+print("\n4. REMOVED - Lifetime-Based Features (LEAKY when predicting failure propensity):")
+print("   • Toplam_Arıza_Sayisi_Lifetime ← Used to CREATE target!")
+print("   • MTBF_Gün ← Calculated FROM Toplam_Arıza_Sayisi_Lifetime")
+print("   • MTBF_Risk_Score ← Calculated FROM MTBF_Gün")
+print("   • Reliability_Score ← Calculated FROM MTBF_Gün")
+print("   • Composite_PoF_Risk_Score ← Includes MTBF_Risk_Score")
+
+print("\n5. SAFE - Static Attributes:")
 print("   • Ekipman_Yaşı_Yıl (equipment age)")
 print("   • Yas_Beklenen_Omur_Orani (age ratio)")
 print("   • Equipment_Class_Primary (equipment type)")
@@ -131,6 +136,22 @@ for col in original_features:
     elif 'Time_Since_Last_Normalized' in col:
         reason = "Normalized time since last failure (recent)"
 
+    # Rule 8: Lifetime failure count (used to create target - DIRECT LEAKAGE!)
+    elif 'Toplam_Arıza_Sayisi_Lifetime' in col or 'Toplam_Ariza_Sayisi_Lifetime' in col:
+        reason = "Lifetime failure count (DIRECTLY used to create target!)"
+
+    # Rule 9: MTBF features (calculated FROM lifetime failure count)
+    elif 'MTBF' in col:
+        reason = "MTBF calculated from lifetime failure count (indirect leakage)"
+
+    # Rule 10: Reliability Score (calculated FROM MTBF)
+    elif 'Reliability_Score' in col:
+        reason = "Reliability calculated from MTBF (indirect leakage)"
+
+    # Rule 11: Composite Risk Score (includes MTBF_Risk_Score)
+    elif 'Composite_PoF_Risk_Score' in col or 'Composite_Risk' in col:
+        reason = "Composite score includes MTBF_Risk_Score (indirect leakage)"
+
     if reason:
         leaky_features.append(col)
         leaky_reasons[col] = reason
@@ -154,11 +175,13 @@ print(f"\n✓ {len(safe_features)} safe features identified")
 # Categorize safe features
 id_features = [col for col in safe_features if 'ID' in col or col == 'Ekipman_ID']
 age_features = [col for col in safe_features if 'Yaş' in col or 'Age' in col or 'Ömür' in col or 'Life' in col]
-historical_features = [col for col in safe_features if 'Lifetime' in col or 'MTBF' in col or 'Reliability' in col or 'Failure_Rate_Per_Year' in col]
-location_features = [col for col in safe_features if 'Geographic' in col or 'Cluster' in col or 'KOORDINAT' in col or 'İl' in col or 'İlçe' in col]
-equipment_features = [col for col in safe_features if 'Equipment' in col or 'Ekipman' in col or 'Class' in col]
-customer_features = [col for col in safe_features if 'Customer' in col or 'Müşteri' in col]
-composite_features = [col for col in safe_features if 'Risk' in col or 'Score' in col or 'Interaction' in col]
+# NOTE: Removed 'Lifetime', 'MTBF', 'Reliability' from historical features (they are leaky!)
+historical_features = [col for col in safe_features if 'Son_Arıza' in col or 'Last_Failure' in col or 'Recurrence' in col]
+location_features = [col for col in safe_features if 'Geographic' in col or 'Cluster' in col or 'KOORDINAT' in col or 'İl' in col or 'İlçe' in col or 'urban' in col or 'suburban' in col]
+equipment_features = [col for col in safe_features if 'Equipment' in col or 'Ekipman' in col or 'Class' in col or 'voltage' in col]
+customer_features = [col for col in safe_features if 'Customer' in col or 'Müşteri' in col or 'Peak' in col]
+# NOTE: Most 'Risk' and 'Score' features are leaky (removed by rules above), only remaining ones are safe
+composite_features = [col for col in safe_features if ('Risk' in col or 'Score' in col) and col not in equipment_features]
 
 # Note: Some composite features might be in multiple categories
 # Filter out composites that are already categorized

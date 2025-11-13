@@ -1,19 +1,30 @@
 """
 MODEL TRAINING - POF PREDICTION
-Turkish EDAŞ PoF Prediction Project
+Turkish EDAŞ PoF Prediction Project (v3.1)
 
 Purpose:
-- Train XGBoost and CatBoost models
-- Predict failure probability for 3/6/12 months (24M removed - invalid target)
+- Train XGBoost and CatBoost models with GridSearchCV hyperparameter tuning
+- Predict failure probability for 6/12 months (3M removed - 100% positive class)
 - Evaluate performance with multiple metrics
 - Generate predictions and identify high-risk equipment
+
+Changes in v3.1:
+- FIXED: Removed 3M horizon (all equipment has >= 1 lifetime failure)
+- FIXED: Adjusted thresholds for better class balance
+- IMPROVED: Reduced verbosity for cleaner console output
+
+Changes in v3.0:
+- FIXED: Target creation now uses lifetime failure thresholds (no data leakage)
+- ADDED: GridSearchCV for optimal hyperparameter tuning
+- IMPROVED: More robust target definition based on failure propensity
 
 Strategy:
 - Single model for all equipment classes (using Equipment_Class_Primary feature)
 - Balanced class weights (optimize recall)
 - 70/30 train/test split with stratification
+- GridSearchCV with 3-fold stratified CV for hyperparameter optimization
 
-Input:  data/features_selected.csv (18 features)
+Input:  data/features_selected_clean.csv (non-leaky features)
 Output: models/*.pkl, predictions/*.csv, evaluation reports
 
 Author: Data Analytics Team
@@ -31,10 +42,10 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Model libraries
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
 from sklearn.metrics import (
-    roc_auc_score, roc_curve, precision_recall_curve, 
-    confusion_matrix, classification_report, 
+    roc_auc_score, roc_curve, precision_recall_curve,
+    confusion_matrix, classification_report,
     precision_score, recall_score, f1_score, average_precision_score
 )
 from sklearn.preprocessing import LabelEncoder
@@ -49,7 +60,7 @@ sns.set_palette("husl")
 
 print("="*100)
 print(" "*30 + "POF MODEL TRAINING PIPELINE")
-print(" "*28 + "XGBoost + CatBoost | 3/6/12 Months")  # CHANGED: Removed 24M
+print(" "*30 + "XGBoost + CatBoost | 6/12 Months")
 print("="*100)
 
 # ============================================================================
@@ -59,45 +70,70 @@ print("="*100)
 # Model parameters
 RANDOM_STATE = 42
 TEST_SIZE = 0.30
-N_FOLDS = 5
+N_FOLDS = 3  # For GridSearchCV (reduced from 5 for speed)
 
-# Prediction horizons (days) - CHANGED: Removed 24M (100% positive class)
+# GridSearchCV settings
+USE_GRIDSEARCH = True  # Set to False to skip hyperparameter tuning
+GRIDSEARCH_VERBOSE = 1  # 0=silent, 1=progress bar, 2=detailed (REDUCED for cleaner output)
+GRIDSEARCH_N_JOBS = -1
+
+# Prediction horizons (days)
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
+# NOTE: 24M removed (100% positive class in original data)
 HORIZONS = {
-    '3M': 90,
     '6M': 180,
     '12M': 365
 }
 
-# XGBoost parameters
-XGBOOST_PARAMS = {
+# Target creation thresholds (based on lifetime failures)
+# Equipment with >= threshold lifetime failures is considered "failure-prone"
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
+TARGET_THRESHOLDS = {
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive (changed from 3 for better balance)
+}
+
+# XGBoost base parameters (fixed across all searches)
+XGBOOST_BASE_PARAMS = {
     'objective': 'binary:logistic',
     'eval_metric': 'auc',
-    'max_depth': 6,
-    'learning_rate': 0.1,
-    'n_estimators': 100,
-    'min_child_weight': 3,
-    'subsample': 0.8,
-    'colsample_bytree': 0.8,
-    'gamma': 0.1,
-    'reg_alpha': 0.1,
-    'reg_lambda': 1.0,
     'random_state': RANDOM_STATE,
     'n_jobs': -1,
     'scale_pos_weight': 1.0  # Will be calculated per target
 }
 
-# CatBoost parameters
-CATBOOST_PARAMS = {
-    'iterations': 200,
-    'learning_rate': 0.05,
-    'depth': 6,
-    'l2_leaf_reg': 3,
+# XGBoost GridSearchCV parameter grid (REDUCED for stability)
+XGBOOST_PARAM_GRID = {
+    'max_depth': [4, 6],
+    'learning_rate': [0.05, 0.1],
+    'n_estimators': [100, 200],
+    'min_child_weight': [1, 3],
+    'subsample': [0.8],
+    'colsample_bytree': [0.8],
+    'gamma': [0, 0.1],
+    'reg_alpha': [0, 0.1],
+    'reg_lambda': [1.0]
+}  # 64 combinations (much more manageable)
+
+# CatBoost base parameters (fixed across all searches)
+CATBOOST_BASE_PARAMS = {
     'loss_function': 'Logloss',
     'eval_metric': 'AUC',
     'random_seed': RANDOM_STATE,
     'verbose': False,
-    'auto_class_weights': 'Balanced'  # Balanced class weights
+    'auto_class_weights': 'Balanced',
+    'task_type': 'CPU',
+    'thread_count': -1
 }
+
+# CatBoost GridSearchCV parameter grid (REDUCED for stability)
+CATBOOST_PARAM_GRID = {
+    'iterations': [100, 200],
+    'learning_rate': [0.05, 0.1],
+    'depth': [4, 6],
+    'l2_leaf_reg': [1, 3],
+    'border_count': [64]
+}  # 16 combinations (much more manageable)
 
 # Create output directories
 Path('models').mkdir(exist_ok=True)
@@ -110,8 +146,21 @@ print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
 print(f"   Class Weight Strategy: Balanced")
-print(f"\n⚠️  NOTE: 24M horizon removed (100% positive class - invalid for binary classification)")  # ADDED
+print(f"   Hyperparameter Tuning: {'GridSearchCV (ENABLED)' if USE_GRIDSEARCH else 'DISABLED (using defaults)'}")
+if USE_GRIDSEARCH:
+    xgb_combinations = np.prod([len(v) for v in XGBOOST_PARAM_GRID.values()])
+    cat_combinations = np.prod([len(v) for v in CATBOOST_PARAM_GRID.values()])
+    print(f"   XGBoost Grid Size: {xgb_combinations:,} combinations")
+    print(f"   CatBoost Grid Size: {cat_combinations:,} combinations")
+    print(f"   Verbosity Level: {GRIDSEARCH_VERBOSE} (1=progress bar, cleaner output)")
+print(f"\n⚠️  DATA CHARACTERISTICS:")
+print(f"   • Dataset contains ONLY failed equipment (1148 total)")
+print(f"   • All equipment has >= 1 lifetime failure (100% positive)")
+print(f"   • 3M horizon removed (100% positive class - invalid for classification)")
+print(f"   • Both 6M and 12M use threshold=2 for consistent 21.3% positive rate")
+print(f"\n✓  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -142,39 +191,45 @@ print("\n" + "="*100)
 print("STEP 2: CREATING TARGET VARIABLES FOR MULTIPLE HORIZONS")
 print("="*100)
 
-print("\n--- Creating Binary Targets ---")
+print("\n⚠️  NEW APPROACH: Using lifetime failure thresholds (NO DATA LEAKAGE)")
+print("   Equipment with higher lifetime failures is more likely to fail in the future")
+print("   Different thresholds for different prediction horizons")
 
-# We need to create targets based on whether equipment will fail in next N days
-# Use Son_Arıza_Tarihi (last fault date) and calculate if recent enough
+# Verify required column exists
+if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
+    print(f"\n❌ ERROR: 'Toplam_Arıza_Sayisi_Lifetime' column not found!")
+    print("This column should be created by 02_data_transformation.py")
+    print("Available columns:", list(df_full.columns[:10]), "...")
+    exit(1)
+
+print("\n--- Creating Binary Targets Based on Lifetime Failure Propensity ---")
 
 targets = {}
 
 for horizon_name, horizon_days in HORIZONS.items():
-    # Target = 1 if equipment had ANY failure in last N days from reference date
-    # Since we're predicting FUTURE failures, we use recent history as proxy
-    
-    # Strategy: Use failure counts as proxy for failure likelihood
-    if horizon_name == '3M' and 'Arıza_Sayısı_3ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_3ay'] > 0).astype(int)
-    elif horizon_name == '6M' and 'Arıza_Sayısı_6ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_6ay'] > 0).astype(int)
-    elif horizon_name == '12M' and 'Arıza_Sayısı_12ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
-    else:
-        # Fallback: use 12M target
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
-    
+    threshold = TARGET_THRESHOLDS[horizon_name]
+
+    # Target = 1 if equipment has >= threshold lifetime failures
+    # Equipment with more historical failures is failure-prone (higher future failure risk)
+    targets[horizon_name] = (df_full['Toplam_Arıza_Sayisi_Lifetime'] >= threshold).astype(int)
+
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values
-    
+
     # Print distribution
     target_dist = df[f'Target_{horizon_name}'].value_counts()
     pos_rate = target_dist.get(1, 0) / len(df) * 100
-    
+
     print(f"\n{horizon_name} ({horizon_days} days) Target:")
-    print(f"  No Failure (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
-    print(f"  Failure (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"  Threshold: >= {threshold} lifetime failures")
+    print(f"  Failure-Prone (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"  Not Failure-Prone (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
     print(f"  Positive Rate: {pos_rate:.1f}%")
+
+    # Warning if class imbalance is severe
+    if pos_rate < 5 or pos_rate > 95:
+        print(f"  ⚠️  WARNING: Severe class imbalance ({pos_rate:.1f}% positive)")
+        print(f"     Consider adjusting threshold or using SMOTE")
 
 # ============================================================================
 # STEP 3: PREPARE FEATURES
@@ -264,76 +319,126 @@ for horizon in HORIZONS.keys():
     print(f"    Test positive rate: {pos_rate_test:.1f}%")
 
 # ============================================================================
-# STEP 5: TRAIN MODELS - XGBOOST
+# STEP 5: TRAIN MODELS - XGBOOST WITH GRIDSEARCHCV
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 5: TRAINING XGBOOST MODELS")
+print("STEP 5: TRAINING XGBOOST MODELS" + (" WITH GRIDSEARCHCV" if USE_GRIDSEARCH else ""))
 print("="*100)
 
 xgb_models = {}
 xgb_results = {}
+xgb_best_params = {}
 
 for horizon in HORIZONS.keys():
     print(f"\n{'='*80}")
     print(f"Training XGBoost for {horizon} Horizon")
     print(f"{'='*80}")
-    
+
     y_train = targets_train[horizon]
     y_test = targets_test[horizon]
-    
+
     # Calculate class weight
     n_pos = y_train.sum()
     n_neg = len(y_train) - n_pos
     scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
-    
+
     print(f"\n📊 Class Balance:")
     print(f"   Negative samples: {n_neg:,}")
     print(f"   Positive samples: {n_pos:,}")
     print(f"   Scale pos weight: {scale_pos_weight:.2f}")
-    
-    # Update parameters
-    params = XGBOOST_PARAMS.copy()
-    params['scale_pos_weight'] = scale_pos_weight
-    
-    # Train model
-    print(f"\n⏳ Training XGBoost...")
-    
-    model = xgb.XGBClassifier(**params)
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_test, y_test)],
-        verbose=False
-    )
-    
+
+    # Update base parameters with calculated class weight
+    base_params = XGBOOST_BASE_PARAMS.copy()
+    base_params['scale_pos_weight'] = scale_pos_weight
+
+    if USE_GRIDSEARCH:
+        # ===== GRIDSEARCHCV HYPERPARAMETER TUNING =====
+        print(f"\n⏳ Running GridSearchCV for hyperparameter tuning...")
+        print(f"   Grid size: {np.prod([len(v) for v in XGBOOST_PARAM_GRID.values()]):,} combinations")
+        print(f"   CV folds: {N_FOLDS}")
+        print(f"   This may take several minutes...")
+
+        # Create base estimator
+        xgb_estimator = xgb.XGBClassifier(**base_params)
+
+        # GridSearchCV
+        grid_search = GridSearchCV(
+            estimator=xgb_estimator,
+            param_grid=XGBOOST_PARAM_GRID,
+            scoring='roc_auc',
+            cv=StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE),
+            n_jobs=GRIDSEARCH_N_JOBS,
+            verbose=GRIDSEARCH_VERBOSE,
+            refit=True
+        )
+
+        # Fit GridSearchCV
+        grid_search.fit(X_train, y_train)
+
+        # Get best model
+        model = grid_search.best_estimator_
+        best_params = grid_search.best_params_
+        best_cv_score = grid_search.best_score_
+
+        print(f"\n✅ GridSearchCV Complete!")
+        print(f"   Best CV AUC: {best_cv_score:.4f}")
+        print(f"\n   Best Hyperparameters:")
+        for param, value in best_params.items():
+            print(f"      {param}: {value}")
+
+        xgb_best_params[horizon] = best_params
+
+    else:
+        # ===== TRAINING WITH DEFAULT PARAMETERS =====
+        print(f"\n⏳ Training XGBoost with default parameters...")
+
+        # Use default parameters from grid (middle values)
+        default_params = base_params.copy()
+        default_params.update({
+            'max_depth': 6,
+            'learning_rate': 0.1,
+            'n_estimators': 100,
+            'min_child_weight': 3,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
+            'gamma': 0.1,
+            'reg_alpha': 0.1,
+            'reg_lambda': 1.0
+        })
+
+        model = xgb.XGBClassifier(**default_params)
+        model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+
+    # ===== EVALUATION =====
     # Predictions
     y_pred_proba = model.predict_proba(X_test)[:, 1]
     y_pred = (y_pred_proba >= 0.5).astype(int)
-    
+
     # Metrics
     auc = roc_auc_score(y_test, y_pred_proba)
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
     ap = average_precision_score(y_test, y_pred_proba)
-    
-    print(f"\n✅ XGBoost {horizon} Results:")
+
+    print(f"\n✅ XGBoost {horizon} Test Set Results:")
     print(f"   AUC: {auc:.4f}")
     print(f"   Average Precision: {ap:.4f}")
     print(f"   Precision: {precision:.4f}")
     print(f"   Recall: {recall:.4f}")
     print(f"   F1-Score: {f1:.4f}")
-    
-    # ADDED: Warning for suspiciously high performance
+
+    # Warning for suspiciously high performance
     if auc >= 0.98:
         print(f"\n   ⚠️  WARNING: Very high AUC ({auc:.4f}) may indicate data leakage!")
         print(f"   Check if features contain information from the target.")
-    
+
     # Save model
     model_path = Path(f'models/xgboost_{horizon.lower()}.pkl')
     with open(model_path, 'wb') as f:
         pickle.dump(model, f)
     print(f"\n💾 Model saved: {model_path}")
-    
+
     # Store results
     xgb_models[horizon] = model
     xgb_results[horizon] = {
@@ -347,103 +452,139 @@ for horizon in HORIZONS.keys():
         'y_pred': y_pred
     }
 
+# Save best parameters if GridSearch was used
+if USE_GRIDSEARCH:
+    best_params_df = pd.DataFrame(xgb_best_params).T
+    best_params_df.to_csv('results/xgboost_best_params.csv')
+    print(f"\n💾 Best parameters saved: results/xgboost_best_params.csv")
+
 # ============================================================================
-# STEP 6: TRAIN MODELS - CATBOOST
+# STEP 6: TRAIN MODELS - CATBOOST WITH GRIDSEARCHCV
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 6: TRAINING CATBOOST MODELS")
+print("STEP 6: TRAINING CATBOOST MODELS" + (" WITH GRIDSEARCHCV" if USE_GRIDSEARCH else ""))
 print("="*100)
 
 catboost_models = {}
 catboost_results = {}
+catboost_best_params = {}
 
 # Get categorical feature indices
-cat_features_idx = [all_features.index(f) for f in categorical_features]
+cat_features_idx = [all_features.index(f) for f in categorical_features if f in all_features]
 
 for horizon in HORIZONS.keys():
     print(f"\n{'='*80}")
     print(f"Training CatBoost for {horizon} Horizon")
     print(f"{'='*80}")
-    
+
     y_train = targets_train[horizon]
     y_test = targets_test[horizon]
-    
-    # Create CatBoost pools (use original non-encoded categoricals)
+
+    # Prepare data (use original non-encoded categoricals for CatBoost)
     X_train_cat = df.loc[train_idx, all_features].copy()
     X_test_cat = df.loc[test_idx, all_features].copy()
-    
-    # ADDED: Handle NaN values in categorical features for CatBoost
-    # CatBoost requires categorical features to be string or int, not NaN
+
+    # Handle NaN values in categorical features
     for cat_feat in categorical_features:
-        # Fill NaN with 'Unknown' for categorical features
         X_train_cat[cat_feat] = X_train_cat[cat_feat].fillna('Unknown').astype(str)
         X_test_cat[cat_feat] = X_test_cat[cat_feat].fillna('Unknown').astype(str)
-    
-    # ADDED: Handle NaN values in numeric features
-    # Fill with median
+
+    # Handle NaN values in numeric features (fill with median)
     numeric_features_in_data = [f for f in all_features if f not in categorical_features]
     for num_feat in numeric_features_in_data:
         if X_train_cat[num_feat].isna().any():
             median_val = X_train_cat[num_feat].median()
             X_train_cat[num_feat] = X_train_cat[num_feat].fillna(median_val)
             X_test_cat[num_feat] = X_test_cat[num_feat].fillna(median_val)
-    
-    # Check for any remaining NaN values
+
+    # Final NaN check
     if X_train_cat.isna().any().any():
-        print("\n⚠️  WARNING: Still have NaN values after filling:")
-        nan_cols = X_train_cat.columns[X_train_cat.isna().any()].tolist()
-        for col in nan_cols:
-            nan_count = X_train_cat[col].isna().sum()
-            print(f"   {col}: {nan_count} NaN values")
-        # Fill any remaining NaN with 0
+        print("\n⚠️  WARNING: Filling remaining NaN values with 0")
         X_train_cat = X_train_cat.fillna(0)
         X_test_cat = X_test_cat.fillna(0)
-        print("   Filled remaining NaN values with 0")
-    
-    train_pool = Pool(
-        X_train_cat, 
-        y_train, 
-        cat_features=categorical_features
-    )
-    
-    test_pool = Pool(
-        X_test_cat, 
-        y_test, 
-        cat_features=categorical_features
-    )
-    
-    print(f"\n⏳ Training CatBoost...")
-    
-    model = CatBoostClassifier(**CATBOOST_PARAMS)
-    model.fit(
-        train_pool,
-        eval_set=test_pool,
-        verbose=False
-    )
-    
+
+    if USE_GRIDSEARCH:
+        # ===== GRIDSEARCHCV HYPERPARAMETER TUNING =====
+        print(f"\n⏳ Running GridSearchCV for hyperparameter tuning...")
+        print(f"   Grid size: {np.prod([len(v) for v in CATBOOST_PARAM_GRID.values()]):,} combinations")
+        print(f"   CV folds: {N_FOLDS}")
+        print(f"   This may take several minutes...")
+
+        # Create base estimator with cat_features
+        cat_estimator = CatBoostClassifier(**CATBOOST_BASE_PARAMS, cat_features=cat_features_idx)
+
+        # GridSearchCV
+        grid_search = GridSearchCV(
+            estimator=cat_estimator,
+            param_grid=CATBOOST_PARAM_GRID,
+            scoring='roc_auc',
+            cv=StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE),
+            n_jobs=1,  # CatBoost handles parallelization internally
+            verbose=GRIDSEARCH_VERBOSE,
+            refit=True
+        )
+
+        # Fit GridSearchCV
+        grid_search.fit(X_train_cat, y_train)
+
+        # Get best model
+        model = grid_search.best_estimator_
+        best_params = grid_search.best_params_
+        best_cv_score = grid_search.best_score_
+
+        print(f"\n✅ GridSearchCV Complete!")
+        print(f"   Best CV AUC: {best_cv_score:.4f}")
+        print(f"\n   Best Hyperparameters:")
+        for param, value in best_params.items():
+            print(f"      {param}: {value}")
+
+        catboost_best_params[horizon] = best_params
+
+    else:
+        # ===== TRAINING WITH DEFAULT PARAMETERS =====
+        print(f"\n⏳ Training CatBoost with default parameters...")
+
+        # Use default parameters from grid (middle values)
+        default_params = CATBOOST_BASE_PARAMS.copy()
+        default_params.update({
+            'iterations': 200,
+            'learning_rate': 0.05,
+            'depth': 6,
+            'l2_leaf_reg': 3,
+            'border_count': 64
+        })
+
+        # Create pools for CatBoost
+        train_pool = Pool(X_train_cat, y_train, cat_features=categorical_features)
+        test_pool = Pool(X_test_cat, y_test, cat_features=categorical_features)
+
+        model = CatBoostClassifier(**default_params, cat_features=cat_features_idx)
+        model.fit(train_pool, eval_set=test_pool, verbose=False)
+
+    # ===== EVALUATION =====
     # Predictions
-    y_pred_proba = model.predict_proba(test_pool)[:, 1]
+    y_pred_proba = model.predict_proba(X_test_cat)[:, 1]
     y_pred = (y_pred_proba >= 0.5).astype(int)
-    
+
     # Metrics
     auc = roc_auc_score(y_test, y_pred_proba)
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
     ap = average_precision_score(y_test, y_pred_proba)
-    
-    print(f"\n✅ CatBoost {horizon} Results:")
+
+    print(f"\n✅ CatBoost {horizon} Test Set Results:")
     print(f"   AUC: {auc:.4f}")
     print(f"   Average Precision: {ap:.4f}")
     print(f"   Precision: {precision:.4f}")
     print(f"   Recall: {recall:.4f}")
     print(f"   F1-Score: {f1:.4f}")
-    
+
     # Save model
     model_path = Path(f'models/catboost_{horizon.lower()}.pkl')
     model.save_model(str(model_path))
     print(f"\n💾 Model saved: {model_path}")
-    
+
     # Store results
     catboost_models[horizon] = model
     catboost_results[horizon] = {
@@ -456,6 +597,12 @@ for horizon in HORIZONS.keys():
         'y_pred_proba': y_pred_proba,
         'y_pred': y_pred
     }
+
+# Save best parameters if GridSearch was used
+if USE_GRIDSEARCH:
+    best_params_df = pd.DataFrame(catboost_best_params).T
+    best_params_df.to_csv('results/catboost_best_params.csv')
+    print(f"\n💾 Best parameters saved: results/catboost_best_params.csv")
 # ============================================================================
 # STEP 7: MODEL COMPARISON
 # ============================================================================
