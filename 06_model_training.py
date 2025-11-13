@@ -96,18 +96,18 @@ XGBOOST_BASE_PARAMS = {
     'scale_pos_weight': 1.0  # Will be calculated per target
 }
 
-# XGBoost GridSearchCV parameter grid
+# XGBoost GridSearchCV parameter grid (REDUCED for stability)
 XGBOOST_PARAM_GRID = {
-    'max_depth': [4, 6, 8],
-    'learning_rate': [0.01, 0.05, 0.1],
-    'n_estimators': [100, 200, 300],
-    'min_child_weight': [1, 3, 5],
-    'subsample': [0.7, 0.8, 0.9],
-    'colsample_bytree': [0.7, 0.8, 0.9],
-    'gamma': [0, 0.1, 0.2],
-    'reg_alpha': [0, 0.1, 0.5],
-    'reg_lambda': [0.5, 1.0, 2.0]
-}
+    'max_depth': [4, 6],
+    'learning_rate': [0.05, 0.1],
+    'n_estimators': [100, 200],
+    'min_child_weight': [1, 3],
+    'subsample': [0.8],
+    'colsample_bytree': [0.8],
+    'gamma': [0, 0.1],
+    'reg_alpha': [0, 0.1],
+    'reg_lambda': [1.0]
+}  # 64 combinations (much more manageable)
 
 # CatBoost base parameters (fixed across all searches)
 CATBOOST_BASE_PARAMS = {
@@ -120,14 +120,14 @@ CATBOOST_BASE_PARAMS = {
     'thread_count': -1
 }
 
-# CatBoost GridSearchCV parameter grid
+# CatBoost GridSearchCV parameter grid (REDUCED for stability)
 CATBOOST_PARAM_GRID = {
-    'iterations': [100, 200, 300],
-    'learning_rate': [0.03, 0.05, 0.1],
-    'depth': [4, 6, 8],
-    'l2_leaf_reg': [1, 3, 5, 7],
-    'border_count': [32, 64, 128]
-}
+    'iterations': [100, 200],
+    'learning_rate': [0.05, 0.1],
+    'depth': [4, 6],
+    'l2_leaf_reg': [1, 3],
+    'border_count': [64]
+}  # 16 combinations (much more manageable)
 
 # Create output directories
 Path('models').mkdir(exist_ok=True)
