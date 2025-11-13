@@ -265,8 +265,8 @@ for feat in all_features:
 # XGBoost: tuple of constraints in feature order
 monotonic_constraints_xgb = tuple([monotonic_constraints_dict[feat] for feat in all_features])
 
-# CatBoost: string format like "1,-1,0,1,..."
-monotonic_constraints_cat = ','.join([str(monotonic_constraints_dict[feat]) for feat in all_features])
+# CatBoost: string format like "(1,-1,0,1,...)" - MUST be wrapped in parentheses
+monotonic_constraints_cat = '(' + ','.join([str(monotonic_constraints_dict[feat]) for feat in all_features]) + ')'
 
 print("\n✓ Monotonic constraints configured for both XGBoost and CatBoost")
 
