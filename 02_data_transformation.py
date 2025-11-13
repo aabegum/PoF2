@@ -384,7 +384,10 @@ for col in optional_spec_cols.keys():
 equipment_df.rename(columns=rename_dict, inplace=True)
 
 # Calculate cause code features if available
-if 'Arıza_Nedeni_Sık' in equipment_df.columns:
+# Check if cause code was successfully aggregated (could be in multiple columns after aggregation)
+has_cause_code = any(col for col in equipment_df.columns if 'cause code' in col.lower() or 'arıza_nedeni' in col.lower())
+
+if has_cause_code and 'cause code' in df.columns:
     print("\nCalculating cause code features...")
 
     # Create cause code distribution per equipment
@@ -403,6 +406,8 @@ if 'Arıza_Nedeni_Sık' in equipment_df.columns:
     print(f"  ✓ Created Arıza_Nedeni_Tutarlılık (cause consistency)")
     print(f"  ✓ Avg cause types per equipment: {equipment_df['Arıza_Nedeni_Çeşitlilik'].mean():.2f}")
     print(f"  ✓ Avg cause consistency: {equipment_df['Arıza_Nedeni_Tutarlılık'].mean():.2%}")
+else:
+    print("\n⚠ Cause code column not found in fault data - skipping cause diversity/consistency features")
 
 # Calculate MTBF
 def calculate_mtbf(row):
