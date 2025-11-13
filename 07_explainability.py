@@ -61,7 +61,8 @@ N_BACKGROUND_SAMPLES = 100  # For SHAP explainer (use subset for speed)
 N_HIGH_RISK_EXAMPLES = 20   # Number of individual explanations
 
 # Prediction horizons
-HORIZONS = ['3M', '6M', '12M']
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
+HORIZONS = ['6M', '12M']
 
 # Create output directories
 Path('outputs/explainability').mkdir(parents=True, exist_ok=True)
