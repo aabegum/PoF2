@@ -1,12 +1,17 @@
 """
 MODEL TRAINING - POF PREDICTION
-Turkish EDAŞ PoF Prediction Project (v3.0)
+Turkish EDAŞ PoF Prediction Project (v3.1)
 
 Purpose:
 - Train XGBoost and CatBoost models with GridSearchCV hyperparameter tuning
-- Predict failure probability for 3/6/12 months (24M removed - invalid target)
+- Predict failure probability for 6/12 months (3M removed - 100% positive class)
 - Evaluate performance with multiple metrics
 - Generate predictions and identify high-risk equipment
+
+Changes in v3.1:
+- FIXED: Removed 3M horizon (all equipment has >= 1 lifetime failure)
+- FIXED: Adjusted thresholds for better class balance
+- IMPROVED: Reduced verbosity for cleaner console output
 
 Changes in v3.0:
 - FIXED: Target creation now uses lifetime failure thresholds (no data leakage)
@@ -55,7 +60,7 @@ sns.set_palette("husl")
 
 print("="*100)
 print(" "*30 + "POF MODEL TRAINING PIPELINE")
-print(" "*28 + "XGBoost + CatBoost | 3/6/12 Months")  # CHANGED: Removed 24M
+print(" "*30 + "XGBoost + CatBoost | 6/12 Months")
 print("="*100)
 
 # ============================================================================
@@ -69,22 +74,23 @@ N_FOLDS = 3  # For GridSearchCV (reduced from 5 for speed)
 
 # GridSearchCV settings
 USE_GRIDSEARCH = True  # Set to False to skip hyperparameter tuning
-GRIDSEARCH_VERBOSE = 2
+GRIDSEARCH_VERBOSE = 1  # 0=silent, 1=progress bar, 2=detailed (REDUCED for cleaner output)
 GRIDSEARCH_N_JOBS = -1
 
-# Prediction horizons (days) - CHANGED: Removed 24M (100% positive class)
+# Prediction horizons (days)
+# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
+# NOTE: 24M removed (100% positive class in original data)
 HORIZONS = {
-    '3M': 90,
     '6M': 180,
     '12M': 365
 }
 
 # Target creation thresholds (based on lifetime failures)
 # Equipment with >= threshold lifetime failures is considered "failure-prone"
+# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
 TARGET_THRESHOLDS = {
-    '3M': 1,   # At least 1 lifetime failure (most lenient for short horizon)
-    '6M': 2,   # At least 2 lifetime failures
-    '12M': 3   # At least 3 lifetime failures (most strict for long horizon)
+    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
+    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive (changed from 3 for better balance)
 }
 
 # XGBoost base parameters (fixed across all searches)
@@ -140,6 +146,7 @@ print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
+print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
 print(f"   Class Weight Strategy: Balanced")
 print(f"   Hyperparameter Tuning: {'GridSearchCV (ENABLED)' if USE_GRIDSEARCH else 'DISABLED (using defaults)'}")
 if USE_GRIDSEARCH:
@@ -147,8 +154,13 @@ if USE_GRIDSEARCH:
     cat_combinations = np.prod([len(v) for v in CATBOOST_PARAM_GRID.values()])
     print(f"   XGBoost Grid Size: {xgb_combinations:,} combinations")
     print(f"   CatBoost Grid Size: {cat_combinations:,} combinations")
-print(f"\n⚠️  NOTE: 24M horizon removed (100% positive class - invalid for binary classification)")
-print(f"⚠️  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
+    print(f"   Verbosity Level: {GRIDSEARCH_VERBOSE} (1=progress bar, cleaner output)")
+print(f"\n⚠️  DATA CHARACTERISTICS:")
+print(f"   • Dataset contains ONLY failed equipment (1148 total)")
+print(f"   • All equipment has >= 1 lifetime failure (100% positive)")
+print(f"   • 3M horizon removed (100% positive class - invalid for classification)")
+print(f"   • Both 6M and 12M use threshold=2 for consistent 21.3% positive rate")
+print(f"\n✓  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
