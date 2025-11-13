@@ -488,6 +488,255 @@ if 'Avg_Customer_Count' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
     print("✓ Customer × Failure interaction")
 
 # ============================================================================
+# STEP 9B: ADDITIONAL DOMAIN-SPECIFIC FEATURES
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 9B: ADDITIONAL DOMAIN-SPECIFIC FEATURES")
+print("="*100)
+
+# ============================================================================
+# 1. VOLTAGE LEVEL CLASSIFICATION
+# ============================================================================
+print("\n--- Voltage Level Classification ---")
+
+if 'component_voltage' in df.columns:
+    # Rename for clarity
+    df['voltage_level'] = df['component_voltage']
+
+    coverage = df['voltage_level'].notna().sum()
+    print(f"✓ Voltage level data available: {coverage:,} equipment ({coverage/len(df)*100:.1f}%)")
+    print(f"  Unique voltage values: {df['voltage_level'].nunique()}")
+
+    # Show raw distribution
+    print(f"\n  Raw voltage distribution:")
+    for voltage, count in df['voltage_level'].value_counts().sort_index(ascending=False).head(5).items():
+        pct = count / len(df) * 100
+        print(f"    {voltage:>10.1f} V: {count:>4,} equipment ({pct:>5.1f}%)")
+
+    # Create categorical voltage classification
+    def classify_voltage(voltage):
+        """
+        Classify voltage into Turkish EDAŞ standard categories
+        AG (Alçak Gerilim) = Low Voltage (< 1 kV)
+        OG (Orta Gerilim) = Medium Voltage (10-36 kV)
+        YG (Yüksek Gerilim) = High Voltage (>= 36 kV)
+        """
+        if pd.isna(voltage):
+            return None
+
+        voltage = float(voltage)
+
+        if voltage < 1000:  # < 1 kV
+            return 'AG'
+        elif 10000 <= voltage < 36000:  # 10-36 kV
+            return 'OG'
+        elif voltage >= 36000:  # >= 36 kV
+            return 'YG'
+        else:
+            return 'Bilinmeyen'
+
+    df['Voltage_Class'] = df['voltage_level'].apply(classify_voltage)
+
+    # Show classification distribution
+    print(f"\n  Voltage classification:")
+    voltage_class_dist = df['Voltage_Class'].value_counts()
+    for v_class, count in voltage_class_dist.items():
+        if pd.notna(v_class):
+            pct = count / len(df) * 100
+
+            # Add description
+            if v_class == 'AG':
+                desc = '(0.4 kV - Low Voltage)'
+            elif v_class == 'OG':
+                desc = '(15.8/34.5 kV - Medium Voltage)'
+            elif v_class == 'YG':
+                desc = '(>36 kV - High Voltage)'
+            else:
+                desc = ''
+
+            print(f"    {v_class} {desc:35s}: {count:>4,} equipment ({pct:>5.1f}%)")
+
+    # Create binary flags for modeling
+    df['Is_MV'] = (df['Voltage_Class'] == 'OG').astype(int)
+    df['Is_LV'] = (df['Voltage_Class'] == 'AG').astype(int)
+    df['Is_HV'] = (df['Voltage_Class'] == 'YG').astype(int)
+
+    print(f"\n✓ Voltage flags created:")
+    print(f"    Is_MV: {df['Is_MV'].sum():,} equipment")
+    print(f"    Is_LV: {df['Is_LV'].sum():,} equipment")
+    print(f"    Is_HV: {df['Is_HV'].sum():,} equipment")
+
+    # Voltage-based failure analysis
+    print(f"\n  Voltage-level failure patterns:")
+    for v_class in ['AG', 'OG', 'YG']:
+        mask = df['Voltage_Class'] == v_class
+        if mask.sum() > 0:
+            avg_faults = df.loc[mask, 'Arıza_Sayısı_12ay'].mean() if 'Arıza_Sayısı_12ay' in df.columns else 0
+            avg_age = df.loc[mask, 'Ekipman_Yaşı_Yıl'].mean() if 'Ekipman_Yaşı_Yıl' in df.columns else 0
+            recurring_pct = df.loc[mask, 'Tekrarlayan_Arıza_90gün_Flag'].sum() / mask.sum() * 100 if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns else 0
+
+            print(f"    {v_class}: Avg age={avg_age:.1f}y, Avg faults(12M)={avg_faults:.2f}, Recurring={recurring_pct:.1f}%")
+
+else:
+    print("⚠ component_voltage column not found (should be from 02_data_transformation.py)")
+    df['voltage_level'] = None
+    df['Voltage_Class'] = None
+    df['Is_MV'] = 0
+    df['Is_LV'] = 0
+    df['Is_HV'] = 0
+
+# ============================================================================
+# 2. GEOGRAPHIC CLASSIFICATION (Urban vs Rural)
+# ============================================================================
+print("\n--- Geographic Classification (Manisa Region) ---")
+
+if 'İlçe' in df.columns:
+    # Salihli and Alaşehir are major urban centers
+    # Gördes is rural/agricultural
+    urban_districts = ['SALİHLİ', 'ALAŞEHİR', 'SALIHLI', 'ALAŞEHIR']
+
+    df['Bölge_Tipi'] = df['İlçe'].apply(
+        lambda x: 'Kentsel' if pd.notna(x) and str(x).upper() in urban_districts
+        else 'Kırsal'
+    )
+
+    # Show distribution
+    kentsel_count = (df['Bölge_Tipi'] == 'Kentsel').sum()
+    kirsal_count = (df['Bölge_Tipi'] == 'Kırsal').sum()
+    print(f"✓ Geographic classification:")
+    print(f"  Kentsel (Salihli + Alaşehir): {kentsel_count:,} equipment ({kentsel_count/len(df)*100:.1f}%)")
+    print(f"  Kırsal (Gördes): {kirsal_count:,} equipment ({kirsal_count/len(df)*100:.1f}%)")
+
+    # District breakdown (top 5)
+    print(f"\n  District breakdown:")
+    for district, count in df['İlçe'].value_counts().head(5).items():
+        btype = 'Kentsel' if str(district).upper() in urban_districts else 'Kırsal'
+        print(f"    {district:<15} {count:>4,} equipment ({btype})")
+else:
+    print("⚠ İlçe column not found")
+    df['Bölge_Tipi'] = None
+
+# ============================================================================
+# 3. SEASONAL FEATURES
+# ============================================================================
+print("\n--- Seasonal Features ---")
+
+if 'Son_Arıza_Tarihi' in df.columns:
+    def get_season(date_str):
+        """Map fault date to season (Turkish climate)"""
+        if pd.isna(date_str):
+            return None
+        try:
+            date = pd.to_datetime(date_str)
+            month = date.month
+            if month in [12, 1, 2]:
+                return 'Kış'        # Winter
+            elif month in [3, 4, 5]:
+                return 'İlkbahar'   # Spring
+            elif month in [6, 7, 8]:
+                return 'Yaz'        # Summer
+            else:
+                return 'Sonbahar'   # Fall
+        except:
+            return None
+
+    df['Son_Arıza_Mevsim'] = df['Son_Arıza_Tarihi'].apply(get_season)
+
+    season_dist = df['Son_Arıza_Mevsim'].value_counts()
+    print(f"✓ Last fault season calculated ({df['Son_Arıza_Mevsim'].notna().sum()} equipment)")
+    print(f"  Season distribution:")
+    for season in ['Yaz', 'Kış', 'İlkbahar', 'Sonbahar']:
+        count = season_dist.get(season, 0)
+        if count > 0:
+            print(f"    {season:<12} {count:>4,} equipment ({count/df['Son_Arıza_Mevsim'].notna().sum()*100:.1f}%)")
+else:
+    print("⚠ Son_Arıza_Tarihi column not found")
+    df['Son_Arıza_Mevsim'] = None
+
+# ============================================================================
+# 4. CUSTOMER TYPE RATIOS
+# ============================================================================
+print("\n--- Customer Type Ratios ---")
+
+# Check for customer impact columns
+has_customer_cols = all(col in df.columns for col in ['urban_mv_Avg', 'urban_lv_Avg',
+                                                        'suburban_mv_Avg', 'suburban_lv_Avg',
+                                                        'rural_mv_Avg', 'rural_lv_Avg',
+                                                        'total_customer_count_Avg'])
+
+if has_customer_cols:
+    # Urban customer ratio
+    df['Kentsel_Müşteri_Oranı'] = (
+        (df['urban_mv_Avg'].fillna(0) + df['urban_lv_Avg'].fillna(0)) /
+        (df['total_customer_count_Avg'] + 1)  # +1 to avoid division by zero
+    )
+
+    # Rural customer ratio
+    df['Kırsal_Müşteri_Oranı'] = (
+        (df['rural_mv_Avg'].fillna(0) + df['rural_lv_Avg'].fillna(0)) /
+        (df['total_customer_count_Avg'] + 1)
+    )
+
+    # MV customer ratio (across all areas)
+    df['OG_Müşteri_Oranı'] = (
+        (df['urban_mv_Avg'].fillna(0) + df['suburban_mv_Avg'].fillna(0) + df['rural_mv_Avg'].fillna(0)) /
+        (df['total_customer_count_Avg'] + 1)
+    )
+
+    print(f"✓ Customer ratios calculated:")
+    print(f"  Urban customer ratio: Mean={df['Kentsel_Müşteri_Oranı'].mean():.2%}, Max={df['Kentsel_Müşteri_Oranı'].max():.2%}")
+    print(f"  Rural customer ratio: Mean={df['Kırsal_Müşteri_Oranı'].mean():.2%}, Max={df['Kırsal_Müşteri_Oranı'].max():.2%}")
+    print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
+else:
+    print("⚠ Customer impact columns not found")
+    df['Kentsel_Müşteri_Oranı'] = 0
+    df['Kırsal_Müşteri_Oranı'] = 0
+    df['OG_Müşteri_Oranı'] = 0
+
+# ============================================================================
+# 5. LOADING INTENSITY METRICS (Leakage-Safe)
+# ============================================================================
+print("\n--- Loading Intensity Metrics (Leakage-Safe) ---")
+
+# Use recency-based loading instead of 12-month fault counts (avoids target leakage)
+if 'Son_Arıza_Gun_Sayisi' in df.columns and 'Ekipman_Yaşı_Yıl' in df.columns:
+    # Equipment loading score: Recent failures indicate high loading
+    # Formula: 1 / (days_since_last_fault + 1) → Recent fault = high score
+    df['Ekipman_Yoğunluk_Skoru'] = 1 / (df['Son_Arıza_Gun_Sayisi'].fillna(365) + 1)
+
+    print(f"✓ Equipment loading score (recency-based):")
+    print(f"  Mean={df['Ekipman_Yoğunluk_Skoru'].mean():.4f}, Max={df['Ekipman_Yoğunluk_Skoru'].max():.4f}")
+else:
+    print("⚠ Son_Arıza_Gun_Sayisi not available for loading score")
+    df['Ekipman_Yoğunluk_Skoru'] = 0
+
+# Customer-weighted risk (consequence metric, not PoF)
+if 'Composite_PoF_Risk_Score' in df.columns and has_customer_cols:
+    df['Müşteri_Başına_Risk'] = df['Composite_PoF_Risk_Score'] / (df['total_customer_count_Avg'] + 1)
+    print(f"✓ Customer-weighted risk:")
+    print(f"  Mean={df['Müşteri_Başına_Risk'].mean():.3f}, Max={df['Müşteri_Başına_Risk'].max():.3f}")
+else:
+    df['Müşteri_Başına_Risk'] = 0
+
+# ============================================================================
+# 6. URBAN/RURAL VS CUSTOMER IMPACT CROSS-ANALYSIS (Informational)
+# ============================================================================
+if 'Bölge_Tipi' in df.columns and df['Bölge_Tipi'].notna().any() and 'Arıza_Sayısı_12ay' in df.columns:
+    print("\n--- Urban/Rural Failure Pattern Summary ---")
+    for btype in ['Kentsel', 'Kırsal']:
+        mask = df['Bölge_Tipi'] == btype
+        if mask.sum() > 0:
+            avg_customers = df.loc[mask, 'total_customer_count_Avg'].mean() if has_customer_cols else 0
+            avg_faults = df.loc[mask, 'Arıza_Sayısı_12ay'].mean()
+            avg_age = df.loc[mask, 'Ekipman_Yaşı_Yıl'].mean() if 'Ekipman_Yaşı_Yıl' in df.columns else 0
+            print(f"  {btype}: Avg customers={avg_customers:.1f}, Avg faults(12M)={avg_faults:.2f}, Avg age={avg_age:.1f}y")
+
+print("\n✓ Additional domain-specific features complete!")
+print(f"  New features: voltage_level, Voltage_Class, Is_MV/LV/HV, Bölge_Tipi,")
+print(f"                Son_Arıza_Mevsim, Kentsel/Kırsal/OG_Müşteri_Oranı,")
+print(f"                Ekipman_Yoğunluk_Skoru, Müşteri_Başına_Risk")
+
+# ============================================================================
 # STEP 10: FEATURE SUMMARY & VALIDATION
 # ============================================================================
 print("\n" + "="*100)
