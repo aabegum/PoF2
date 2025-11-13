@@ -93,10 +93,6 @@ print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
-# Load full data for target creation
-df_full = pd.read_csv('data/features_engineered.csv')
-print(f"✓ Loaded full data: {df_full.shape[0]:,} equipment")
-
 # ============================================================================
 # STEP 2: PREPARE FEATURES
 # ============================================================================
