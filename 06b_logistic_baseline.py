@@ -1,20 +1,28 @@
 """
 LOGISTIC REGRESSION BASELINE - POF PREDICTION
-Turkish EDAŞ PoF Prediction Project
+Turkish EDAŞ PoF Prediction Project (v2.0)
 
 Purpose:
-- Train interpretable Logistic Regression baseline models
+- Train interpretable Logistic Regression baseline models with GridSearchCV
+- Train Ridge and Lasso Regression for comparison
 - Provide coefficient-based explanations (odds ratios)
 - Benchmark for complex models (XGBoost/CatBoost)
 - Enable business stakeholder understanding
 
+Changes in v2.0:
+- FIXED: Target creation now uses lifetime failure thresholds (no data leakage)
+- ADDED: GridSearchCV for optimal regularization parameter (C) tuning
+- ADDED: Ridge Regression (L2) and Lasso Regression (L1) as additional baselines
+- IMPROVED: More robust target definition based on failure propensity
+
 Strategy:
-- L2 regularization to prevent overfitting
+- L1 (Lasso), L2 (Ridge), and Elastic Net regularization options
+- GridSearchCV for optimal C (inverse regularization strength)
 - Balanced class weights (handle imbalance)
 - 70/30 train/test split with stratification
 - Feature importance via coefficients
 
-Input:  data/features_selected_clean.csv (11 features)
+Input:  data/features_selected_clean.csv (non-leaky features)
 Output: models/logistic_*.pkl, results/logistic_coefficients.csv
 
 Author: Data Analytics Team
@@ -32,8 +40,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Model libraries
-from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
-from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold, GridSearchCV
+from sklearn.linear_model import LogisticRegression, Ridge, Lasso
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import (
     roc_auc_score, roc_curve, precision_recall_curve,
@@ -59,7 +67,12 @@ print("="*100)
 # Model parameters
 RANDOM_STATE = 42
 TEST_SIZE = 0.30
-N_FOLDS = 5
+N_FOLDS = 3  # For GridSearchCV (reduced from 5 for speed)
+
+# GridSearchCV settings
+USE_GRIDSEARCH = True  # Set to False to skip hyperparameter tuning
+GRIDSEARCH_VERBOSE = 1
+GRIDSEARCH_N_JOBS = -1
 
 # Prediction horizons (days)
 HORIZONS = {
@@ -68,15 +81,39 @@ HORIZONS = {
     '12M': 365
 }
 
-# Logistic Regression parameters
-LOGISTIC_PARAMS = {
-    'penalty': 'l2',
-    'C': 1.0,  # Inverse regularization strength
-    'solver': 'lbfgs',
+# Target creation thresholds (based on lifetime failures)
+# Equipment with >= threshold lifetime failures is considered "failure-prone"
+TARGET_THRESHOLDS = {
+    '3M': 1,   # At least 1 lifetime failure (most lenient for short horizon)
+    '6M': 2,   # At least 2 lifetime failures
+    '12M': 3   # At least 3 lifetime failures (most strict for long horizon)
+}
+
+# Logistic Regression base parameters
+LOGISTIC_BASE_PARAMS = {
     'max_iter': 1000,
     'class_weight': 'balanced',
     'random_state': RANDOM_STATE,
     'n_jobs': -1
+}
+
+# GridSearchCV parameter grid for Logistic Regression
+LOGISTIC_PARAM_GRID = {
+    'C': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],  # Inverse regularization strength
+    'penalty': ['l1', 'l2'],  # L1 (Lasso) or L2 (Ridge)
+    'solver': ['liblinear', 'saga']  # Solvers that support both L1 and L2
+}
+
+# Ridge Regression (L2 only) parameter grid
+RIDGE_PARAM_GRID = {
+    'alpha': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],  # Regularization strength
+    'max_iter': [1000]
+}
+
+# Lasso Regression (L1 only) parameter grid
+LASSO_PARAM_GRID = {
+    'alpha': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],  # Regularization strength
+    'max_iter': [1000]
 }
 
 # Create output directories
@@ -89,8 +126,16 @@ print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
-print(f"   Regularization: L2 (Ridge), C={LOGISTIC_PARAMS['C']}")
+print(f"   Hyperparameter Tuning: {'GridSearchCV (ENABLED)' if USE_GRIDSEARCH else 'DISABLED (using defaults)'}")
+if USE_GRIDSEARCH:
+    logistic_combinations = np.prod([len(v) for v in LOGISTIC_PARAM_GRID.values()])
+    ridge_combinations = np.prod([len(v) for v in RIDGE_PARAM_GRID.values()])
+    lasso_combinations = np.prod([len(v) for v in LASSO_PARAM_GRID.values()])
+    print(f"   Logistic Grid Size: {logistic_combinations} combinations")
+    print(f"   Ridge Grid Size: {ridge_combinations} combinations")
+    print(f"   Lasso Grid Size: {lasso_combinations} combinations")
 print(f"   Class Weight Strategy: Balanced")
+print(f"⚠️  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -121,21 +166,27 @@ print("\n" + "="*100)
 print("STEP 2: CREATING TARGET VARIABLES FOR MULTIPLE HORIZONS")
 print("="*100)
 
-print("\n--- Creating Binary Targets ---")
+print("\n⚠️  NEW APPROACH: Using lifetime failure thresholds (NO DATA LEAKAGE)")
+print("   Equipment with higher lifetime failures is more likely to fail in the future")
+print("   Different thresholds for different prediction horizons")
+
+# Verify required column exists
+if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
+    print(f"\n❌ ERROR: 'Toplam_Arıza_Sayisi_Lifetime' column not found!")
+    print("This column should be created by 02_data_transformation.py")
+    print("Available columns:", list(df_full.columns[:10]), "...")
+    exit(1)
+
+print("\n--- Creating Binary Targets Based on Lifetime Failure Propensity ---")
 
 targets = {}
 
 for horizon_name, horizon_days in HORIZONS.items():
-    # Target = 1 if equipment had ANY failure in time period
-    if horizon_name == '3M' and 'Arıza_Sayısı_3ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_3ay'] > 0).astype(int)
-    elif horizon_name == '6M' and 'Arıza_Sayısı_6ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_6ay'] > 0).astype(int)
-    elif horizon_name == '12M' and 'Arıza_Sayısı_12ay' in df_full.columns:
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
-    else:
-        # Fallback: use 12M target
-        targets[horizon_name] = (df_full['Arıza_Sayısı_12ay'] > 0).astype(int)
+    threshold = TARGET_THRESHOLDS[horizon_name]
+
+    # Target = 1 if equipment has >= threshold lifetime failures
+    # Equipment with more historical failures is failure-prone (higher future failure risk)
+    targets[horizon_name] = (df_full['Toplam_Arıza_Sayisi_Lifetime'] >= threshold).astype(int)
 
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values
@@ -145,9 +196,15 @@ for horizon_name, horizon_days in HORIZONS.items():
     pos_rate = target_dist.get(1, 0) / len(df) * 100
 
     print(f"\n{horizon_name} ({horizon_days} days) Target:")
-    print(f"  No Failure (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
-    print(f"  Failure (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"  Threshold: >= {threshold} lifetime failures")
+    print(f"  Failure-Prone (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
+    print(f"  Not Failure-Prone (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
     print(f"  Positive Rate: {pos_rate:.1f}%")
+
+    # Warning if class imbalance is severe
+    if pos_rate < 5 or pos_rate > 95:
+        print(f"  ⚠️  WARNING: Severe class imbalance ({pos_rate:.1f}% positive)")
+        print(f"     Consider adjusting threshold or using SMOTE")
 
 # ============================================================================
 # STEP 3: PREPARE FEATURES
@@ -254,10 +311,10 @@ print(f"   Training set: {len(train_idx):,} equipment ({len(train_idx)/len(df)*1
 print(f"   Test set: {len(test_idx):,} equipment ({len(test_idx)/len(df)*100:.1f}%)")
 
 # ============================================================================
-# STEP 6: TRAIN LOGISTIC REGRESSION MODELS
+# STEP 6: TRAIN LINEAR MODELS WITH GRIDSEARCHCV
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 6: TRAINING LOGISTIC REGRESSION MODELS")
+print("STEP 6: TRAINING LINEAR MODELS" + (" WITH GRIDSEARCHCV" if USE_GRIDSEARCH else ""))
 print("="*100)
 
 # Storage for results
@@ -265,10 +322,14 @@ models = {}
 predictions = {}
 performance_metrics = []
 all_coefficients = []
+best_params_all = {}
+
+# Model types to train
+MODEL_TYPES = ['Logistic', 'Ridge', 'Lasso']
 
 for horizon_name in HORIZONS.keys():
     print(f"\n{'='*100}")
-    print(f"TRAINING MODEL FOR {horizon_name} HORIZON")
+    print(f"TRAINING MODELS FOR {horizon_name} HORIZON")
     print(f"{'='*100}")
 
     # Get target for this horizon
@@ -287,92 +348,161 @@ for horizon_name in HORIZONS.keys():
     print(f"  No Failure (0): {(y_test == 0).sum():,} ({100-test_pos_rate:.1f}%)")
     print(f"  Failure (1): {y_test.sum():,} ({test_pos_rate:.1f}%)")
 
-    # Train model
-    print(f"\n--- Training Logistic Regression ---")
+    models[horizon_name] = {}
+    best_params_all[horizon_name] = {}
 
-    model = LogisticRegression(**LOGISTIC_PARAMS)
-    model.fit(X_train, y_train)
+    # Train each model type
+    for model_type in MODEL_TYPES:
+        print(f"\n{'='*80}")
+        print(f"Training {model_type} Regression")
+        print(f"{'='*80}")
 
-    print(f"✓ Model trained successfully")
+        if USE_GRIDSEARCH:
+            # ===== GRIDSEARCHCV HYPERPARAMETER TUNING =====
+            print(f"\n⏳ Running GridSearchCV for {model_type}...")
 
-    # Cross-validation on training set
-    print(f"\n--- Cross-Validation (Training Set) ---")
-    cv = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
-    cv_scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='roc_auc', n_jobs=-1)
+            if model_type == 'Logistic':
+                estimator = LogisticRegression(**LOGISTIC_BASE_PARAMS)
+                param_grid = LOGISTIC_PARAM_GRID
+            elif model_type == 'Ridge':
+                estimator = Ridge(random_state=RANDOM_STATE)
+                param_grid = RIDGE_PARAM_GRID
+            else:  # Lasso
+                estimator = Lasso(random_state=RANDOM_STATE)
+                param_grid = LASSO_PARAM_GRID
 
-    print(f"5-Fold CV AUC Scores: {cv_scores}")
-    print(f"Mean CV AUC: {cv_scores.mean():.4f} (± {cv_scores.std():.4f})")
+            print(f"   Grid size: {np.prod([len(v) for v in param_grid.values()])} combinations")
+            print(f"   CV folds: {N_FOLDS}")
 
-    # Predictions
-    y_pred_proba = model.predict_proba(X_test)[:, 1]
-    y_pred = model.predict(X_test)
+            # GridSearchCV
+            grid_search = GridSearchCV(
+                estimator=estimator,
+                param_grid=param_grid,
+                scoring='roc_auc',
+                cv=StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE),
+                n_jobs=GRIDSEARCH_N_JOBS,
+                verbose=GRIDSEARCH_VERBOSE,
+                refit=True
+            )
 
-    # Evaluation metrics
-    auc = roc_auc_score(y_test, y_pred_proba)
-    ap = average_precision_score(y_test, y_pred_proba)
-    precision = precision_score(y_test, y_pred, zero_division=0)
-    recall = recall_score(y_test, y_pred, zero_division=0)
-    f1 = f1_score(y_test, y_pred, zero_division=0)
+            # Fit GridSearchCV
+            grid_search.fit(X_train, y_train)
 
-    print(f"\n--- Test Set Performance ---")
-    print(f"AUC-ROC: {auc:.4f}")
-    print(f"Average Precision: {ap:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F1-Score: {f1:.4f}")
+            # Get best model
+            model = grid_search.best_estimator_
+            best_params = grid_search.best_params_
+            best_cv_score = grid_search.best_score_
 
-    # Confusion matrix
-    cm = confusion_matrix(y_test, y_pred)
-    print(f"\nConfusion Matrix:")
-    print(f"  TN: {cm[0,0]:4d}  |  FP: {cm[0,1]:4d}")
-    print(f"  FN: {cm[1,0]:4d}  |  TP: {cm[1,1]:4d}")
+            print(f"\n✅ GridSearchCV Complete!")
+            print(f"   Best CV AUC: {best_cv_score:.4f}")
+            print(f"\n   Best Hyperparameters:")
+            for param, value in best_params.items():
+                print(f"      {param}: {value}")
 
-    # Store results
-    models[horizon_name] = model
-    predictions[horizon_name] = {
-        'y_true': y_test,
-        'y_pred_proba': y_pred_proba,
-        'y_pred': y_pred
-    }
+            best_params_all[horizon_name][model_type] = best_params
 
-    # Save performance metrics
-    performance_metrics.append({
-        'Horizon': horizon_name,
-        'Model': 'Logistic Regression',
-        'AUC': auc,
-        'Average_Precision': ap,
-        'Precision': precision,
-        'Recall': recall,
-        'F1_Score': f1,
-        'CV_AUC_Mean': cv_scores.mean(),
-        'CV_AUC_Std': cv_scores.std()
-    })
+        else:
+            # ===== TRAINING WITH DEFAULT PARAMETERS =====
+            print(f"\n⏳ Training {model_type} with default parameters...")
 
-    # Extract coefficients and calculate odds ratios
-    coefficients = pd.DataFrame({
-        'Feature': all_features,
-        'Coefficient': model.coef_[0],
-        'Abs_Coefficient': np.abs(model.coef_[0]),
-        'Odds_Ratio': np.exp(model.coef_[0])
-    })
-    coefficients['Horizon'] = horizon_name
-    coefficients['Intercept'] = model.intercept_[0]
-    coefficients = coefficients.sort_values('Abs_Coefficient', ascending=False)
+            if model_type == 'Logistic':
+                params = LOGISTIC_BASE_PARAMS.copy()
+                params.update({'C': 1.0, 'penalty': 'l2', 'solver': 'lbfgs'})
+                model = LogisticRegression(**params)
+            elif model_type == 'Ridge':
+                model = Ridge(alpha=1.0, random_state=RANDOM_STATE)
+            else:  # Lasso
+                model = Lasso(alpha=1.0, random_state=RANDOM_STATE)
 
-    all_coefficients.append(coefficients)
+            model.fit(X_train, y_train)
 
-    print(f"\n--- Top 5 Most Important Features (by |coefficient|) ---")
-    for idx, row in coefficients.head(5).iterrows():
-        direction = "↑" if row['Coefficient'] > 0 else "↓"
-        print(f"  {direction} {row['Feature']:40s} | Coef: {row['Coefficient']:7.3f} | Odds Ratio: {row['Odds_Ratio']:6.3f}")
+        # ===== EVALUATION =====
+        # Predictions (handle different model types)
+        if model_type == 'Logistic':
+            y_pred_proba = model.predict_proba(X_test)[:, 1]
+            y_pred = model.predict(X_test)
+        else:  # Ridge and Lasso output continuous values
+            y_pred_raw = model.predict(X_test)
+            # Convert to probabilities (clip to [0,1])
+            y_pred_proba = np.clip(y_pred_raw, 0, 1)
+            y_pred = (y_pred_proba >= 0.5).astype(int)
 
-    # Save model
-    model_path = f'models/logistic_{horizon_name.lower()}.pkl'
-    with open(model_path, 'wb') as f:
-        pickle.dump(model, f)
-    print(f"\n✓ Model saved: {model_path}")
+        # Evaluation metrics
+        auc = roc_auc_score(y_test, y_pred_proba)
+        ap = average_precision_score(y_test, y_pred_proba)
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
 
-    # Save predictions for test set
+        print(f"\n✅ {model_type} Test Set Performance:")
+        print(f"   AUC-ROC: {auc:.4f}")
+        print(f"   Average Precision: {ap:.4f}")
+        print(f"   Precision: {precision:.4f}")
+        print(f"   Recall: {recall:.4f}")
+        print(f"   F1-Score: {f1:.4f}")
+
+        # Store results
+        models[horizon_name][model_type] = model
+        predictions[f'{horizon_name}_{model_type}'] = {
+            'y_true': y_test,
+            'y_pred_proba': y_pred_proba,
+            'y_pred': y_pred
+        }
+
+        # Save performance metrics
+        performance_metrics.append({
+            'Horizon': horizon_name,
+            'Model': f'{model_type} Regression',
+            'AUC': auc,
+            'Average_Precision': ap,
+            'Precision': precision,
+            'Recall': recall,
+            'F1_Score': f1
+        })
+
+        # Extract coefficients (for interpretation)
+        if model_type == 'Logistic':
+            coefficients = pd.DataFrame({
+                'Feature': all_features,
+                'Coefficient': model.coef_[0],
+                'Abs_Coefficient': np.abs(model.coef_[0]),
+                'Odds_Ratio': np.exp(model.coef_[0])
+            })
+            coefficients['Intercept'] = model.intercept_[0]
+        else:  # Ridge or Lasso
+            coefficients = pd.DataFrame({
+                'Feature': all_features,
+                'Coefficient': model.coef_,
+                'Abs_Coefficient': np.abs(model.coef_),
+                'Odds_Ratio': np.nan  # Not applicable for Ridge/Lasso
+            })
+            coefficients['Intercept'] = model.intercept_
+
+        coefficients['Horizon'] = horizon_name
+        coefficients['Model'] = model_type
+        coefficients = coefficients.sort_values('Abs_Coefficient', ascending=False)
+
+        all_coefficients.append(coefficients)
+
+        print(f"\n--- Top 5 Most Important Features (by |coefficient|) ---")
+        for idx, row in coefficients.head(5).iterrows():
+            direction = "↑" if row['Coefficient'] > 0 else "↓"
+            if model_type == 'Logistic':
+                print(f"  {direction} {row['Feature']:40s} | Coef: {row['Coefficient']:7.3f} | Odds Ratio: {row['Odds_Ratio']:6.3f}")
+            else:
+                print(f"  {direction} {row['Feature']:40s} | Coef: {row['Coefficient']:7.3f}")
+
+        # Save model
+        model_path = f'models/{model_type.lower()}_{horizon_name.lower()}.pkl'
+        with open(model_path, 'wb') as f:
+            pickle.dump(model, f)
+        print(f"\n💾 Model saved: {model_path}")
+
+    # Save predictions for test set (Logistic only for main predictions file)
+    logistic_model = models[horizon_name]['Logistic']
+    y_pred_proba = logistic_model.predict_proba(X_test)[:, 1]
+    y_pred = logistic_model.predict(X_test)
+
     pred_df = pd.DataFrame({
         'Ekipman_ID': df.loc[test_idx, id_column].values,
         'Equipment_Class': df.loc[test_idx, 'Equipment_Class_Primary'].values,
@@ -391,7 +521,13 @@ for horizon_name in HORIZONS.keys():
 
     pred_path = f'predictions/logistic_predictions_{horizon_name.lower()}.csv'
     pred_df.to_csv(pred_path, index=False)
-    print(f"✓ Predictions saved: {pred_path}")
+    print(f"\n✓ Predictions saved: {pred_path}")
+
+# Save best parameters if GridSearch was used
+if USE_GRIDSEARCH:
+    best_params_df = pd.DataFrame(best_params_all).T
+    best_params_df.to_csv('results/linear_models_best_params.csv')
+    print(f"\n💾 Best parameters saved: results/linear_models_best_params.csv")
 
 # ============================================================================
 # STEP 7: VISUALIZE MODEL PERFORMANCE
@@ -400,57 +536,70 @@ print("\n" + "="*100)
 print("STEP 7: VISUALIZING MODEL PERFORMANCE")
 print("="*100)
 
-# 1. ROC Curves for all horizons
-plt.figure(figsize=(10, 8))
+# 1. ROC Curves for all horizons (Logistic vs Ridge vs Lasso)
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-for horizon_name in HORIZONS.keys():
-    y_test = predictions[horizon_name]['y_true']
-    y_pred_proba = predictions[horizon_name]['y_pred_proba']
+for idx, horizon_name in enumerate(HORIZONS.keys()):
+    ax = axes[idx]
 
-    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
-    auc = roc_auc_score(y_test, y_pred_proba)
+    for model_type in MODEL_TYPES:
+        pred_key = f'{horizon_name}_{model_type}'
+        y_test = predictions[pred_key]['y_true']
+        y_pred_proba = predictions[pred_key]['y_pred_proba']
 
-    plt.plot(fpr, tpr, label=f'{horizon_name} (AUC = {auc:.3f})', linewidth=2)
+        fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+        auc = roc_auc_score(y_test, y_pred_proba)
 
-plt.plot([0, 1], [0, 1], 'k--', label='Random Classifier', linewidth=1)
-plt.xlabel('False Positive Rate', fontsize=12)
-plt.ylabel('True Positive Rate', fontsize=12)
-plt.title('ROC Curves - Logistic Regression (All Horizons)', fontsize=14, fontweight='bold')
-plt.legend(loc='lower right', fontsize=10)
-plt.grid(True, alpha=0.3)
+        ax.plot(fpr, tpr, label=f'{model_type} (AUC = {auc:.3f})', linewidth=2)
+
+    ax.plot([0, 1], [0, 1], 'k--', label='Random', linewidth=1, alpha=0.5)
+    ax.set_xlabel('False Positive Rate', fontsize=10)
+    ax.set_ylabel('True Positive Rate', fontsize=10)
+    ax.set_title(f'{horizon_name} Horizon', fontsize=12, fontweight='bold')
+    ax.legend(loc='lower right', fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+plt.suptitle('ROC Curves - Linear Models Comparison (All Horizons)', fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
 plt.savefig('outputs/logistic_baseline/roc_curves_all_horizons.png', dpi=300, bbox_inches='tight')
 print("✓ Saved: outputs/logistic_baseline/roc_curves_all_horizons.png")
 plt.close()
 
 # 2. Precision-Recall Curves
-plt.figure(figsize=(10, 8))
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-for horizon_name in HORIZONS.keys():
-    y_test = predictions[horizon_name]['y_true']
-    y_pred_proba = predictions[horizon_name]['y_pred_proba']
+for idx, horizon_name in enumerate(HORIZONS.keys()):
+    ax = axes[idx]
 
-    precision, recall, _ = precision_recall_curve(y_test, y_pred_proba)
-    ap = average_precision_score(y_test, y_pred_proba)
+    for model_type in MODEL_TYPES:
+        pred_key = f'{horizon_name}_{model_type}'
+        y_test = predictions[pred_key]['y_true']
+        y_pred_proba = predictions[pred_key]['y_pred_proba']
 
-    plt.plot(recall, precision, label=f'{horizon_name} (AP = {ap:.3f})', linewidth=2)
+        precision, recall, _ = precision_recall_curve(y_test, y_pred_proba)
+        ap = average_precision_score(y_test, y_pred_proba)
 
-plt.xlabel('Recall', fontsize=12)
-plt.ylabel('Precision', fontsize=12)
-plt.title('Precision-Recall Curves - Logistic Regression (All Horizons)', fontsize=14, fontweight='bold')
-plt.legend(loc='best', fontsize=10)
-plt.grid(True, alpha=0.3)
+        ax.plot(recall, precision, label=f'{model_type} (AP = {ap:.3f})', linewidth=2)
+
+    ax.set_xlabel('Recall', fontsize=10)
+    ax.set_ylabel('Precision', fontsize=10)
+    ax.set_title(f'{horizon_name} Horizon', fontsize=12, fontweight='bold')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+plt.suptitle('Precision-Recall Curves - Linear Models Comparison', fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
 plt.savefig('outputs/logistic_baseline/pr_curves_all_horizons.png', dpi=300, bbox_inches='tight')
 print("✓ Saved: outputs/logistic_baseline/pr_curves_all_horizons.png")
 plt.close()
 
-# 3. Confusion Matrices
+# 3. Confusion Matrices (Logistic Regression only - main model)
 fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
 for idx, horizon_name in enumerate(HORIZONS.keys()):
-    y_test = predictions[horizon_name]['y_true']
-    y_pred = predictions[horizon_name]['y_pred']
+    pred_key = f'{horizon_name}_Logistic'
+    y_test = predictions[pred_key]['y_true']
+    y_pred = predictions[pred_key]['y_pred']
 
     cm = confusion_matrix(y_test, y_pred)
 
@@ -466,20 +615,23 @@ plt.savefig('outputs/logistic_baseline/confusion_matrices.png', dpi=300, bbox_in
 print("✓ Saved: outputs/logistic_baseline/confusion_matrices.png")
 plt.close()
 
-# 4. Feature Coefficients Comparison
+# 4. Feature Coefficients Comparison (Logistic Regression only)
 fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
-for idx, horizon_name in enumerate(HORIZONS.keys()):
-    coef_df = all_coefficients[idx].head(10).copy()
+# Get Logistic coefficients for each horizon
+logistic_coefs = [coef_df for coef_df in all_coefficients if coef_df['Model'].iloc[0] == 'Logistic']
+
+for idx, (horizon_name, coef_df) in enumerate(zip(HORIZONS.keys(), logistic_coefs)):
+    top_coef = coef_df.head(10).copy()
 
     # Sort by coefficient value for better visualization
-    coef_df = coef_df.sort_values('Coefficient')
+    top_coef = top_coef.sort_values('Coefficient')
 
-    colors = ['red' if x < 0 else 'green' for x in coef_df['Coefficient']]
+    colors = ['red' if x < 0 else 'green' for x in top_coef['Coefficient']]
 
-    axes[idx].barh(range(len(coef_df)), coef_df['Coefficient'], color=colors, alpha=0.7)
-    axes[idx].set_yticks(range(len(coef_df)))
-    axes[idx].set_yticklabels(coef_df['Feature'], fontsize=8)
+    axes[idx].barh(range(len(top_coef)), top_coef['Coefficient'], color=colors, alpha=0.7)
+    axes[idx].set_yticks(range(len(top_coef)))
+    axes[idx].set_yticklabels(top_coef['Feature'], fontsize=8)
     axes[idx].set_xlabel('Coefficient Value', fontsize=10)
     axes[idx].set_title(f'{horizon_name} Horizon', fontsize=12, fontweight='bold')
     axes[idx].axvline(x=0, color='black', linestyle='--', linewidth=1)
@@ -511,13 +663,22 @@ print("✓ Saved: results/logistic_coefficients.csv")
 # STEP 9: SUMMARY REPORT
 # ============================================================================
 print("\n" + "="*100)
-print("SUMMARY: LOGISTIC REGRESSION BASELINE RESULTS")
+print("SUMMARY: LINEAR MODELS BASELINE RESULTS")
 print("="*100)
 
 print("\n📊 Model Performance Summary:")
 print(perf_df.to_string(index=False))
 
-print("\n\n📈 Coefficient Interpretation Guide:")
+print("\n\n📈 Best Model by Horizon (based on AUC):")
+for horizon in HORIZONS.keys():
+    horizon_perf = perf_df[perf_df['Horizon'] == horizon]
+    best_model = horizon_perf.loc[horizon_perf['AUC'].idxmax()]
+    print(f"\n{horizon} Horizon:")
+    print(f"  Best Model: {best_model['Model']}")
+    print(f"  AUC: {best_model['AUC']:.4f}")
+    print(f"  F1-Score: {best_model['F1_Score']:.4f}")
+
+print("\n\n📈 Coefficient Interpretation Guide (Logistic Regression):")
 print("─" * 100)
 print("Positive Coefficient → Feature INCREASES failure probability")
 print("Negative Coefficient → Feature DECREASES failure probability")
@@ -525,27 +686,36 @@ print("Odds Ratio > 1 → Feature increases odds of failure")
 print("Odds Ratio < 1 → Feature decreases odds of failure")
 print("─" * 100)
 
-print("\n\n🎯 Top Risk Factors (12M Horizon):")
-coef_12m = all_coefficients[2]  # 12M is index 2
+print("\n\n🎯 Top Risk Factors (12M Horizon - Logistic Regression):")
+# Find 12M Logistic coefficients
+coef_12m_logistic = [coef_df for coef_df in all_coefficients
+                      if coef_df['Horizon'].iloc[0] == '12M' and coef_df['Model'].iloc[0] == 'Logistic'][0]
+
 print("\nIncreasing Risk:")
-positive_coef = coef_12m[coef_12m['Coefficient'] > 0].head(3)
+positive_coef = coef_12m_logistic[coef_12m_logistic['Coefficient'] > 0].head(3)
 for idx, row in positive_coef.iterrows():
     print(f"  ↑ {row['Feature']:40s} | Odds Ratio: {row['Odds_Ratio']:.3f} ({(row['Odds_Ratio']-1)*100:+.1f}% per unit increase)")
 
 print("\nDecreasing Risk:")
-negative_coef = coef_12m[coef_12m['Coefficient'] < 0].head(3)
+negative_coef = coef_12m_logistic[coef_12m_logistic['Coefficient'] < 0].head(3)
 for idx, row in negative_coef.iterrows():
     print(f"  ↓ {row['Feature']:40s} | Odds Ratio: {row['Odds_Ratio']:.3f} ({(1-row['Odds_Ratio'])*100:.1f}% per unit increase)")
 
 print("\n" + "="*100)
-print("✅ LOGISTIC REGRESSION BASELINE COMPLETE!")
+print("✅ LINEAR MODELS BASELINE COMPLETE!")
 print("="*100)
 print("\n📂 Outputs:")
-print("   Models: models/logistic_*.pkl")
+print("   Models: models/logistic_*.pkl, models/ridge_*.pkl, models/lasso_*.pkl")
 print("   Predictions: predictions/logistic_predictions_*.csv")
 print("   Visualizations: outputs/logistic_baseline/*.png")
 print("   Results: results/logistic_baseline_performance.csv")
 print("   Coefficients: results/logistic_coefficients.csv")
+if USE_GRIDSEARCH:
+    print("   Best Parameters: results/linear_models_best_params.csv")
+print("\n💡 Model Comparison:")
+print("   • Logistic: Best for interpretability (odds ratios)")
+print("   • Ridge (L2): Best for correlated features (smooth coefficients)")
+print("   • Lasso (L1): Best for feature selection (sparse coefficients)")
 print("\n💡 Next Steps:")
 print("   1. Compare with XGBoost/CatBoost performance (06_model_training.py)")
 print("   2. Add monotonic constraints to tree models (06c_monotonic_models.py)")
