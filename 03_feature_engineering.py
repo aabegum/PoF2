@@ -702,10 +702,16 @@ print("\n--- Loading Intensity Metrics (Leakage-Safe) ---")
 if 'Son_Arıza_Gun_Sayisi' in df.columns and 'Ekipman_Yaşı_Yıl' in df.columns:
     # Equipment loading score: Recent failures indicate high loading
     # Formula: 1 / (days_since_last_fault + 1) → Recent fault = high score
-    df['Ekipman_Yoğunluk_Skoru'] = 1 / (df['Son_Arıza_Gun_Sayisi'].fillna(365) + 1)
+    # Handle NaN and negative values (equipment that never failed)
+    days_since = df['Son_Arıza_Gun_Sayisi'].copy()
+    days_since = days_since.fillna(365)  # Never failed = 365 days default
+    days_since = days_since.clip(lower=0)  # Negative values → 0 (equipment never failed)
+
+    df['Ekipman_Yoğunluk_Skoru'] = 1 / (days_since + 1)
 
     print(f"✓ Equipment loading score (recency-based):")
     print(f"  Mean={df['Ekipman_Yoğunluk_Skoru'].mean():.4f}, Max={df['Ekipman_Yoğunluk_Skoru'].max():.4f}")
+    print(f"  Note: Equipment never failed get default 365-day recency")
 else:
     print("⚠ Son_Arıza_Gun_Sayisi not available for loading score")
     df['Ekipman_Yoğunluk_Skoru'] = 0

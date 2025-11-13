@@ -366,7 +366,9 @@ for col in customer_impact_cols:
 # Add optional specification columns dynamically
 for col in optional_spec_cols.keys():
     if f'{col}_first' in equipment_df.columns:
-        rename_dict[f'{col}_first'] = col
+        # Standardize column names (replace spaces with underscores)
+        clean_col_name = col.replace(' ', '_')
+        rename_dict[f'{col}_first'] = clean_col_name
 
 equipment_df.rename(columns=rename_dict, inplace=True)
 
