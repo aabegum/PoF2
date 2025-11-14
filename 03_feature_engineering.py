@@ -710,6 +710,12 @@ else:
 # ============================================================================
 print("\n--- Customer Type Ratios ---")
 
+# Check for customer impact columns (used later for customer-weighted risk)
+has_customer_cols = all(col in df.columns for col in ['urban_mv_Avg', 'urban_lv_Avg',
+                                                        'suburban_mv_Avg', 'suburban_lv_Avg',
+                                                        'rural_mv_Avg', 'rural_lv_Avg',
+                                                        'total_customer_count_Avg'])
+
 # Check if fault-level ratios were calculated (proper method - no Simpson's Paradox)
 has_fault_level_ratios = all(col in df.columns for col in ['Urban_Customer_Ratio_mean',
                                                              'Rural_Customer_Ratio_mean',
@@ -728,12 +734,7 @@ if has_fault_level_ratios:
     print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
 
 else:
-    # Fallback: Check for old method (equipment-level averaged counts)
-    has_customer_cols = all(col in df.columns for col in ['urban_mv_Avg', 'urban_lv_Avg',
-                                                            'suburban_mv_Avg', 'suburban_lv_Avg',
-                                                            'rural_mv_Avg', 'rural_lv_Avg',
-                                                            'total_customer_count_Avg'])
-
+    # Fallback: Use old method (equipment-level averaged counts)
     if has_customer_cols:
         print("⚠ WARNING: Using old method (equipment-level averaged counts)")
         print("  This can cause Simpson's Paradox. Run 02_data_transformation.py to fix.")
