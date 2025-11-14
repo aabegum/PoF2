@@ -743,6 +743,73 @@ print(f"                Son_Arıza_Mevsim, Kentsel/Kırsal/OG_Müşteri_Oranı,"
 print(f"                Ekipman_Yoğunluk_Skoru, Müşteri_Başına_Risk")
 
 # ============================================================================
+# STEP 9C: FAULT CAUSE CODE FEATURES (MODULE 3)
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 9C: FAULT CAUSE CODE FEATURES")
+print("="*100)
+
+# Check if cause code columns exist (added by 02_data_transformation.py)
+has_cause_codes = ('Arıza_Nedeni_İlk' in df.columns or
+                   'Arıza_Nedeni_Son' in df.columns or
+                   'Arıza_Nedeni_Sık' in df.columns)
+
+if has_cause_codes:
+    print("\n✓ Cause code columns found - creating cause-based features")
+
+    # Equipment Class × Cause Code interaction
+    if 'Equipment_Class_Primary' in df.columns and 'Arıza_Nedeni_Sık' in df.columns:
+        print("\n--- Equipment Class × Cause Code Interaction ---")
+
+        # Create interaction feature (categorical)
+        df['Ekipman_Neden_Kombinasyonu'] = (
+            df['Equipment_Class_Primary'].astype(str) + '_' +
+            df['Arıza_Nedeni_Sık'].astype(str)
+        )
+
+        # Calculate risk score per combination (average failure count)
+        if 'Toplam_Arıza_Sayisi_Lifetime' in df.columns:
+            combo_risk = df.groupby('Ekipman_Neden_Kombinasyonu')['Toplam_Arıza_Sayisi_Lifetime'].mean()
+            df['Ekipman_Neden_Risk_Skoru'] = df['Ekipman_Neden_Kombinasyonu'].map(combo_risk)
+
+            print(f"  ✓ Created Ekipman_Neden_Kombinasyonu: {df['Ekipman_Neden_Kombinasyonu'].nunique()} unique combinations")
+            print(f"  ✓ Created Ekipman_Neden_Risk_Skoru: Mean={df['Ekipman_Neden_Risk_Skoru'].mean():.2f}")
+
+    # Cause consistency flag (high consistency = always same cause)
+    if 'Arıza_Nedeni_Tutarlılık' in df.columns:
+        df['Tek_Neden_Flag'] = (df['Arıza_Nedeni_Tutarlılık'] >= 0.8).astype(int)  # 80%+ same cause
+        print(f"\n  ✓ Created Tek_Neden_Flag: {df['Tek_Neden_Flag'].sum()} equipment with single dominant cause (≥80%)")
+
+    # Cause diversity risk (more cause types = more complex failures)
+    if 'Arıza_Nedeni_Çeşitlilik' in df.columns:
+        df['Çok_Nedenli_Flag'] = (df['Arıza_Nedeni_Çeşitlilik'] >= 3).astype(int)  # 3+ different causes
+        print(f"  ✓ Created Çok_Nedenli_Flag: {df['Çok_Nedenli_Flag'].sum()} equipment with multiple causes (≥3 types)")
+
+    # Cause changed flag (recent cause different from first cause)
+    if 'Arıza_Nedeni_İlk' in df.columns and 'Arıza_Nedeni_Son' in df.columns:
+        df['Neden_Değişim_Flag'] = (
+            df['Arıza_Nedeni_İlk'].astype(str) != df['Arıza_Nedeni_Son'].astype(str)
+        ).astype(int)
+        print(f"  ✓ Created Neden_Değişim_Flag: {df['Neden_Değişim_Flag'].sum()} equipment with changing failure causes")
+
+    # Summary statistics by cause code
+    if 'Arıza_Nedeni_Sık' in df.columns:
+        print(f"\n--- Failure Cause Distribution ---")
+        cause_dist = df['Arıza_Nedeni_Sık'].value_counts().head(10)
+        print(f"  Top 10 most common failure causes:")
+        for cause, count in cause_dist.items():
+            pct = count / len(df) * 100
+            print(f"    {cause}: {count} equipment ({pct:.1f}%)")
+
+    print("\n✓ Fault cause code features complete!")
+    print(f"  New features: Ekipman_Neden_Kombinasyonu, Ekipman_Neden_Risk_Skoru,")
+    print(f"                Tek_Neden_Flag, Çok_Nedenli_Flag, Neden_Değişim_Flag")
+
+else:
+    print("\n⚠ Cause code columns not found - skipping cause-based features")
+    print("  This is expected if 02_data_transformation.py hasn't been re-run with cause code support")
+
+# ============================================================================
 # STEP 10: FEATURE SUMMARY & VALIDATION
 # ============================================================================
 print("\n" + "="*100)

@@ -289,6 +289,11 @@ agg_dict = {
     'Time_To_Repair_Hours': ['mean', 'max']
 }
 
+# Add cause code column if available
+if 'cause code' in df.columns:
+    agg_dict['cause code'] = ['first', 'last', lambda x: x.mode()[0] if len(x.mode()) > 0 else None]
+    print("  ✓ Found: cause code (will aggregate first, last, and most common)")
+
 # Add customer impact columns if available
 customer_impact_cols = [
     'urban mv+suburban mv',
@@ -356,6 +361,12 @@ rename_dict = {
     'Fault_Last_12M_sum': 'Arıza_Sayısı_12ay',
 }
 
+# Add cause code columns if available
+if 'cause code_first' in equipment_df.columns:
+    rename_dict['cause code_first'] = 'Arıza_Nedeni_İlk'
+    rename_dict['cause code_last'] = 'Arıza_Nedeni_Son'
+    rename_dict['cause code_<lambda>'] = 'Arıza_Nedeni_Sık'  # Most common (mode)
+
 # Add customer impact columns dynamically
 for col in customer_impact_cols:
     if f'{col}_mean' in equipment_df.columns:
@@ -371,6 +382,32 @@ for col in optional_spec_cols.keys():
         rename_dict[f'{col}_first'] = clean_col_name
 
 equipment_df.rename(columns=rename_dict, inplace=True)
+
+# Calculate cause code features if available
+# Check if cause code was successfully aggregated (could be in multiple columns after aggregation)
+has_cause_code = any(col for col in equipment_df.columns if 'cause code' in col.lower() or 'arıza_nedeni' in col.lower())
+
+if has_cause_code and 'cause code' in df.columns:
+    print("\nCalculating cause code features...")
+
+    # Create cause code distribution per equipment
+    cause_distribution = df.groupby([equipment_id_col, 'cause code']).size().unstack(fill_value=0)
+
+    # Cause diversity: How many different cause types per equipment
+    equipment_df['Arıza_Nedeni_Çeşitlilik'] = (cause_distribution > 0).sum(axis=1).reindex(equipment_df['Ekipman_ID']).fillna(0).values
+
+    # Cause consistency: Percentage of faults with most common cause
+    total_faults_per_equip = cause_distribution.sum(axis=1)
+    max_cause_per_equip = cause_distribution.max(axis=1)
+    cause_consistency = (max_cause_per_equip / total_faults_per_equip).reindex(equipment_df['Ekipman_ID']).fillna(0).values
+    equipment_df['Arıza_Nedeni_Tutarlılık'] = cause_consistency
+
+    print(f"  ✓ Created Arıza_Nedeni_Çeşitlilik (cause diversity)")
+    print(f"  ✓ Created Arıza_Nedeni_Tutarlılık (cause consistency)")
+    print(f"  ✓ Avg cause types per equipment: {equipment_df['Arıza_Nedeni_Çeşitlilik'].mean():.2f}")
+    print(f"  ✓ Avg cause consistency: {equipment_df['Arıza_Nedeni_Tutarlılık'].mean():.2%}")
+else:
+    print("\n⚠ Cause code column not found in fault data - skipping cause diversity/consistency features")
 
 # Calculate MTBF
 def calculate_mtbf(row):
