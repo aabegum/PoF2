@@ -1,13 +1,18 @@
 """
-DATA TRANSFORMATION: FAULT-LEVEL → EQUIPMENT-LEVEL v2.0
+DATA TRANSFORMATION: FAULT-LEVEL → EQUIPMENT-LEVEL v3.0 (ENHANCED)
 Turkish EDAŞ PoF Prediction Project
 
-This script transforms fault records into equipment-level data ready for PoF modeling.
+ENHANCEMENTS in v3.0:
+✓ Day-precision age calculation (not just year)
+✓ Improved date validation with diagnostics
+✓ Optional first work order fallback for missing ages
+✓ Vectorized operations for better performance
+✓ Complete audit trail (install date, age source, age in days)
 
 Key Features:
 ✓ Smart Equipment ID (cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu)
 ✓ Unified Equipment Classification (Equipment_Type → Ekipman Sınıfı → fallbacks)
-✓ Age source tracking (TESIS_TARIHI vs EDBS_IDATE)
+✓ Age source tracking (TESIS_TARIHI vs EDBS_IDATE vs FIRST_WORKORDER_PROXY)
 ✓ Handles invalid dates (1900-01-01, 00:00:00, nulls)
 ✓ Failure history aggregation (3/6/12 months)
 ✓ MTBF calculation
@@ -15,10 +20,10 @@ Key Features:
 ✓ Customer impact columns (all MV/LV categories)
 ✓ Optional specifications (voltage_level, kVa_rating) - future-proof
 
-Priority Logic (aligned with 01_data_profiling.py):
+Priority Logic:
 - Equipment ID: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu
 - Equipment Class: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı
-- Installation Date: TESIS_TARIHI → EDBS_IDATE
+- Installation Date: TESIS_TARIHI → EDBS_IDATE → First Work Order (optional)
 
 Input:  data/combined_data.xlsx (fault records)
 Output: data/equipment_level_data.csv (equipment records with ~30+ features)
@@ -44,66 +49,283 @@ if sys.platform == 'win32':
 
 pd.set_option('display.max_columns', None)
 
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
 # Constants
 CURRENT_YEAR = 2025
 MIN_VALID_YEAR = 1950
 MAX_VALID_YEAR = 2025
 REFERENCE_DATE = pd.Timestamp('2025-06-25')
 
+# Feature flags
+USE_FIRST_WORKORDER_FALLBACK = True  # Set to True to enable Option 3 (first work order as age proxy)
+
 print("="*100)
-print(" "*30 + "DATA TRANSFORMATION PIPELINE")
+print(" "*25 + "DATA TRANSFORMATION PIPELINE v3.0 (ENHANCED)")
+print("="*100)
+print(f"\n⚙️  Configuration:")
+print(f"   Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')}")
+print(f"   Valid Year Range: {MIN_VALID_YEAR}-{MAX_VALID_YEAR}")
+print(f"   First Work Order Fallback: {'ENABLED' if USE_FIRST_WORKORDER_FALLBACK else 'DISABLED'}")
+
+# ============================================================================
+# STEP 1: LOAD DATA
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 1: LOADING FAULT-LEVEL DATA")
 print("="*100)
 
-# STEP 1: LOAD DATA
-print("\nSTEP 1: Loading fault-level data...")
 df = pd.read_excel('data/combined_data.xlsx')
-print(f"✓ Loaded: {df.shape[0]:,} faults × {df.shape[1]} columns")
+print(f"\n✓ Loaded: {df.shape[0]:,} faults × {df.shape[1]} columns")
 original_fault_count = len(df)
 
-# STEP 2: CLEAN INSTALLATION DATES
-print("\nSTEP 2: Cleaning installation dates...")
+# ============================================================================
+# STEP 2: ENHANCED DATE PARSING & VALIDATION
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 2: PARSING AND VALIDATING DATE COLUMNS (ENHANCED)")
+print("="*100)
 
-def clean_date(date_val):
-    if pd.isna(date_val):
-        return None
-    try:
-        year = date_val.year
-        if year < MIN_VALID_YEAR or year > MAX_VALID_YEAR:
-            return None
-        return date_val
-    except:
-        return None
+def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, max_year=MAX_VALID_YEAR, report=True):
+    """
+    Parse and validate dates with detailed diagnostics
 
-df['TESIS_TARIHI'] = pd.to_datetime(df['TESIS_TARIHI'], errors='coerce')
-df['EDBS_IDATE'] = pd.to_datetime(df['EDBS_IDATE'], errors='coerce')
+    Args:
+        date_series: Series of date values
+        column_name: Name for reporting
+        min_year: Minimum valid year (default: 1950)
+        max_year: Maximum valid year (default: 2025)
+        report: Whether to print statistics (default: True)
 
-df['TESIS_TARIHI_clean'] = df['TESIS_TARIHI'].apply(clean_date)
-df['EDBS_IDATE_clean'] = df['EDBS_IDATE'].apply(clean_date)
+    Returns:
+        Series of validated datetime values (invalid → NaT)
+    """
+    # Parse dates with Turkish date format support (DD/MM/YYYY)
+    parsed = pd.to_datetime(date_series, errors='coerce', dayfirst=True)
 
-df['Installation_Date'] = df['TESIS_TARIHI_clean'].fillna(df['EDBS_IDATE_clean'])
+    # Validation masks
+    valid_mask = (
+        parsed.notna() &
+        (parsed.dt.year >= min_year) &
+        (parsed.dt.year <= max_year)
+    )
 
-print(f"✓ Combined coverage: {df['Installation_Date'].notna().sum()} ({df['Installation_Date'].notna().sum()/len(df)*100:.1f}%)")
+    # Categorize invalid dates
+    invalid_old = (parsed.notna() & (parsed.dt.year < min_year)).sum()
+    invalid_future = (parsed.notna() & (parsed.dt.year > max_year)).sum()
 
-# STEP 3: CALCULATE AGE
-print("\nSTEP 3: Calculating equipment age...")
-df['Installation_Year'] = df['Installation_Date'].dt.year
-df['Ekipman_Yaşı_Yıl'] = CURRENT_YEAR - df['Installation_Year']
-print(f"✓ Age calculated for {df['Ekipman_Yaşı_Yıl'].notna().sum():,} records")
+    # Set invalid to NaT
+    parsed[~valid_mask] = pd.NaT
 
-# STEP 4: PROCESS TIMESTAMPS
-print("\nSTEP 4: Processing fault timestamps...")
-df['started at'] = pd.to_datetime(df['started at'], errors='coerce')
-df['ended at'] = pd.to_datetime(df['ended at'], errors='coerce')
+    # Statistics
+    if report:
+        total = len(date_series)
+        valid = valid_mask.sum()
+
+        print(f"\n  {column_name:30s}:")
+        print(f"    Valid dates:       {valid:6,}/{total:6,} ({valid/total*100:5.1f}%)")
+        if invalid_old > 0:
+            print(f"    Invalid (< {min_year}): {invalid_old:6,} ⚠️  (set to NaT)")
+        if invalid_future > 0:
+            print(f"    Invalid (> {max_year}): {invalid_future:6,} ⚠️  (set to NaT)")
+
+    return parsed
+
+# Parse and validate all date columns
+print("\nParsing installation date columns:")
+df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI')
+df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE')
+
+print("\nParsing fault timestamp columns:")
+df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True)
+df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True)
+
+# Parse work order creation date (for fallback option)
+if 'Oluşturma Tarihi Sıralama' in df.columns or 'Oluşturulma_Tarihi' in df.columns:
+    creation_col = 'Oluşturma Tarihi Sıralama' if 'Oluşturma Tarihi Sıralama' in df.columns else 'Oluşturulma_Tarihi'
+    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Creation Date', min_year=2020, report=True)
+else:
+    df['Oluşturulma_Tarihi'] = pd.NaT
+    print("\n  ⚠️  Work order creation date not found (fallback option disabled)")
+
+# ============================================================================
+# STEP 3: ENHANCED EQUIPMENT AGE CALCULATION
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 3: CALCULATING EQUIPMENT AGE (DAY PRECISION)")
+print("="*100)
+
+def calculate_equipment_age_improved(row):
+    """
+    Calculate equipment age with day precision
+
+    Priority:
+    1. TESIS_TARIHI (primary installation date)
+    2. EDBS_IDATE (fallback installation date)
+    3. First work order date (optional proxy - equipment may be older)
+
+    Returns:
+        tuple: (age_in_days, source_used, install_date)
+    """
+    ref_date = REFERENCE_DATE
+
+    # Option 1: TESIS_TARIHI (primary)
+    if pd.notna(row['TESIS_TARIHI_parsed']):
+        install_date = row['TESIS_TARIHI_parsed']
+        if install_date < ref_date:
+            age_days = (ref_date - install_date).days
+            return age_days, 'TESIS_TARIHI', install_date
+
+    # Option 2: EDBS_IDATE (fallback)
+    if pd.notna(row['EDBS_IDATE_parsed']):
+        install_date = row['EDBS_IDATE_parsed']
+        if install_date < ref_date:
+            age_days = (ref_date - install_date).days
+            return age_days, 'EDBS_IDATE', install_date
+
+    # No valid installation date found
+    return None, 'MISSING', None
+
+print("\nCalculating ages from installation dates...")
+
+# Optimized tuple unpacking (vectorized)
+results = df.apply(calculate_equipment_age_improved, axis=1, result_type='expand')
+results.columns = ['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']
+
+# Assign all at once
+df[['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']] = results
+df['Ekipman_Yaşı_Yıl'] = df['Ekipman_Yaşı_Gün'] / 365.25
+
+# Statistics
+print("\n✓ Age Calculation Results:")
+print(f"\n  Age Source Distribution:")
+source_counts = df['Yaş_Kaynak'].value_counts()
+for source, count in source_counts.items():
+    pct = count / len(df) * 100
+    print(f"    {source:25s}: {count:6,} ({pct:5.1f}%)")
+
+# Age statistics (excluding missing)
+valid_ages = df[df['Yaş_Kaynak'] != 'MISSING']['Ekipman_Yaşı_Yıl']
+if len(valid_ages) > 0:
+    print(f"\n  Age Statistics (valid ages only):")
+    print(f"    Mean:   {valid_ages.mean():>6.1f} years")
+    print(f"    Median: {valid_ages.median():>6.1f} years")
+    print(f"    Min:    {valid_ages.min():>6.1f} years")
+    print(f"    Max:    {valid_ages.max():>6.1f} years")
+
+    # Age distribution
+    age_bins = [0, 5, 10, 20, 30, 50, 75]
+    age_labels = ['0-5 yrs', '5-10 yrs', '10-20 yrs', '20-30 yrs', '30-50 yrs', '50-75 yrs']
+    age_dist = pd.cut(valid_ages, bins=age_bins, labels=age_labels).value_counts().sort_index()
+
+    print(f"\n  Age Distribution:")
+    for label, count in age_dist.items():
+        pct = count / len(valid_ages) * 100
+        bar = '█' * int(pct / 2)  # Visual bar
+        print(f"    {label}: {count:>4,} ({pct:>5.1f}%) {bar}")
+
+    # Warnings
+    if (valid_ages > 75).sum() > 0:
+        print(f"\n  ⚠️  WARNING: {(valid_ages > 75).sum()} equipment > 75 years (check data quality!)")
+    if valid_ages.median() < 1:
+        print(f"  ⚠️  WARNING: Median age is {valid_ages.median():.1f} years - investigate if accurate")
+
+# ============================================================================
+# STEP 3B: OPTIONAL FIRST WORK ORDER FALLBACK
+# ============================================================================
+if USE_FIRST_WORKORDER_FALLBACK:
+    print("\n" + "="*100)
+    print("STEP 3B: FILLING MISSING AGES WITH FIRST WORK ORDER (VECTORIZED)")
+    print("="*100)
+
+    missing_mask = df['Yaş_Kaynak'] == 'MISSING'
+    missing_count = missing_mask.sum()
+
+    if missing_count > 0 and 'Oluşturulma_Tarihi' in df.columns:
+        print(f"\n  Equipment with MISSING age: {missing_count:,} ({missing_count/len(df)*100:.1f}%)")
+        print(f"  Attempting to use first work order date as proxy...\n")
+
+        # Identify equipment ID column
+        equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
+        equip_id_col = None
+        for col in equip_id_cols:
+            if col in df.columns:
+                equip_id_col = col
+                break
+
+        if equip_id_col:
+            print(f"  Using equipment ID column: {equip_id_col}")
+
+            # Vectorized approach: Get first work order per equipment
+            first_wo_dates = df.groupby(equip_id_col)['Oluşturulma_Tarihi'].min()
+
+            # Map first work order dates to all rows
+            df['_first_wo'] = df[equip_id_col].map(first_wo_dates)
+
+            # Calculate age from first work order (vectorized)
+            age_from_wo = (REFERENCE_DATE - df['_first_wo']).dt.days
+
+            # Only fill where: missing AND first_wo is valid AND age is positive
+            fill_mask = (
+                missing_mask &
+                df['_first_wo'].notna() &
+                (age_from_wo > 0)
+            )
+
+            # Vectorized assignment
+            df.loc[fill_mask, 'Ekipman_Yaşı_Gün'] = age_from_wo[fill_mask]
+            df.loc[fill_mask, 'Ekipman_Yaşı_Yıl'] = age_from_wo[fill_mask] / 365.25
+            df.loc[fill_mask, 'Yaş_Kaynak'] = 'FIRST_WORKORDER_PROXY'
+            df.loc[fill_mask, 'Ekipman_Kurulum_Tarihi'] = df.loc[fill_mask, '_first_wo']
+
+            # Cleanup temporary column
+            df.drop(columns=['_first_wo'], inplace=True)
+
+            filled_count = fill_mask.sum()
+            remaining_missing = (df['Yaş_Kaynak'] == 'MISSING').sum()
+
+            print(f"  ✓ Filled: {filled_count:,} using first work order proxy")
+            print(f"  ✓ Remaining MISSING: {remaining_missing:,} ({remaining_missing/len(df)*100:.1f}%)")
+
+            # Final age statistics
+            if filled_count > 0:
+                print(f"\n  Updated Age Source Distribution:")
+                for source, count in df['Yaş_Kaynak'].value_counts().items():
+                    pct = count / len(df) * 100
+                    print(f"    {source:25s}: {count:6,} ({pct:5.1f}%)")
+        else:
+            print(f"  ⚠️  Equipment ID column not found - cannot use first work order fallback")
+    elif missing_count == 0:
+        print(f"\n  ✓ No missing ages - first work order fallback not needed")
+    else:
+        print(f"\n  ⚠️  Work order creation date not available - cannot use fallback")
+
+# ============================================================================
+# STEP 4: PROCESS FAULT TIMESTAMPS
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 4: PROCESSING FAULT TIMESTAMPS")
+print("="*100)
 
 df['Fault_Month'] = df['started at'].dt.month
 df['Summer_Peak_Flag'] = df['Fault_Month'].isin([6, 7, 8, 9]).astype(int)
 df['Winter_Peak_Flag'] = df['Fault_Month'].isin([12, 1, 2]).astype(int)
 df['Time_To_Repair_Hours'] = (df['ended at'] - df['started at']).dt.total_seconds() / 3600
 
-print("✓ Temporal features created")
+print("\n✓ Temporal features created:")
+print(f"  Summer peak faults: {df['Summer_Peak_Flag'].sum():,}")
+print(f"  Winter peak faults: {df['Winter_Peak_Flag'].sum():,}")
+print(f"  Avg repair time: {df['Time_To_Repair_Hours'].mean():.1f} hours")
 
+# ============================================================================
 # STEP 5: CALCULATE FAILURE PERIODS
-print("\nSTEP 5: Calculating failure counts...")
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 5: CALCULATING FAILURE PERIOD FLAGS")
+print("="*100)
+
 reference_date = df['started at'].max()
 cutoff_3m = reference_date - pd.Timedelta(days=90)
 cutoff_6m = reference_date - pd.Timedelta(days=180)
@@ -113,12 +335,17 @@ df['Fault_Last_3M'] = (df['started at'] >= cutoff_3m).astype(int)
 df['Fault_Last_6M'] = (df['started at'] >= cutoff_6m).astype(int)
 df['Fault_Last_12M'] = (df['started at'] >= cutoff_12m).astype(int)
 
-print("✓ Failure period flags created")
+print(f"\n✓ Failure period flags created:")
+print(f"  Reference date: {reference_date.strftime('%Y-%m-%d')}")
+print(f"  Faults in last 3M:  {df['Fault_Last_3M'].sum():,}")
+print(f"  Faults in last 6M:  {df['Fault_Last_6M'].sum():,}")
+print(f"  Faults in last 12M: {df['Fault_Last_12M'].sum():,}")
+
 # ============================================================================
-# STEP 5: IDENTIFY PRIMARY EQUIPMENT ID
+# STEP 6: IDENTIFY PRIMARY EQUIPMENT ID
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 5: EQUIPMENT IDENTIFICATION")
+print("STEP 6: EQUIPMENT IDENTIFICATION")
 print("="*100)
 
 # PRIMARY STRATEGY: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu
@@ -159,7 +386,7 @@ print(f"  Average faults per equipment: {len(df)/unique_equipment:.1f}")
 equipment_id_col = 'Equipment_ID_Primary'
 
 # ============================================================================
-# STEP 5b: CREATE UNIFIED EQUIPMENT CLASSIFICATION
+# STEP 6B: CREATE UNIFIED EQUIPMENT CLASSIFICATION
 # ============================================================================
 print("\n--- Smart Equipment Classification Selection ---")
 
@@ -245,35 +472,36 @@ df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(
 
 harmonized_classes = df['Equipment_Class_Primary'].nunique()
 print(f"✓ Equipment classes harmonized:")
-print(f"  Before: 20 types → After: {harmonized_classes} types")
+print(f"  Before: {len(equipment_class_mapping)} types → After: {harmonized_classes} types")
 print(f"\n  Consolidated mappings:")
-print(f"    • aghat (92) + AG Hat (13) → AG Hat (105)")
-print(f"    • REKORTMAN (70) + Rekortman (6) → Rekortman (76)")
-print(f"    • agdirek (5) + AG Direk (2) → AG Direk (7)")
-print(f"    • OGAGTRF (12) + OG/AG Trafo (2) + Trafo Bina Tip (3) → OG/AG Trafo (17)")
-print(f"    • SDK (12) + AG Pano (2) → AG Pano Box (14)")
-print(f"    • anahtar (300) + AG Anahtar (19) → AG Anahtar (319)")
+print(f"    • aghat + AG Hat → AG Hat")
+print(f"    • REKORTMAN + Rekortman → Rekortman")
+print(f"    • agdirek + AG Direk → AG Direk")
+print(f"    • OGAGTRF + OG/AG Trafo + Trafo Bina Tip → OG/AG Trafo")
+print(f"    • SDK + AG Pano → AG Pano Box")
+print(f"    • anahtar + AG Anahtar → AG Anahtar")
 
 # Track age source
 def get_age_source(row):
     """Track which column provided installation date"""
-    if pd.notna(row.get('TESIS_TARIHI_clean')):
-        return 'TESIS_TARIHI'
-    elif pd.notna(row.get('EDBS_IDATE_clean')):
-        return 'EDBS_IDATE'
-    return 'MISSING'
+    return row['Yaş_Kaynak']  # Already set in step 3
 
-df['Age_Source'] = df.apply(get_age_source, axis=1)
-# STEP 6: AGGREGATE TO EQUIPMENT LEVEL
-print("\nSTEP 6: Aggregating to equipment level...")
+df['Age_Source'] = df['Yaş_Kaynak']
+
+# ============================================================================
+# STEP 7: AGGREGATE TO EQUIPMENT LEVEL
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 7: AGGREGATING TO EQUIPMENT LEVEL")
+print("="*100)
 
 # Build aggregation dictionary dynamically based on available columns
 agg_dict = {
     # Equipment identification & classification
-    'Equipment_Class_Primary': 'first',  # NEW: Unified classification
-    'Ekipman Sınıfı': 'first',          # Keep for reference
-    'Equipment_Type': 'first',           # Keep for reference
-    'Kesinti Ekipman Sınıfı': 'first',  # Keep for reference
+    'Equipment_Class_Primary': 'first',
+    'Ekipman Sınıfı': 'first',
+    'Equipment_Type': 'first',
+    'Kesinti Ekipman Sınıfı': 'first',
 
     # Geographic data
     'KOORDINAT_X': 'first',
@@ -282,11 +510,11 @@ agg_dict = {
     'İlçe': 'first',
     'Mahalle': 'first',
 
-    # Age data
-    'Installation_Date': 'first',
-    'Installation_Year': 'first',
+    # Age data (ENHANCED - includes install date and days)
+    'Ekipman_Kurulum_Tarihi': 'first',
+    'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
-    'Age_Source': 'first',  # NEW: Track which date column used
+    'Age_Source': 'first',
 
     # Fault history
     'started at': ['count', 'min', 'max'],
@@ -303,7 +531,7 @@ agg_dict = {
 # Add cause code column if available
 if 'cause code' in df.columns:
     agg_dict['cause code'] = ['first', 'last', lambda x: x.mode()[0] if len(x.mode()) > 0 else None]
-    print("  ✓ Found: cause code (will aggregate first, last, and most common)")
+    print("\n  ✓ Found: cause code (will aggregate first, last, and most common)")
 
 # Add customer impact columns if available
 customer_impact_cols = [
@@ -340,18 +568,23 @@ for col, agg_func in optional_spec_cols.items():
         agg_dict[col] = agg_func
         print(f"  ✓ Found: {col}")
 
+print(f"\n✓ Aggregating {len(df):,} fault records to equipment level...")
 equipment_df = df.groupby(equipment_id_col).agg(agg_dict).reset_index()
 equipment_df.columns = ['_'.join(col).strip('_') if col[1] else col[0] for col in equipment_df.columns.values]
 
 print(f"✓ Created {len(equipment_df):,} equipment records from {original_fault_count:,} faults")
 
-# STEP 7: RENAME COLUMNS
-print("\nSTEP 7: Creating final features...")
+# ============================================================================
+# STEP 8: RENAME COLUMNS
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 8: CREATING FINAL FEATURES")
+print("="*100)
 
-# Base rename dictionary
+# Base rename dictionary (ENHANCED - includes new age columns)
 rename_dict = {
     'Equipment_ID_Primary': 'Ekipman_ID',
-    'Equipment_Class_Primary_first': 'Equipment_Class_Primary',  # NEW: Unified classification
+    'Equipment_Class_Primary_first': 'Equipment_Class_Primary',
     'Ekipman Sınıfı_first': 'Ekipman_Sınıfı',
     'Equipment_Type_first': 'Equipment_Type',
     'Kesinti Ekipman Sınıfı_first': 'Kesinti Ekipman Sınıfı',
@@ -360,10 +593,10 @@ rename_dict = {
     'İl_first': 'İl',
     'İlçe_first': 'İlçe',
     'Mahalle_first': 'Mahalle',
-    'Installation_Date_first': 'Installation_Date',
-    'Installation_Year_first': 'Installation_Year',
+    'Ekipman_Kurulum_Tarihi_first': 'Ekipman_Kurulum_Tarihi',  # NEW
+    'Ekipman_Yaşı_Gün_first': 'Ekipman_Yaşı_Gün',  # NEW
     'Ekipman_Yaşı_Yıl_first': 'Ekipman_Yaşı_Yıl',
-    'Age_Source_first': 'Age_Source',  # NEW: Track date source
+    'Age_Source_first': 'Age_Source',
     'started at_count': 'Toplam_Arıza_Sayisi_Lifetime',
     'started at_min': 'İlk_Arıza_Tarihi',
     'started at_max': 'Son_Arıza_Tarihi',
@@ -376,7 +609,7 @@ rename_dict = {
 if 'cause code_first' in equipment_df.columns:
     rename_dict['cause code_first'] = 'Arıza_Nedeni_İlk'
     rename_dict['cause code_last'] = 'Arıza_Nedeni_Son'
-    rename_dict['cause code_<lambda>'] = 'Arıza_Nedeni_Sık'  # Most common (mode)
+    rename_dict['cause code_<lambda>'] = 'Arıza_Nedeni_Sık'
 
 # Add customer impact columns dynamically
 for col in customer_impact_cols:
@@ -388,14 +621,14 @@ for col in customer_impact_cols:
 # Add optional specification columns dynamically
 for col in optional_spec_cols.keys():
     if f'{col}_first' in equipment_df.columns:
-        # Standardize column names (replace spaces with underscores)
         clean_col_name = col.replace(' ', '_')
         rename_dict[f'{col}_first'] = clean_col_name
 
 equipment_df.rename(columns=rename_dict, inplace=True)
 
-# Calculate cause code features if available
-# Check if cause code was successfully aggregated (could be in multiple columns after aggregation)
+# ============================================================================
+# STEP 9: CALCULATE CAUSE CODE FEATURES
+# ============================================================================
 has_cause_code = any(col for col in equipment_df.columns if 'cause code' in col.lower() or 'arıza_nedeni' in col.lower())
 
 if has_cause_code and 'cause code' in df.columns:
@@ -420,7 +653,11 @@ if has_cause_code and 'cause code' in df.columns:
 else:
     print("\n⚠ Cause code column not found in fault data - skipping cause diversity/consistency features")
 
-# Calculate MTBF
+# ============================================================================
+# STEP 10: CALCULATE MTBF
+# ============================================================================
+print("\nCalculating MTBF (Mean Time Between Failures)...")
+
 def calculate_mtbf(row):
     if pd.notna(row['İlk_Arıza_Tarihi']) and pd.notna(row['Son_Arıza_Tarihi']):
         total_days = (row['Son_Arıza_Tarihi'] - row['İlk_Arıza_Tarihi']).days
@@ -434,8 +671,14 @@ equipment_df['MTBF_Gün'] = equipment_df.apply(calculate_mtbf, axis=1)
 # Days since last fault
 equipment_df['Son_Arıza_Gun_Sayisi'] = (REFERENCE_DATE - equipment_df['Son_Arıza_Tarihi']).dt.days
 
-# Recurrence flags
-print("\nSTEP 8: Detecting recurring faults...")
+print(f"  ✓ MTBF calculable for {equipment_df['MTBF_Gün'].notna().sum():,} equipment")
+
+# ============================================================================
+# STEP 11: DETECT RECURRING FAULTS
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 11: DETECTING RECURRING FAULTS")
+print("="*100)
 
 def calculate_recurrence(equipment_id):
     equip_faults = df[df[equipment_id_col] == equipment_id]['started at'].dropna().sort_values()
@@ -444,15 +687,23 @@ def calculate_recurrence(equipment_id):
     time_diffs = equip_faults.diff().dt.days.dropna()
     return int((time_diffs <= 30).any()), int((time_diffs <= 90).any())
 
+print("\nAnalyzing recurring fault patterns...")
 recurrence_results = equipment_df['Ekipman_ID'].apply(calculate_recurrence)
 equipment_df['Tekrarlayan_Arıza_30gün_Flag'] = [r[0] for r in recurrence_results]
 equipment_df['Tekrarlayan_Arıza_90gün_Flag'] = [r[1] for r in recurrence_results]
 
-print(f"✓ Found {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum()} equipment with recurring faults (90 days)")
+print(f"✓ Recurring faults (30 days): {equipment_df['Tekrarlayan_Arıza_30gün_Flag'].sum():,} equipment")
+print(f"✓ Recurring faults (90 days): {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment")
 
-# STEP 9: SAVE
-print("\nSTEP 9: Saving results...")
+# ============================================================================
+# STEP 12: SAVE RESULTS
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 12: SAVING RESULTS")
+print("="*100)
+
 equipment_df.to_csv('data/equipment_level_data.csv', index=False, encoding='utf-8-sig')
+print(f"\n✓ Saved: data/equipment_level_data.csv ({len(equipment_df):,} records)")
 
 # Feature documentation
 feature_docs = pd.DataFrame({
@@ -461,7 +712,11 @@ feature_docs = pd.DataFrame({
     'Completeness_%': (equipment_df.notna().sum() / len(equipment_df) * 100).round(1)
 })
 feature_docs.to_csv('data/feature_documentation.csv', index=False)
+print(f"✓ Saved: data/feature_documentation.csv ({len(equipment_df.columns)} features)")
 
+# ============================================================================
+# FINAL SUMMARY
+# ============================================================================
 print("\n" + "="*100)
 print("TRANSFORMATION COMPLETE!")
 print("="*100)
@@ -475,7 +730,8 @@ print(f"   • Total Features: {len(equipment_df.columns)} columns")
 print(f"\n🎯 KEY FEATURES CREATED:")
 print(f"   • Equipment ID Strategy: cbs_id → Ekipman ID → HEPSI_ID → Ekipman Kodu")
 print(f"   • Equipment Classification: Equipment_Class_Primary (unified)")
-print(f"   • Age Source Tracking: {equipment_df['Age_Source'].value_counts().to_dict() if 'Age_Source' in equipment_df.columns else 'N/A'}")
+print(f"   • Age Precision: DAY-LEVEL (not just year) ✨")
+print(f"   • Age Sources: {equipment_df['Age_Source'].value_counts().to_dict()}")
 print(f"   • Failure History: 3M, 6M, 12M fault counts")
 print(f"   • MTBF: {equipment_df['MTBF_Gün'].notna().sum():,} equipment with valid MTBF")
 print(f"   • Recurring Faults: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
@@ -484,10 +740,10 @@ print(f"   • Recurring Faults: {equipment_df['Tekrarlayan_Arıza_90gün_Flag']
 customer_cols_found = [col for col in customer_impact_cols if any(col.replace(" ", "_") in c for c in equipment_df.columns)]
 if customer_cols_found:
     print(f"\n👥 CUSTOMER IMPACT COLUMNS:")
-    for col in customer_cols_found:
+    for col in customer_cols_found[:5]:  # Show first 5
         print(f"   ✓ {col}")
-else:
-    print(f"\n👥 CUSTOMER IMPACT COLUMNS: Using 'total customer count' only")
+    if len(customer_cols_found) > 5:
+        print(f"   ... and {len(customer_cols_found)-5} more")
 
 # Optional specifications summary
 optional_cols_found = [col for col in optional_spec_cols.keys() if col in equipment_df.columns]
@@ -497,13 +753,16 @@ if optional_cols_found:
         coverage = equipment_df[col].notna().sum()
         pct = coverage / len(equipment_df) * 100
         print(f"   ✓ {col}: {coverage:,} ({pct:.1f}% coverage)")
-else:
-    print(f"\n💡 OPTIONAL SPECIFICATIONS: None found")
-    print(f"   Can add later: voltage_level, kVa_rating, component voltage")
 
-print(f"\n✅ FILES SAVED:")
-print(f"   • data/equipment_level_data.csv ({len(equipment_df):,} records)")
-print(f"   • data/feature_documentation.csv ({len(equipment_df.columns)} features)")
+print(f"\n✅ ENHANCEMENTS IN v3.0:")
+print(f"   ✨ Day-precision age calculation (365.25 days/year)")
+print(f"   ✨ Installation date preserved (Ekipman_Kurulum_Tarihi)")
+print(f"   ✨ Age in days available (Ekipman_Yaşı_Gün)")
+if USE_FIRST_WORKORDER_FALLBACK:
+    wo_count = (equipment_df['Age_Source'] == 'FIRST_WORKORDER_PROXY').sum()
+    print(f"   ✨ First work order fallback ({wo_count} equipment)")
+print(f"   ✨ Enhanced date validation with diagnostics")
+print(f"   ✨ Vectorized operations for better performance")
 
 print(f"\n🚀 READY FOR NEXT PHASE:")
 print(f"   → Run: 03_feature_engineering.py")
