@@ -580,64 +580,260 @@ log_print("\n" + "="*100)
 log_print("STEP 10: MODEL PREDICTIONS ANALYSIS (IF AVAILABLE)")
 log_print("="*100)
 
-# Check if predictions exist
+# Check for different prediction sources
 predictions_dir = Path('predictions')
+results_dir = Path('results')
+
+found_any_predictions = False
+
+# 1. Check for survival analysis predictions (Model 1 - Temporal PoF)
+pof_multi_horizon_path = predictions_dir / 'pof_multi_horizon_predictions.csv'
+if pof_multi_horizon_path.exists():
+    log_print(f"\n--- MODEL 1: TEMPORAL POF PREDICTIONS (Survival Analysis) ---")
+    log_print(f"Found: {pof_multi_horizon_path}")
+
+    pred_df = pd.read_csv(pof_multi_horizon_path)
+    log_print(f"Equipment: {len(pred_df):,}")
+
+    # Analyze multi-horizon predictions
+    for horizon in ['3M', '12M', '24M']:
+        pof_col = f'PoF_Probability_{horizon}'
+        if pof_col in pred_df.columns:
+            mean_pof = pred_df[pof_col].mean()
+            median_pof = pred_df[pof_col].median()
+            log_print(f"\n{horizon} Predictions:")
+            log_print(f"  Mean PoF: {mean_pof:.2%}")
+            log_print(f"  Median PoF: {median_pof:.2%}")
+            log_print(f"  High risk (>40%): {(pred_df[pof_col] > 0.4).sum():,}")
+
+    # Check Risk_Category distribution
+    if 'Risk_Category' in pred_df.columns:
+        log_print(f"\nRisk Category Distribution:")
+        risk_dist = pred_df['Risk_Category'].value_counts()
+        for cat, count in risk_dist.items():
+            pct = count / len(pred_df) * 100
+            log_print(f"  {cat}: {count:,} ({pct:.1f}%)")
+
+    found_any_predictions = True
+
+# 2. Check for risk assessment files (Model 1 + CoF)
+risk_files = {
+    '3M': results_dir / 'risk_assessment_3M.csv',
+    '12M': results_dir / 'risk_assessment_12M.csv',
+    '24M': results_dir / 'risk_assessment_24M.csv'
+}
+
+for horizon, risk_path in risk_files.items():
+    if risk_path.exists():
+        if not found_any_predictions:
+            log_print(f"\n--- RISK ASSESSMENT (PoF × CoF) ---")
+
+        log_print(f"\nFound: {risk_path}")
+        risk_df = pd.read_csv(risk_path)
+
+        log_print(f"{horizon} Risk Assessment:")
+        log_print(f"  Equipment: {len(risk_df):,}")
+
+        if 'Risk_Score' in risk_df.columns:
+            mean_risk = risk_df['Risk_Score'].mean()
+            log_print(f"  Mean Risk Score: {mean_risk:.1f}/100")
+
+        if 'Risk_Category' in risk_df.columns:
+            risk_cat_dist = risk_df['Risk_Category'].value_counts()
+            for cat, count in risk_cat_dist.items():
+                pct = count / len(risk_df) * 100
+                log_print(f"    {cat}: {count:,} ({pct:.1f}%)")
+
+        found_any_predictions = True
+
+# 3. Check for CAPEX priority list
+capex_path = results_dir / 'capex_priority_list.csv'
+if capex_path.exists():
+    log_print(f"\n--- CAPEX PRIORITY LIST ---")
+    log_print(f"Found: {capex_path}")
+
+    capex_df = pd.read_csv(capex_path)
+    log_print(f"Top priority equipment: {len(capex_df):,}")
+
+    if 'Recommended_Action' in capex_df.columns:
+        action_dist = capex_df['Recommended_Action'].value_counts()
+        log_print(f"\nRecommended Actions:")
+        for action, count in action_dist.items():
+            log_print(f"  {action}: {count:,}")
+
+    found_any_predictions = True
+
+# 4. Check for legacy Model 2 predictions (chronic repeater)
 if predictions_dir.exists():
-    pred_files = list(predictions_dir.glob('predictions_*.csv'))
-    
+    pred_files = list(predictions_dir.glob('failure_predictions_*.csv'))
+
     if pred_files:
-        log_print(f"\n--- Found {len(pred_files)} Prediction Files ---")
-        
+        log_print(f"\n--- MODEL 2: CHRONIC REPEATER PREDICTIONS ---")
+        log_print(f"Found {len(pred_files)} prediction files")
+
         for pred_file in pred_files:
-            log_print(f"\nAnalyzing: {pred_file.name}")
             pred_df = pd.read_csv(pred_file)
-            
+            horizon = pred_file.stem.split('_')[-1]
+
+            log_print(f"\n{horizon.upper()} Predictions ({pred_file.name}):")
+            log_print(f"  Equipment: {len(pred_df):,}")
+
+            if 'Failure_Probability' in pred_df.columns:
+                mean_prob = pred_df['Failure_Probability'].mean()
+                log_print(f"  Mean Failure Probability: {mean_prob:.2%}")
+
             if 'Risk_Level' in pred_df.columns:
                 risk_dist = pred_df['Risk_Level'].value_counts()
-                log_print(f"  Risk Distribution:")
                 for risk, count in risk_dist.items():
                     pct = count / len(pred_df) * 100
                     log_print(f"    {risk}: {count:,} ({pct:.1f}%)")
-        
-        # Visualize latest predictions (12M)
-        pred_12m_path = predictions_dir / 'predictions_12m.csv'
-        if pred_12m_path.exists():
-            pred_df = pd.read_csv(pred_12m_path)
-            
-            fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-            
-            # Risk distribution
-            if 'Risk_Level' in pred_df.columns:
-                ax = axes[0]
-                risk_dist = pred_df['Risk_Level'].value_counts()
-                colors = {'Critical': 'red', 'High': 'orange', 'Medium': 'yellow', 'Low': 'green'}
-                plot_colors = [colors.get(risk, 'gray') for risk in risk_dist.index]
-                
-                ax.bar(risk_dist.index, risk_dist.values, color=plot_colors, alpha=0.7)
-                ax.set_xlabel('Risk Level', fontsize=11)
+
+        found_any_predictions = True
+
+# Visualizations
+if found_any_predictions:
+    log_print("\n--- Creating Prediction Visualizations ---")
+
+    # Priority: Visualize risk assessment if available, otherwise survival analysis, otherwise legacy
+    viz_created = False
+
+    # Try risk assessment first (most comprehensive)
+    risk_12m_path = results_dir / 'risk_assessment_12M.csv'
+    if risk_12m_path.exists():
+        risk_df = pd.read_csv(risk_12m_path)
+
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+        # 1. Risk Score distribution
+        if 'Risk_Score' in risk_df.columns:
+            ax = axes[0, 0]
+            ax.hist(risk_df['Risk_Score'], bins=50, edgecolor='black', alpha=0.7, color='#e74c3c')
+            ax.set_xlabel('Risk Score (0-100)', fontsize=11)
+            ax.set_ylabel('Number of Equipment', fontsize=11)
+            ax.set_title('Risk Score Distribution (12M)', fontsize=13, fontweight='bold')
+            ax.axvline(risk_df['Risk_Score'].mean(), color='blue', linestyle='--',
+                      label=f'Mean: {risk_df["Risk_Score"].mean():.1f}')
+            ax.axvline(70, color='red', linestyle='--', linewidth=2, label='High Risk Threshold')
+            ax.legend()
+            ax.grid(alpha=0.3)
+
+        # 2. Risk Category distribution
+        if 'Risk_Category' in risk_df.columns:
+            ax = axes[0, 1]
+            risk_cat_dist = risk_df['Risk_Category'].value_counts()
+            colors_cat = {'DÜŞÜK': '#2ecc71', 'ORTA': '#f39c12', 'YÜKSEK': '#e74c3c', 'KRİTİK': '#c0392b'}
+            plot_colors = [colors_cat.get(cat, 'gray') for cat in risk_cat_dist.index]
+
+            ax.bar(risk_cat_dist.index, risk_cat_dist.values, color=plot_colors, alpha=0.7, edgecolor='black')
+            ax.set_xlabel('Risk Category', fontsize=11)
+            ax.set_ylabel('Number of Equipment', fontsize=11)
+            ax.set_title('Risk Category Distribution (12M)', fontsize=13, fontweight='bold')
+            ax.grid(axis='y', alpha=0.3)
+
+            # Add value labels
+            for i, (cat, count) in enumerate(risk_cat_dist.items()):
+                pct = count / len(risk_df) * 100
+                ax.text(i, count + max(risk_cat_dist.values)*0.02, f'{count:,}\n({pct:.1f}%)',
+                       ha='center', va='bottom', fontweight='bold', fontsize=9)
+
+        # 3. PoF vs CoF scatter
+        if 'PoF_Probability' in risk_df.columns and 'CoF_Score' in risk_df.columns:
+            ax = axes[1, 0]
+            scatter = ax.scatter(risk_df['PoF_Probability'] * 100, risk_df['CoF_Score'],
+                               c=risk_df['Risk_Score'], cmap='RdYlGn_r',
+                               s=50, alpha=0.6, edgecolors='black', linewidth=0.5)
+            ax.set_xlabel('Probability of Failure (%)', fontsize=11)
+            ax.set_ylabel('Consequence of Failure Score', fontsize=11)
+            ax.set_title('Risk Matrix: PoF vs CoF (12M)', fontsize=13, fontweight='bold')
+            ax.grid(alpha=0.3)
+
+            # Add colorbar
+            cbar = plt.colorbar(scatter, ax=ax)
+            cbar.set_label('Risk Score', rotation=270, labelpad=15)
+
+            # Add quadrant lines
+            ax.axhline(50, color='gray', linestyle='--', alpha=0.5)
+            ax.axvline(50, color='gray', linestyle='--', alpha=0.5)
+
+        # 4. Risk by equipment class
+        if 'Ekipman_Sınıfı' in risk_df.columns and 'Risk_Score' in risk_df.columns:
+            ax = axes[1, 1]
+
+            # Get top equipment classes
+            top_classes = risk_df['Ekipman_Sınıfı'].value_counts().head(10).index
+            class_risk = risk_df[risk_df['Ekipman_Sınıfı'].isin(top_classes)].groupby('Ekipman_Sınıfı')['Risk_Score'].mean()
+            class_risk = class_risk.sort_values(ascending=False)
+
+            ax.barh(range(len(class_risk)), class_risk.values, color='#e74c3c', alpha=0.7, edgecolor='black')
+            ax.set_yticks(range(len(class_risk)))
+            ax.set_yticklabels(class_risk.index, fontsize=9)
+            ax.set_xlabel('Average Risk Score', fontsize=11)
+            ax.set_ylabel('Equipment Class', fontsize=11)
+            ax.set_title('Average Risk by Equipment Class (Top 10)', fontsize=12, fontweight='bold')
+            ax.invert_yaxis()
+            ax.grid(axis='x', alpha=0.3)
+            ax.axvline(70, color='red', linestyle='--', linewidth=2, alpha=0.7, label='High Risk')
+            ax.legend()
+
+            # Add value labels
+            for i, val in enumerate(class_risk.values):
+                ax.text(val + 1, i, f'{val:.1f}', va='center', fontsize=8)
+
+        plt.tight_layout()
+        plt.savefig('outputs/eda/10_model_predictions.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        log_print("\n✓ Saved: outputs/eda/10_model_predictions.png")
+        viz_created = True
+
+    # Fallback to survival analysis visualization
+    elif pof_multi_horizon_path.exists() and not viz_created:
+        pred_df = pd.read_csv(pof_multi_horizon_path)
+
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+        # Plot PoF distributions for each horizon
+        horizons_to_plot = ['3M', '12M', '24M']
+        ax_idx = 0
+
+        for horizon in horizons_to_plot:
+            pof_col = f'PoF_Probability_{horizon}'
+            if pof_col in pred_df.columns and ax_idx < 3:
+                ax = axes.flat[ax_idx]
+                ax.hist(pred_df[pof_col] * 100, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
+                ax.set_xlabel(f'PoF Probability ({horizon}) %', fontsize=11)
                 ax.set_ylabel('Number of Equipment', fontsize=11)
-                ax.set_title('Model Predictions - 12M Risk Distribution', fontsize=13, fontweight='bold')
-                ax.grid(axis='y', alpha=0.3)
-            
-            # Risk score distribution
-            if 'Risk_Score' in pred_df.columns:
-                ax = axes[1]
-                ax.hist(pred_df['Risk_Score'], bins=50, edgecolor='black', alpha=0.7, color='steelblue')
-                ax.set_xlabel('Risk Score', fontsize=11)
-                ax.set_ylabel('Number of Equipment', fontsize=11)
-                ax.set_title('Model Predictions - 12M Risk Score Distribution', fontsize=13, fontweight='bold')
-                ax.axvline(50, color='red', linestyle='--', label='High Risk Threshold')
+                ax.set_title(f'PoF Distribution - {horizon} Horizon', fontsize=12, fontweight='bold')
+                ax.axvline(pred_df[pof_col].mean() * 100, color='red', linestyle='--',
+                          label=f'Mean: {pred_df[pof_col].mean():.2%}')
                 ax.legend()
                 ax.grid(alpha=0.3)
-            
-            plt.tight_layout()
-            plt.savefig('outputs/eda/10_model_predictions.png', dpi=300, bbox_inches='tight')
-            plt.close()
-            log_print("\n✓ Saved: outputs/eda/10_model_predictions.png")
-    else:
-        log_print("\n⚠️  No prediction files found. Run 06_model_training.py first to see prediction analysis.")
-else:
-    log_print("\n⚠️  Predictions directory not found. Run 06_model_training.py first.")
+                ax_idx += 1
+
+        # Risk category if available
+        if 'Risk_Category' in pred_df.columns:
+            ax = axes.flat[3]
+            risk_dist = pred_df['Risk_Category'].value_counts()
+            colors_cat = {'DÜŞÜK': 'green', 'ORTA': 'yellow', 'YÜKSEK': 'orange'}
+            plot_colors = [colors_cat.get(cat, 'gray') for cat in risk_dist.index]
+
+            ax.bar(risk_dist.index, risk_dist.values, color=plot_colors, alpha=0.7)
+            ax.set_xlabel('Risk Category', fontsize=11)
+            ax.set_ylabel('Number of Equipment', fontsize=11)
+            ax.set_title('Risk Category Distribution', fontsize=13, fontweight='bold')
+            ax.grid(axis='y', alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig('outputs/eda/10_model_predictions.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        log_print("\n✓ Saved: outputs/eda/10_model_predictions.png")
+        viz_created = True
+
+if not found_any_predictions:
+    log_print("\n⚠️  No prediction files found.")
+    log_print("Run one of the following to generate predictions:")
+    log_print("  • 06_model_training.py (Model 2: Chronic repeater classifier)")
+    log_print("  • 09_survival_analysis.py (Model 1: Temporal PoF predictor)")
+    log_print("  • 10_consequence_of_failure.py (Risk = PoF × CoF)")
 
 # ============================================================================
 # STEP 11: VOLTAGE-LEVEL ANALYSIS (NEW - From Step 9B)
@@ -1149,6 +1345,379 @@ plt.close()
 log_print("\n✓ Saved: outputs/eda/14_customer_loading_analysis.png")
 
 # ============================================================================
+# STEP 15: CAUSE CODE ANALYSIS (MODULE 3 REQUIREMENT)
+# ============================================================================
+log_print("\n" + "="*100)
+log_print("STEP 15: CAUSE CODE ANALYSIS (MODULE 3)")
+log_print("="*100)
+
+# Check for cause code columns
+cause_code_cols = {
+    'Arıza_Nedeni_İlk': 'First Cause',
+    'Arıza_Nedeni_Son': 'Last Cause',
+    'Arıza_Nedeni_Sık': 'Most Common Cause',
+    'Arıza_Nedeni_Çeşitlilik': 'Cause Diversity',
+    'Arıza_Nedeni_Tutarlılık': 'Cause Consistency',
+    'Tek_Neden_Flag': 'Single Dominant Cause Flag',
+    'Çok_Nedenli_Flag': 'Multiple Causes Flag',
+    'Neden_Değişim_Flag': 'Cause Changed Flag',
+    'Ekipman_Neden_Risk_Skoru': 'Equipment×Cause Risk Score'
+}
+
+available_cause_cols = {k: v for k, v in cause_code_cols.items() if k in df.columns}
+
+if available_cause_cols:
+    log_print(f"\n✓ Found {len(available_cause_cols)} cause code features:")
+    for col, desc in available_cause_cols.items():
+        log_print(f"  • {col}: {desc}")
+
+    # Cause code statistics
+    log_print("\n--- Cause Code Statistics ---")
+
+    # Cause diversity
+    if 'Arıza_Nedeni_Çeşitlilik' in df.columns:
+        diversity_stats = df['Arıza_Nedeni_Çeşitlilik'].describe()
+        log_print(f"\nCause Diversity (types per equipment):")
+        log_print(f"  Mean: {diversity_stats['mean']:.2f} types")
+        log_print(f"  Median: {diversity_stats['50%']:.0f} types")
+        log_print(f"  Max: {diversity_stats['max']:.0f} types")
+
+    # Cause consistency
+    if 'Arıza_Nedeni_Tutarlılık' in df.columns:
+        consistency_stats = df['Arıza_Nedeni_Tutarlılık'].describe()
+        log_print(f"\nCause Consistency (% of failures with most common cause):")
+        log_print(f"  Mean: {consistency_stats['mean']:.2%}")
+        log_print(f"  Median: {consistency_stats['50%']:.2%}")
+        log_print(f"  Equipment with 100% consistency: {(df['Arıza_Nedeni_Tutarlılık'] == 1.0).sum():,}")
+
+    # Single dominant cause flag
+    if 'Tek_Neden_Flag' in df.columns:
+        tek_neden_count = df['Tek_Neden_Flag'].sum()
+        tek_neden_pct = tek_neden_count / len(df) * 100
+        log_print(f"\nSingle Dominant Cause (≥80% consistency):")
+        log_print(f"  Equipment count: {tek_neden_count:,} ({tek_neden_pct:.1f}%)")
+
+        # Impact on failures
+        if 'Arıza_Sayısı_12ay' in df.columns:
+            tek_neden_failures = df[df['Tek_Neden_Flag'] == 1]['Arıza_Sayısı_12ay'].mean()
+            multi_neden_failures = df[df['Tek_Neden_Flag'] == 0]['Arıza_Sayısı_12ay'].mean()
+            log_print(f"  Avg 12M failures (single cause): {tek_neden_failures:.2f}")
+            log_print(f"  Avg 12M failures (multiple causes): {multi_neden_failures:.2f}")
+
+    # Multiple causes flag
+    if 'Çok_Nedenli_Flag' in df.columns:
+        multi_count = df['Çok_Nedenli_Flag'].sum()
+        multi_pct = multi_count / len(df) * 100
+        log_print(f"\nMultiple Causes (≥3 different types):")
+        log_print(f"  Equipment count: {multi_count:,} ({multi_pct:.1f}%)")
+
+    # Cause evolution
+    if 'Neden_Değişim_Flag' in df.columns:
+        changed_count = df['Neden_Değişim_Flag'].sum()
+        changed_pct = changed_count / len(df) * 100
+        log_print(f"\nCause Evolution (first ≠ last):")
+        log_print(f"  Equipment count: {changed_count:,} ({changed_pct:.1f}%)")
+
+    # Most common causes
+    if 'Arıza_Nedeni_Sık' in df.columns:
+        log_print(f"\n--- Most Common Cause Codes ---")
+        cause_dist = df['Arıza_Nedeni_Sık'].value_counts().head(15)
+        log_print(f"\nTop 15 Cause Codes:")
+        for i, (cause, count) in enumerate(cause_dist.items(), 1):
+            pct = count / df['Arıza_Nedeni_Sık'].notna().sum() * 100
+            log_print(f"  {i:2d}. {cause}: {count:,} ({pct:.1f}%)")
+
+    # Equipment Class × Cause Code analysis
+    if 'Equipment_Class_Primary' in df.columns and 'Arıza_Nedeni_Sık' in df.columns:
+        log_print(f"\n--- Equipment Class × Cause Code Patterns ---")
+
+        # Get top equipment classes and causes
+        top_classes = df['Equipment_Class_Primary'].value_counts().head(8).index
+        top_causes = df['Arıza_Nedeni_Sık'].value_counts().head(10).index
+
+        # Create crosstab
+        class_cause_ct = pd.crosstab(
+            df[df['Equipment_Class_Primary'].isin(top_classes)]['Equipment_Class_Primary'],
+            df[df['Arıza_Nedeni_Sık'].isin(top_causes)]['Arıza_Nedeni_Sık']
+        )
+
+        log_print(f"\nCrosstab created: {len(class_cause_ct)} classes × {len(class_cause_ct.columns)} causes")
+
+    # Visualizations
+    fig, axes = plt.subplots(2, 2, figsize=(18, 14))
+
+    # 1. Cause consistency distribution
+    if 'Arıza_Nedeni_Tutarlılık' in df.columns:
+        ax = axes[0, 0]
+        consistency_data = df['Arıza_Nedeni_Tutarlılık'].dropna()
+        ax.hist(consistency_data, bins=50, edgecolor='black', alpha=0.7, color='#3498db')
+        ax.set_xlabel('Cause Consistency (0=diverse, 1=single cause)', fontsize=11)
+        ax.set_ylabel('Number of Equipment', fontsize=11)
+        ax.set_title('Cause Consistency Distribution', fontsize=13, fontweight='bold')
+        ax.axvline(0.8, color='red', linestyle='--', linewidth=2,
+                   label=f'80% threshold (Tek_Neden_Flag)')
+        ax.axvline(consistency_data.mean(), color='orange', linestyle='--',
+                   label=f'Mean: {consistency_data.mean():.2%}')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+    # 2. Top cause codes distribution
+    if 'Arıza_Nedeni_Sık' in df.columns:
+        ax = axes[0, 1]
+        cause_dist = df['Arıza_Nedeni_Sık'].value_counts().head(15)
+        ax.barh(range(len(cause_dist)), cause_dist.values, color='#e74c3c', alpha=0.7)
+        ax.set_yticks(range(len(cause_dist)))
+        ax.set_yticklabels(cause_dist.index, fontsize=9)
+        ax.set_xlabel('Number of Equipment', fontsize=11)
+        ax.set_ylabel('Cause Code', fontsize=11)
+        ax.set_title('Top 15 Most Common Cause Codes', fontsize=13, fontweight='bold')
+        ax.invert_yaxis()
+        ax.grid(axis='x', alpha=0.3)
+
+        # Add value labels
+        for i, val in enumerate(cause_dist.values):
+            ax.text(val + 5, i, f'{val:,}', va='center', fontsize=8)
+
+    # 3. Equipment Class × Cause Code heatmap
+    if 'Equipment_Class_Primary' in df.columns and 'Arıza_Nedeni_Sık' in df.columns:
+        ax = axes[1, 0]
+
+        # Normalize by row (equipment class)
+        class_cause_pct = class_cause_ct.div(class_cause_ct.sum(axis=1), axis=0) * 100
+
+        # Create heatmap
+        im = ax.imshow(class_cause_pct.values, cmap='YlOrRd', aspect='auto')
+        ax.set_xticks(range(len(class_cause_pct.columns)))
+        ax.set_yticks(range(len(class_cause_pct.index)))
+        ax.set_xticklabels(class_cause_pct.columns, rotation=45, ha='right', fontsize=8)
+        ax.set_yticklabels(class_cause_pct.index, fontsize=9)
+        ax.set_xlabel('Cause Code', fontsize=11)
+        ax.set_ylabel('Equipment Class', fontsize=11)
+        ax.set_title('Equipment Class × Cause Code Heatmap (%)', fontsize=13, fontweight='bold')
+
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Percentage', rotation=270, labelpad=15)
+
+        # Add text annotations (only for larger cells)
+        for i in range(len(class_cause_pct.index)):
+            for j in range(len(class_cause_pct.columns)):
+                val = class_cause_pct.iloc[i, j]
+                if val > 5:  # Only show if > 5%
+                    ax.text(j, i, f'{val:.0f}', ha="center", va="center",
+                           color="black" if val < 50 else "white", fontsize=7)
+
+    # 4. Tek_Neden_Flag impact on failures
+    if 'Tek_Neden_Flag' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
+        ax = axes[1, 1]
+
+        # Box plot comparing single vs multiple cause equipment
+        tek_neden_data = df[df['Tek_Neden_Flag'] == 1]['Arıza_Sayısı_12ay'].dropna()
+        multi_neden_data = df[df['Tek_Neden_Flag'] == 0]['Arıza_Sayısı_12ay'].dropna()
+
+        bp = ax.boxplot([tek_neden_data, multi_neden_data],
+                        labels=['Single Dominant Cause', 'Multiple Causes'],
+                        patch_artist=True)
+
+        # Color boxes
+        bp['boxes'][0].set_facecolor('#2ecc71')
+        bp['boxes'][1].set_facecolor('#e67e22')
+        for box in bp['boxes']:
+            box.set_alpha(0.7)
+
+        ax.set_ylabel('12M Failures', fontsize=11)
+        ax.set_title('Failure Rate: Single vs Multiple Causes', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add mean markers
+        means = [tek_neden_data.mean(), multi_neden_data.mean()]
+        ax.scatter([1, 2], means, color='red', s=100, zorder=5, marker='D',
+                  label='Mean', edgecolors='black', linewidth=1)
+        ax.legend()
+
+    plt.tight_layout()
+    plt.savefig('outputs/eda/15_cause_code_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    log_print("\n✓ Saved: outputs/eda/15_cause_code_analysis.png")
+else:
+    log_print("\n⚠️  No cause code features found - run 02_data_transformation.py and 03_feature_engineering.py first")
+
+# ============================================================================
+# STEP 16: RECURRING FAILURE (CHRONIC REPEATER) ANALYSIS
+# ============================================================================
+log_print("\n" + "="*100)
+log_print("STEP 16: RECURRING FAILURE (CHRONIC REPEATER) ANALYSIS")
+log_print("="*100)
+
+recurring_30d_col = 'Tekrarlayan_Arıza_30gün_Flag'
+recurring_90d_col = 'Tekrarlayan_Arıza_90gün_Flag'
+
+has_recurring = recurring_30d_col in df.columns or recurring_90d_col in df.columns
+
+if has_recurring:
+    log_print("\n--- Recurring Failure Statistics ---")
+
+    # 30-day recurring
+    if recurring_30d_col in df.columns:
+        count_30d = df[recurring_30d_col].sum()
+        pct_30d = count_30d / len(df) * 100
+        log_print(f"\n30-Day Recurring Failures:")
+        log_print(f"  Equipment count: {count_30d:,} ({pct_30d:.1f}%)")
+        log_print(f"  Definition: At least 2 failures within 30 days")
+
+    # 90-day recurring
+    if recurring_90d_col in df.columns:
+        count_90d = df[recurring_90d_col].sum()
+        pct_90d = count_90d / len(df) * 100
+        log_print(f"\n90-Day Recurring Failures:")
+        log_print(f"  Equipment count: {count_90d:,} ({pct_90d:.1f}%)")
+        log_print(f"  Definition: At least 2 failures within 90 days")
+
+    # Recurring vs MTBF
+    if recurring_90d_col in df.columns and 'MTBF_Gün' in df.columns:
+        recurring_mtbf = df[df[recurring_90d_col] == 1]['MTBF_Gün'].mean()
+        non_recurring_mtbf = df[df[recurring_90d_col] == 0]['MTBF_Gün'].mean()
+        log_print(f"\nMTBF Comparison:")
+        log_print(f"  Recurring equipment: {recurring_mtbf:.1f} days")
+        log_print(f"  Non-recurring equipment: {non_recurring_mtbf:.1f} days")
+        log_print(f"  Difference: {non_recurring_mtbf - recurring_mtbf:.1f} days")
+
+    # Recurring by equipment class
+    if recurring_90d_col in df.columns and 'Equipment_Class_Primary' in df.columns:
+        log_print(f"\n--- Recurring Rate by Equipment Class ---")
+
+        class_recurring = df.groupby('Equipment_Class_Primary')[recurring_90d_col].agg(['sum', 'count', 'mean'])
+        class_recurring = class_recurring.sort_values('mean', ascending=False).head(10)
+
+        log_print(f"\nTop 10 Classes by Recurring Rate:")
+        for i, (cls, row) in enumerate(class_recurring.iterrows(), 1):
+            recurring_pct = row['mean'] * 100
+            log_print(f"  {i:2d}. {cls:<25} {row['sum']:>4.0f}/{row['count']:<4.0f} ({recurring_pct:>5.1f}%)")
+
+    # Recurring by district
+    if recurring_90d_col in df.columns and 'İlçe' in df.columns:
+        log_print(f"\n--- Recurring Rate by District ---")
+
+        district_recurring = df.groupby('İlçe')[recurring_90d_col].agg(['sum', 'count', 'mean'])
+        district_recurring = district_recurring.sort_values('mean', ascending=False)
+
+        log_print(f"\nAll Districts:")
+        for district, row in district_recurring.iterrows():
+            recurring_pct = row['mean'] * 100
+            log_print(f"  {district:<20} {row['sum']:>4.0f}/{row['count']:<4.0f} ({recurring_pct:>5.1f}%)")
+
+    # Visualizations
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+
+    # 1. 30-day vs 90-day comparison
+    ax = axes[0, 0]
+    recurring_data = []
+    recurring_labels = []
+
+    if recurring_30d_col in df.columns:
+        count_30d = df[recurring_30d_col].sum()
+        recurring_data.append(count_30d)
+        recurring_labels.append(f'30-Day\n({count_30d:,})')
+
+    if recurring_90d_col in df.columns:
+        count_90d = df[recurring_90d_col].sum()
+        recurring_data.append(count_90d)
+        recurring_labels.append(f'90-Day\n({count_90d:,})')
+
+    if recurring_data:
+        colors = ['#e74c3c', '#e67e22'][:len(recurring_data)]
+        ax.bar(recurring_labels, recurring_data, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_ylabel('Number of Equipment', fontsize=11)
+        ax.set_title('Recurring Failure Equipment Count', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add percentage labels
+        for i, (label, count) in enumerate(zip(recurring_labels, recurring_data)):
+            pct = count / len(df) * 100
+            ax.text(i, count + max(recurring_data)*0.02, f'{pct:.1f}%',
+                   ha='center', va='bottom', fontweight='bold')
+
+    # 2. Recurring rate by equipment class
+    if recurring_90d_col in df.columns and 'Equipment_Class_Primary' in df.columns:
+        ax = axes[0, 1]
+
+        class_recurring_rate = df.groupby('Equipment_Class_Primary')[recurring_90d_col].mean() * 100
+        class_recurring_rate = class_recurring_rate.sort_values(ascending=False).head(12)
+
+        ax.barh(range(len(class_recurring_rate)), class_recurring_rate.values,
+               color='#e74c3c', alpha=0.7, edgecolor='black')
+        ax.set_yticks(range(len(class_recurring_rate)))
+        ax.set_yticklabels(class_recurring_rate.index, fontsize=9)
+        ax.set_xlabel('Recurring Failure Rate (%)', fontsize=11)
+        ax.set_ylabel('Equipment Class', fontsize=11)
+        ax.set_title('Recurring Rate by Equipment Class (Top 12)', fontsize=12, fontweight='bold')
+        ax.invert_yaxis()
+        ax.grid(axis='x', alpha=0.3)
+
+        # Add value labels
+        for i, val in enumerate(class_recurring_rate.values):
+            ax.text(val + 0.5, i, f'{val:.1f}%', va='center', fontsize=8)
+
+    # 3. Geographic distribution (district)
+    if recurring_90d_col in df.columns and 'İlçe' in df.columns:
+        ax = axes[1, 0]
+
+        district_recurring = df.groupby('İlçe')[recurring_90d_col].sum().sort_values(ascending=False)
+
+        colors_dist = ['#e74c3c' if d == 'Salihli' else '#3498db' if d == 'Alaşehir' else '#2ecc71'
+                      for d in district_recurring.index]
+
+        ax.bar(district_recurring.index, district_recurring.values,
+              color=colors_dist, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('District', fontsize=11)
+        ax.set_ylabel('Recurring Equipment Count', fontsize=11)
+        ax.set_title('Chronic Repeaters by District (90-day)', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add value labels
+        for i, (district, count) in enumerate(district_recurring.items()):
+            ax.text(i, count + max(district_recurring.values)*0.02, f'{count:.0f}',
+                   ha='center', va='bottom', fontweight='bold', fontsize=9)
+
+    # 4. Recurring vs Non-Recurring MTBF comparison
+    if recurring_90d_col in df.columns and 'MTBF_Gün' in df.columns:
+        ax = axes[1, 1]
+
+        recurring_mtbf_data = df[df[recurring_90d_col] == 1]['MTBF_Gün'].dropna()
+        non_recurring_mtbf_data = df[df[recurring_90d_col] == 0]['MTBF_Gün'].dropna()
+
+        # Filter outliers for better visualization
+        recurring_mtbf_capped = recurring_mtbf_data[recurring_mtbf_data < recurring_mtbf_data.quantile(0.95)]
+        non_recurring_mtbf_capped = non_recurring_mtbf_data[non_recurring_mtbf_data < non_recurring_mtbf_data.quantile(0.95)]
+
+        bp = ax.boxplot([recurring_mtbf_capped, non_recurring_mtbf_capped],
+                        labels=['Recurring\n(90-day)', 'Non-Recurring'],
+                        patch_artist=True)
+
+        # Color boxes
+        bp['boxes'][0].set_facecolor('#e74c3c')
+        bp['boxes'][1].set_facecolor('#2ecc71')
+        for box in bp['boxes']:
+            box.set_alpha(0.7)
+
+        ax.set_ylabel('MTBF (Days)', fontsize=11)
+        ax.set_title('MTBF: Recurring vs Non-Recurring Equipment', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+        # Add mean markers
+        means = [recurring_mtbf_capped.mean(), non_recurring_mtbf_capped.mean()]
+        ax.scatter([1, 2], means, color='blue', s=100, zorder=5, marker='D',
+                  label=f'Mean', edgecolors='black', linewidth=1)
+        ax.legend()
+
+    plt.tight_layout()
+    plt.savefig('outputs/eda/16_recurring_failure_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    log_print("\n✓ Saved: outputs/eda/16_recurring_failure_analysis.png")
+else:
+    log_print("\n⚠️  No recurring failure columns found - run 02_data_transformation.py first")
+
+# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
 log_print("\n" + "="*100)
@@ -1176,10 +1745,13 @@ log_print(f"   3. Equipment age vs failure relationship")
 log_print(f"   4. Geographic cluster patterns")
 log_print(f"   5. Risk category distribution")
 log_print(f"   6. Feature correlations and relationships")
-log_print(f"   7. Voltage-level failure patterns (MV vs LV) [NEW]")
-log_print(f"   8. Urban vs Rural infrastructure analysis [NEW]")
-log_print(f"   9. Seasonal failure patterns [NEW]")
-log_print(f"   10. Customer ratios and loading intensity [NEW]")
+log_print(f"   7. Voltage-level failure patterns (MV vs LV)")
+log_print(f"   8. Urban vs Rural infrastructure analysis")
+log_print(f"   9. Seasonal failure patterns")
+log_print(f"   10. Customer ratios and loading intensity")
+log_print(f"   11. Cause code analysis and Equipment×Cause interactions [NEW]")
+log_print(f"   12. Recurring failure (chronic repeater) patterns [NEW]")
+log_print(f"   13. Model predictions (PoF, CoF, Risk assessment) [ENHANCED]")
 
 log_print("\n" + "="*100)
 log_print("EDA PIPELINE COMPLETE")
