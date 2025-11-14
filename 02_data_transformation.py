@@ -120,6 +120,16 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         (parsed.dt.year <= max_year)
     )
 
+    # Additional check: reject Excel default/null dates (1900-01-01 00:00:00, etc.)
+    # These are commonly "00:00:00" time-only values or Excel's epoch for NULL
+    invalid_excel_null = 0
+    excel_null_mask = (
+        parsed.notna() &
+        (parsed.dt.year <= 1900)  # Reject all dates in 1900 or earlier
+    )
+    invalid_excel_null = excel_null_mask.sum()
+    valid_mask = valid_mask & ~excel_null_mask
+
     # Additional check: reject dates too close to reference date (likely Excel =TODAY() defaults)
     invalid_recent = 0
     if reject_recent_days is not None:
@@ -128,8 +138,8 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         invalid_recent = (parsed.notna() & recent_mask).sum()
         valid_mask = valid_mask & ~recent_mask
 
-    # Categorize invalid dates
-    invalid_old = (parsed.notna() & (parsed.dt.year < min_year)).sum()
+    # Categorize invalid dates (excluding Excel nulls already counted)
+    invalid_old = (parsed.notna() & (parsed.dt.year < min_year) & ~excel_null_mask).sum()
     invalid_future = (parsed.notna() & (parsed.dt.year > max_year)).sum()
 
     # Set invalid to NaT
@@ -142,6 +152,8 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
 
         print(f"\n  {column_name:30s}:")
         print(f"    Valid dates:       {valid:6,}/{total:6,} ({valid/total*100:5.1f}%)")
+        if invalid_excel_null > 0:
+            print(f"    Invalid (Excel NULL/00:00:00): {invalid_excel_null:6,} ⚠️  (empty cells, set to NaT)")
         if invalid_old > 0:
             print(f"    Invalid (< {min_year}): {invalid_old:6,} ⚠️  (set to NaT)")
         if invalid_future > 0:
