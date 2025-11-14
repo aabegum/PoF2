@@ -425,6 +425,55 @@ df['Fault_Last_12M'] = (df['started at'] >= cutoff_12m).astype(int)
 print(f"\n✓ Temporal: Summer={df['Summer_Peak_Flag'].sum():,}, Winter={df['Winter_Peak_Flag'].sum():,}, Avg repair={df['Time_To_Repair_Hours'].mean():.1f}h")
 print(f"✓ Periods (ref={reference_date.strftime('%Y-%m-%d')}): 3M={df['Fault_Last_3M'].sum():,}, 6M={df['Fault_Last_6M'].sum():,}, 12M={df['Fault_Last_12M'].sum():,}")
 
+# ============================================================================
+# STEP 5B: CUSTOMER IMPACT RATIOS (Fault-level calculation)
+# ============================================================================
+print("\n" + "="*80)
+print("STEP 5B: CALCULATING CUSTOMER IMPACT RATIOS (FAULT-LEVEL)")
+print("="*80)
+
+# Calculate ratios at FAULT level to avoid Simpson's Paradox
+# (Proper approach: calculate ratio BEFORE averaging, not after)
+
+customer_ratio_cols = []
+
+if 'total customer count' in df.columns:
+    total_customers = df['total customer count'].fillna(0)
+
+    # Urban customer ratio (urban MV + LV / total)
+    if 'urban mv' in df.columns and 'urban lv' in df.columns:
+        df['Urban_Customer_Ratio'] = (
+            (df['urban mv'].fillna(0) + df['urban lv'].fillna(0)) /
+            (total_customers + 1)  # +1 to avoid division by zero
+        ).clip(0, 1)  # Cap at 100%
+        customer_ratio_cols.append('Urban_Customer_Ratio')
+
+    # Rural customer ratio (rural MV + LV / total)
+    if 'rural mv' in df.columns and 'rural lv' in df.columns:
+        df['Rural_Customer_Ratio'] = (
+            (df['rural mv'].fillna(0) + df['rural lv'].fillna(0)) /
+            (total_customers + 1)
+        ).clip(0, 1)
+        customer_ratio_cols.append('Rural_Customer_Ratio')
+
+    # MV customer ratio (all MV / total)
+    if 'urban mv' in df.columns and 'rural mv' in df.columns:
+        suburban_mv = df['suburban mv'].fillna(0) if 'suburban mv' in df.columns else 0
+        df['MV_Customer_Ratio'] = (
+            (df['urban mv'].fillna(0) + suburban_mv + df['rural mv'].fillna(0)) /
+            (total_customers + 1)
+        ).clip(0, 1)
+        customer_ratio_cols.append('MV_Customer_Ratio')
+
+    if customer_ratio_cols:
+        print(f"✓ Created {len(customer_ratio_cols)} fault-level customer ratios:")
+        for col in customer_ratio_cols:
+            print(f"  • {col}: Mean={df[col].mean():.2%}, Max={df[col].max():.2%}")
+    else:
+        print("⚠ Customer columns found but unable to calculate ratios")
+else:
+    print("⚠ 'total customer count' column not found - skipping ratio calculation")
+
 # STEP 6: Equipment Identification
 print("\n" + "="*80)
 print("STEP 6: EQUIPMENT IDENTIFICATION (SIMPLIFIED)")
@@ -623,8 +672,16 @@ agg_dict = {
     # Temporal features
     'Summer_Peak_Flag': 'sum',
     'Winter_Peak_Flag': 'sum',
-    'Time_To_Repair_Hours': ['mean', 'max']
+    'Time_To_Repair_Hours': ['mean', 'max'],
+
+    # Customer impact ratios (fault-level calculated, then averaged)
+    # Note: These are calculated at fault level to avoid Simpson's Paradox
 }
+
+# Add customer ratio columns if they were created
+for ratio_col in ['Urban_Customer_Ratio', 'Rural_Customer_Ratio', 'MV_Customer_Ratio']:
+    if ratio_col in df.columns:
+        agg_dict[ratio_col] = 'mean'  # Average the pre-calculated ratios
 
 # Add cause code column if available
 if 'cause code' in df.columns:

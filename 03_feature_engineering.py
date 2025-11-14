@@ -710,60 +710,61 @@ else:
 # ============================================================================
 print("\n--- Customer Type Ratios ---")
 
-# Check for customer impact columns
-has_customer_cols = all(col in df.columns for col in ['urban_mv_Avg', 'urban_lv_Avg',
-                                                        'suburban_mv_Avg', 'suburban_lv_Avg',
-                                                        'rural_mv_Avg', 'rural_lv_Avg',
-                                                        'total_customer_count_Avg'])
+# Check if fault-level ratios were calculated (proper method - no Simpson's Paradox)
+has_fault_level_ratios = all(col in df.columns for col in ['Urban_Customer_Ratio_mean',
+                                                             'Rural_Customer_Ratio_mean',
+                                                             'MV_Customer_Ratio_mean'])
 
-if has_customer_cols:
-    # Urban customer ratio
-    df['Kentsel_Müşteri_Oranı'] = (
-        (df['urban_mv_Avg'].fillna(0) + df['urban_lv_Avg'].fillna(0)) /
-        (df['total_customer_count_Avg'] + 1)  # +1 to avoid division by zero
-    )
+if has_fault_level_ratios:
+    # Use pre-calculated fault-level ratios (averaged from fault level)
+    # This avoids Simpson's Paradox - ratios were calculated BEFORE averaging
+    df['Kentsel_Müşteri_Oranı'] = df['Urban_Customer_Ratio_mean']
+    df['Kırsal_Müşteri_Oranı'] = df['Rural_Customer_Ratio_mean']
+    df['OG_Müşteri_Oranı'] = df['MV_Customer_Ratio_mean']
 
-    # Rural customer ratio
-    df['Kırsal_Müşteri_Oranı'] = (
-        (df['rural_mv_Avg'].fillna(0) + df['rural_lv_Avg'].fillna(0)) /
-        (df['total_customer_count_Avg'] + 1)
-    )
-
-    # MV customer ratio (across all areas)
-    df['OG_Müşteri_Oranı'] = (
-        (df['urban_mv_Avg'].fillna(0) + df['suburban_mv_Avg'].fillna(0) + df['rural_mv_Avg'].fillna(0)) /
-        (df['total_customer_count_Avg'] + 1)
-    )
-
-    # Validation: Check for invalid ratios >100% (Simpson's Paradox from averaging)
-    invalid_urban = (df['Kentsel_Müşteri_Oranı'] > 1.0).sum()
-    invalid_rural = (df['Kırsal_Müşteri_Oranı'] > 1.0).sum()
-    invalid_og = (df['OG_Müşteri_Oranı'] > 1.0).sum()
-
-    if invalid_urban > 0 or invalid_rural > 0 or invalid_og > 0:
-        print(f"⚠ WARNING: Detected ratios >100% (Simpson's Paradox from averaging):")
-        if invalid_urban > 0:
-            print(f"    Urban ratio >100%: {invalid_urban} equipment (max={df['Kentsel_Müşteri_Oranı'].max():.2%})")
-        if invalid_rural > 0:
-            print(f"    Rural ratio >100%: {invalid_rural} equipment (max={df['Kırsal_Müşteri_Oranı'].max():.2%})")
-        if invalid_og > 0:
-            print(f"    MV ratio >100%: {invalid_og} equipment (max={df['OG_Müşteri_Oranı'].max():.2%})")
-        print(f"  Capping at 100% (defensive fix for modeling)...")
-
-        # Cap ratios at 1.0 (100%)
-        df['Kentsel_Müşteri_Oranı'] = df['Kentsel_Müşteri_Oranı'].clip(upper=1.0)
-        df['Kırsal_Müşteri_Oranı'] = df['Kırsal_Müşteri_Oranı'].clip(upper=1.0)
-        df['OG_Müşteri_Oranı'] = df['OG_Müşteri_Oranı'].clip(upper=1.0)
-
-    print(f"✓ Customer ratios calculated (capped at 100%):")
+    print(f"✓ Customer ratios loaded (fault-level calculated - no Simpson's Paradox):")
     print(f"  Urban customer ratio: Mean={df['Kentsel_Müşteri_Oranı'].mean():.2%}, Max={df['Kentsel_Müşteri_Oranı'].max():.2%}")
     print(f"  Rural customer ratio: Mean={df['Kırsal_Müşteri_Oranı'].mean():.2%}, Max={df['Kırsal_Müşteri_Oranı'].max():.2%}")
     print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
+
 else:
-    print("⚠ Customer impact columns not found")
-    df['Kentsel_Müşteri_Oranı'] = 0
-    df['Kırsal_Müşteri_Oranı'] = 0
-    df['OG_Müşteri_Oranı'] = 0
+    # Fallback: Check for old method (equipment-level averaged counts)
+    has_customer_cols = all(col in df.columns for col in ['urban_mv_Avg', 'urban_lv_Avg',
+                                                            'suburban_mv_Avg', 'suburban_lv_Avg',
+                                                            'rural_mv_Avg', 'rural_lv_Avg',
+                                                            'total_customer_count_Avg'])
+
+    if has_customer_cols:
+        print("⚠ WARNING: Using old method (equipment-level averaged counts)")
+        print("  This can cause Simpson's Paradox. Run 02_data_transformation.py to fix.")
+
+        # Urban customer ratio
+        df['Kentsel_Müşteri_Oranı'] = (
+            (df['urban_mv_Avg'].fillna(0) + df['urban_lv_Avg'].fillna(0)) /
+            (df['total_customer_count_Avg'] + 1)  # +1 to avoid division by zero
+        ).clip(upper=1.0)
+
+        # Rural customer ratio
+        df['Kırsal_Müşteri_Oranı'] = (
+            (df['rural_mv_Avg'].fillna(0) + df['rural_lv_Avg'].fillna(0)) /
+            (df['total_customer_count_Avg'] + 1)
+        ).clip(upper=1.0)
+
+        # MV customer ratio (across all areas)
+        df['OG_Müşteri_Oranı'] = (
+            (df['urban_mv_Avg'].fillna(0) + df['suburban_mv_Avg'].fillna(0) + df['rural_mv_Avg'].fillna(0)) /
+            (df['total_customer_count_Avg'] + 1)
+        ).clip(upper=1.0)
+
+        print(f"✓ Customer ratios calculated (capped at 100% - defensive fix):")
+        print(f"  Urban customer ratio: Mean={df['Kentsel_Müşteri_Oranı'].mean():.2%}, Max={df['Kentsel_Müşteri_Oranı'].max():.2%}")
+        print(f"  Rural customer ratio: Mean={df['Kırsal_Müşteri_Oranı'].mean():.2%}, Max={df['Kırsal_Müşteri_Oranı'].max():.2%}")
+        print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
+    else:
+        print("⚠ Customer impact columns not found")
+        df['Kentsel_Müşteri_Oranı'] = 0
+        df['Kırsal_Müşteri_Oranı'] = 0
+        df['OG_Müşteri_Oranı'] = 0
 
 # ============================================================================
 # 5. LOADING INTENSITY METRICS (Leakage-Safe)
