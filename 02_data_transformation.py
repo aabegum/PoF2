@@ -158,45 +158,51 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
     # Set invalid to NaT
     parsed[~valid_mask] = pd.NaT
 
-    # Report statistics
+    # Report statistics (compact format)
     if report:
         total = len(date_series)
         valid = valid_mask.sum()
+        invalid_total = invalid_excel_null + invalid_zero_time + invalid_old + invalid_future
 
-        print(f"\n  {column_name:30s}:")
-        print(f"    Valid dates:       {valid:6,}/{total:6,} ({valid/total*100:5.1f}%)")
+        status = "✓" if valid/total > 0.95 else ("⚠" if valid/total > 0.80 else "❌")
+        print(f"  {status} {column_name:28s}: {valid:6,}/{total:6,} ({valid/total*100:5.1f}%) ", end="")
+
+        # Show only significant issues in one line
+        issues = []
         if invalid_excel_null > 0:
-            print(f"    Invalid (Excel NULL 1900-01-01): {invalid_excel_null:6,} ⚠️  (set to NaT)")
+            issues.append(f"NULL:{invalid_excel_null}")
         if invalid_zero_time > 0:
-            print(f"    Invalid (00:00:00 timestamp): {invalid_zero_time:6,} ⚠️  (Excel empty cells, set to NaT)")
+            issues.append(f"00:00:{invalid_zero_time}")
         if invalid_old > 0:
-            print(f"    Invalid (< {min_year}): {invalid_old:6,} ⚠️  (set to NaT)")
+            issues.append(f"<{min_year}:{invalid_old}")
         if invalid_future > 0:
-            print(f"    Invalid (> {max_year}): {invalid_future:6,} ⚠️  (set to NaT)")
+            issues.append(f">{max_year}:{invalid_future}")
         if invalid_recent > 0 and is_installation_date:
-            print(f"    ℹ️  Recent installations (< 30 days): {invalid_recent:6,} (kept for review)")
+            issues.append(f"Recent:{invalid_recent}")
+
+        if issues:
+            print(f"[{', '.join(issues)}]")
+        else:
+            print()
 
     return parsed
 
 # Parse and validate all date columns
-print("\nParsing installation date columns:")
-# Installation dates: strict validation (rejects 00:00:00 timestamps = Excel empty cells)
+print("\nInstallation Dates (strict: rejects NULL + 00:00:00):")
 df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI', is_installation_date=True)
-# EDBS dates: same strict validation for installation dates
 df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE', is_installation_date=True)
 
-print("\nParsing fault timestamp columns:")
-# Fault dates: normal validation (00:00:00 timestamps are acceptable for midnight faults)
+print("\nFault Timestamps (allows midnight 00:00:00):")
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True, is_installation_date=False)
 df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True, is_installation_date=False)
 
 # Parse work order creation date (for fallback option)
 if 'Oluşturma Tarihi Sıralama' in df.columns or 'Oluşturulma_Tarihi' in df.columns:
     creation_col = 'Oluşturma Tarihi Sıralama' if 'Oluşturma Tarihi Sıralama' in df.columns else 'Oluşturulma_Tarihi'
-    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Creation Date', min_year=2015, report=True, is_installation_date=False)
+    print("\nWork Order Dates:")
+    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Creation', min_year=2015, report=True, is_installation_date=False)
 else:
     df['Oluşturulma_Tarihi'] = pd.NaT
-    print("\n  ⚠️  Work order creation date not found (fallback option disabled)")
 
 # ============================================================================
 # STEP 3: ENHANCED EQUIPMENT AGE CALCULATION
@@ -239,82 +245,54 @@ def calculate_age_edbs_priority(row):
 
     return None, 'MISSING', None
 
-print("\nCalculating DUAL age features (TESIS-primary + EDBS-primary)...")
+print("\nCalculating dual age features (TESIS-primary + EDBS-primary)...")
 
 # Calculate TESIS-primary age (commissioning age)
-print("  [1/2] TESIS_TARIHI priority (commissioning/database age)...")
 results_tesis = df.apply(calculate_age_tesis_priority, axis=1, result_type='expand')
 results_tesis.columns = ['Ekipman_Yaşı_Gün_TESIS', 'Yaş_Kaynak_TESIS', 'Kurulum_Tarihi_TESIS']
 df[['Ekipman_Yaşı_Gün_TESIS', 'Yaş_Kaynak_TESIS', 'Kurulum_Tarihi_TESIS']] = results_tesis
 df['Ekipman_Yaşı_Yıl_TESIS'] = df['Ekipman_Yaşı_Gün_TESIS'] / 365.25
 
 # Calculate EDBS-primary age (installation age)
-print("  [2/2] EDBS_IDATE priority (physical installation age)...")
 results_edbs = df.apply(calculate_age_edbs_priority, axis=1, result_type='expand')
 results_edbs.columns = ['Ekipman_Yaşı_Gün_EDBS', 'Yaş_Kaynak_EDBS', 'Kurulum_Tarihi_EDBS']
 df[['Ekipman_Yaşı_Gün_EDBS', 'Yaş_Kaynak_EDBS', 'Kurulum_Tarihi_EDBS']] = results_edbs
 df['Ekipman_Yaşı_Yıl_EDBS'] = df['Ekipman_Yaşı_Gün_EDBS'] / 365.25
 
-# Create primary age columns (default to TESIS since EDBS is just database entry date)
-# EDBS_IDATE = EdaBİS system entry date (2017+), not physical installation age
+# Create primary age columns (default to TESIS)
 df['Ekipman_Yaşı_Gün'] = df['Ekipman_Yaşı_Gün_TESIS']
 df['Ekipman_Yaşı_Yıl'] = df['Ekipman_Yaşı_Yıl_TESIS']
 df['Yaş_Kaynak'] = df['Yaş_Kaynak_TESIS']
 df['Ekipman_Kurulum_Tarihi'] = df['Kurulum_Tarihi_TESIS']
 
-# Statistics - TESIS-primary
-print("\n✓ TESIS-Primary Age Results (Commissioning/Database Age):")
-print(f"  Source Distribution:")
-source_counts_tesis = df['Yaş_Kaynak_TESIS'].value_counts()
-for source, count in source_counts_tesis.items():
-    pct = count / len(df) * 100
-    print(f"    {source:10s}: {count:6,} ({pct:5.1f}%)")
+# Compact statistics
+source_counts = df['Yaş_Kaynak_TESIS'].value_counts()
+valid_ages = df[df['Yaş_Kaynak_TESIS'] != 'MISSING']['Ekipman_Yaşı_Yıl_TESIS']
 
-valid_ages_tesis = df[df['Yaş_Kaynak_TESIS'] != 'MISSING']['Ekipman_Yaşı_Yıl_TESIS']
-if len(valid_ages_tesis) > 0:
-    print(f"  Stats: Mean={valid_ages_tesis.mean():.1f}y, Median={valid_ages_tesis.median():.1f}y, Max={valid_ages_tesis.max():.1f}y")
+print(f"\n✓ Age Calculation Complete:")
+print(f"  Sources: ", end="")
+print(" | ".join([f"{src}:{cnt:,}({cnt/len(df)*100:.1f}%)" for src, cnt in source_counts.items()]))
+if len(valid_ages) > 0:
+    print(f"  Range: {valid_ages.min():.1f}-{valid_ages.max():.1f}y, Mean={valid_ages.mean():.1f}y, Median={valid_ages.median():.1f}y")
 
-# Statistics - EDBS-primary
-print("\n✓ EDBS-Primary Age Results (Database Entry Age - EdaBİS System ~2017+):")
-print(f"  Source Distribution:")
-source_counts_edbs = df['Yaş_Kaynak_EDBS'].value_counts()
-for source, count in source_counts_edbs.items():
-    pct = count / len(df) * 100
-    print(f"    {source:10s}: {count:6,} ({pct:5.1f}%)")
-
-valid_ages_edbs = df[df['Yaş_Kaynak_EDBS'] != 'MISSING']['Ekipman_Yaşı_Yıl_EDBS']
-if len(valid_ages_edbs) > 0:
-    print(f"  Stats: Mean={valid_ages_edbs.mean():.1f}y, Median={valid_ages_edbs.median():.1f}y, Max={valid_ages_edbs.max():.1f}y")
-
-# Comparison
-if len(valid_ages_tesis) > 0 and len(valid_ages_edbs) > 0:
-    both_valid = df[(df['Yaş_Kaynak_TESIS'] != 'MISSING') & (df['Yaş_Kaynak_EDBS'] != 'MISSING')]
-    if len(both_valid) > 0:
-        age_diff = (both_valid['Ekipman_Yaşı_Yıl_EDBS'] - both_valid['Ekipman_Yaşı_Yıl_TESIS']).abs()
-        print(f"\n✓ Age Difference (EDBS vs TESIS):")
-        print(f"  Records with both: {len(both_valid):,} ({len(both_valid)/len(df)*100:.1f}%)")
-        print(f"  Mean difference: {age_diff.mean():.1f} years")
-        print(f"  Median difference: {age_diff.median():.1f} years")
-        print(f"  Max difference: {age_diff.max():.1f} years")
-
-# Use TESIS as default (commissioning age - most meaningful for PoF)
+# Age distribution summary (compact)
 valid_ages = df[df['Yaş_Kaynak'] != 'MISSING']['Ekipman_Yaşı_Yıl']
 if len(valid_ages) > 0:
-    print(f"\n✓ Default Age (TESIS-primary / Commissioning Age) Distribution:")
-    age_bins = [0, 5, 10, 20, 30, 50, 75]
-    age_labels = ['0-5 yrs', '5-10 yrs', '10-20 yrs', '20-30 yrs', '30-50 yrs', '50-75 yrs']
+    age_bins = [0, 10, 20, 30, 50, 200]
+    age_labels = ['0-10y', '10-20y', '20-30y', '30-50y', '50+y']
     age_dist = pd.cut(valid_ages, bins=age_bins, labels=age_labels).value_counts().sort_index()
 
-    for label, count in age_dist.items():
-        pct = count / len(valid_ages) * 100
-        bar = '█' * int(pct / 2)
-        print(f"    {label}: {count:>4,} ({pct:>5.1f}%) {bar}")
+    print(f"  Age Distribution: ", end="")
+    print(" | ".join([f"{lbl}:{cnt}({cnt/len(valid_ages)*100:.0f}%)" for lbl, cnt in age_dist.items()]))
 
-    # Warnings
+    # Warnings (compact)
+    warnings = []
     if (valid_ages > 75).sum() > 0:
-        print(f"\n  ⚠️  WARNING: {(valid_ages > 75).sum()} equipment > 75 years (check data quality!)")
+        warnings.append(f"{(valid_ages > 75).sum()} equipment >75y")
     if valid_ages.median() < 1:
-        print(f"  ⚠️  WARNING: Median age is {valid_ages.median():.1f} years - investigate if accurate")
+        warnings.append(f"Median age {valid_ages.median():.1f}y (low!)")
+    if warnings:
+        print(f"  ⚠️  " + ", ".join(warnings))
 
 # ============================================================================
 # STEP 3B: OPTIONAL FIRST WORK ORDER FALLBACK
@@ -405,29 +383,15 @@ if USE_FIRST_WORKORDER_FALLBACK:
     else:
         print(f"\n  ⚠️  Work order creation date not available - cannot use fallback")
 
-# ============================================================================
-# STEP 4: PROCESS FAULT TIMESTAMPS
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 4: PROCESSING FAULT TIMESTAMPS")
-print("="*100)
+# STEP 4 & 5: Temporal Features + Failure Periods
+print("\n" + "="*80)
+print("STEP 4/5: TEMPORAL FEATURES & FAILURE PERIODS")
+print("="*80)
 
 df['Fault_Month'] = df['started at'].dt.month
 df['Summer_Peak_Flag'] = df['Fault_Month'].isin([6, 7, 8, 9]).astype(int)
 df['Winter_Peak_Flag'] = df['Fault_Month'].isin([12, 1, 2]).astype(int)
 df['Time_To_Repair_Hours'] = (df['ended at'] - df['started at']).dt.total_seconds() / 3600
-
-print("\n✓ Temporal features created:")
-print(f"  Summer peak faults: {df['Summer_Peak_Flag'].sum():,}")
-print(f"  Winter peak faults: {df['Winter_Peak_Flag'].sum():,}")
-print(f"  Avg repair time: {df['Time_To_Repair_Hours'].mean():.1f} hours")
-
-# ============================================================================
-# STEP 5: CALCULATE FAILURE PERIODS
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 5: CALCULATING FAILURE PERIOD FLAGS")
-print("="*100)
 
 reference_date = df['started at'].max()
 cutoff_3m = reference_date - pd.Timedelta(days=90)
@@ -438,21 +402,13 @@ df['Fault_Last_3M'] = (df['started at'] >= cutoff_3m).astype(int)
 df['Fault_Last_6M'] = (df['started at'] >= cutoff_6m).astype(int)
 df['Fault_Last_12M'] = (df['started at'] >= cutoff_12m).astype(int)
 
-print(f"\n✓ Failure period flags created:")
-print(f"  Reference date: {reference_date.strftime('%Y-%m-%d')}")
-print(f"  Faults in last 3M:  {df['Fault_Last_3M'].sum():,}")
-print(f"  Faults in last 6M:  {df['Fault_Last_6M'].sum():,}")
-print(f"  Faults in last 12M: {df['Fault_Last_12M'].sum():,}")
+print(f"\n✓ Temporal: Summer={df['Summer_Peak_Flag'].sum():,}, Winter={df['Winter_Peak_Flag'].sum():,}, Avg repair={df['Time_To_Repair_Hours'].mean():.1f}h")
+print(f"✓ Periods (ref={reference_date.strftime('%Y-%m-%d')}): 3M={df['Fault_Last_3M'].sum():,}, 6M={df['Fault_Last_6M'].sum():,}, 12M={df['Fault_Last_12M'].sum():,}")
 
-# ============================================================================
-# STEP 6: IDENTIFY PRIMARY EQUIPMENT ID
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 6: EQUIPMENT IDENTIFICATION")
-print("="*100)
-
-# SIMPLIFIED STRATEGY: cbs_id → Ekipman ID → Generate unique ID
-print("\n--- Smart Equipment ID Selection (Simplified) ---")
+# STEP 6: Equipment Identification
+print("\n" + "="*80)
+print("STEP 6: EQUIPMENT IDENTIFICATION (SIMPLIFIED)")
+print("="*80)
 
 # Create unified equipment ID with fallback logic
 def get_equipment_id(row):
@@ -479,15 +435,10 @@ unique_equipment = df['Equipment_ID_Primary'].nunique()
 # Count by source
 cbs_count = df['cbs_id'].notna().sum()
 ekipman_count = df[df['cbs_id'].isna() & df['Ekipman ID'].notna()].shape[0]
-unknown_count = df['Equipment_ID_Primary'].str.startswith('UNKNOWN_', na=False).sum()
+unknown_count = df['Equipment_ID_Primary'].astype(str).str.startswith('UNKNOWN_', na=False).sum()
 
-print(f"✓ Simplified Equipment ID Strategy:")
-print(f"  Priority 1: cbs_id → {cbs_count:,} equipment")
-print(f"  Priority 2: Ekipman ID → {ekipman_count:,} equipment")
-print(f"  Priority 3: Generated unique ID → {unknown_count:,} equipment (prevents grouping bug)")
-print(f"  Combined coverage: {primary_coverage:,} ({primary_coverage/len(df)*100:.1f}%)")
-print(f"  Unique equipment: {unique_equipment:,}")
-print(f"  Average faults per equipment: {len(df)/unique_equipment:.1f}")
+print(f"\n✓ ID Strategy: cbs_id({cbs_count:,}) → Ekipman ID({ekipman_count:,}) → Generated({unknown_count:,})")
+print(f"  Total: {unique_equipment:,} unique equipment from {len(df):,} faults (avg {len(df)/unique_equipment:.1f} faults/equip)")
 
 # Use this as grouping key
 equipment_id_col = 'Equipment_ID_Primary'
@@ -883,7 +834,7 @@ if optional_cols_found:
 
 print(f"\n✅ ENHANCEMENTS IN v3.1:")
 print(f"   ✨ Dual-track date validation (Excel NULL + 00:00:00 detection)")
-unknown_equip_count = equipment_df['Ekipman_ID'].str.startswith('UNKNOWN_', na=False).sum()
+unknown_equip_count = equipment_df['Ekipman_ID'].astype(str).str.startswith('UNKNOWN_', na=False).sum()
 print(f"   ✨ Simplified Equipment ID (prevents grouping bug for {unknown_equip_count} equipment)")
 print(f"   ✨ Day-precision age calculation (365.25 days/year)")
 print(f"   ✨ Installation date preserved (Ekipman_Kurulum_Tarihi)")
