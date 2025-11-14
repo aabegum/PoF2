@@ -145,7 +145,7 @@ df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=20
 # Parse work order creation date (for fallback option)
 if 'Oluşturma Tarihi Sıralama' in df.columns or 'Oluşturulma_Tarihi' in df.columns:
     creation_col = 'Oluşturma Tarihi Sıralama' if 'Oluşturma Tarihi Sıralama' in df.columns else 'Oluşturulma_Tarihi'
-    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Creation Date', min_year=2020, report=True)
+    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Creation Date', min_year=2015, report=True)
 else:
     df['Oluşturulma_Tarihi'] = pd.NaT
     print("\n  ⚠️  Work order creation date not found (fallback option disabled)")
