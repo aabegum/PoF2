@@ -615,58 +615,81 @@ print("="*100)
 
 print("\n--- Generating Kaplan-Meier Curves by Equipment Class ---")
 
-# Get top equipment classes by count
-top_classes = df_survival_features.merge(
-    df_features[['Ekipman_ID', 'Equipment_Class_Primary']],
-    on='Ekipman_ID',
-    how='left'
-)['Equipment_Class_Primary'].value_counts().head(4).index.tolist()
+# Get equipment class from fault-level data
+equip_id_col = 'cbs_id'
+class_col = None
+for col in df_faults.columns:
+    if 'equipment class' in col.lower() or 'ekipman' in col.lower() and 'sınıf' in col.lower():
+        class_col = col
+        break
 
-fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-axes = axes.flatten()
+if class_col is None:
+    # Try common column names
+    for possible_col in ['equipment class', 'Equipment_Class', 'Ekipman_Sınıfı', 'class']:
+        if possible_col in df_faults.columns:
+            class_col = possible_col
+            break
 
-for i, equipment_class in enumerate(top_classes):
-    ax = axes[i]
+if class_col:
+    print(f"✓ Found equipment class column: {class_col}")
 
-    # Filter data for this class
-    class_data = top_classes_data = df_survival_features.merge(
-        df_features[['Ekipman_ID', 'Equipment_Class_Primary']],
-        on='Ekipman_ID',
-        how='left'
-    )
-    class_data = class_data[class_data['Equipment_Class_Primary'] == equipment_class]
+    # Create equipment class mapping
+    equipment_class_map = df_faults.groupby(equip_id_col)[class_col].first().to_dict()
 
-    if len(class_data) > 0:
-        # Fit Kaplan-Meier
-        kmf = KaplanMeierFitter()
-        kmf.fit(
-            class_data['Time_To_Event'],
-            class_data['Event_Occurred'],
-            label=equipment_class
-        )
+    # Add equipment class to survival data
+    df_survival_features_with_class = df_survival_features.copy()
+    df_survival_features_with_class['Equipment_Class'] = df_survival_features_with_class['Ekipman_ID'].map(equipment_class_map)
 
-        # Plot
-        kmf.plot_survival_function(ax=ax, ci_show=True)
-        ax.set_title(f'Survival Curve: {equipment_class}', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Days', fontsize=10)
-        ax.set_ylabel('Survival Probability', fontsize=10)
-        ax.axhline(0.5, ls='--', color='red', alpha=0.5, label='50% survival')
-        ax.grid(True, alpha=0.3)
-        ax.legend()
+    # Get top equipment classes by count
+    top_classes = df_survival_features_with_class['Equipment_Class'].value_counts().head(4).index.tolist()
+else:
+    print("⚠️  Warning: Equipment class column not found in fault data")
+    print("Skipping survival curve generation")
+    top_classes = []
 
-        # Add median survival time
-        median_survival = kmf.median_survival_time_
-        if not np.isnan(median_survival):
-            ax.axvline(median_survival, ls=':', color='orange', alpha=0.7)
-            ax.text(median_survival, 0.25, f'Median: {median_survival:.0f}d',
-                   fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+if len(top_classes) > 0:
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
 
-plt.tight_layout()
-output_path = Path('outputs/survival_analysis/survival_curves_by_class.png')
-plt.savefig(output_path, dpi=300, bbox_inches='tight')
-plt.close()
+    for i, equipment_class in enumerate(top_classes):
+        ax = axes[i]
 
-print(f"✓ Survival curves saved: {output_path}")
+        # Filter data for this class
+        class_data = df_survival_features_with_class[df_survival_features_with_class['Equipment_Class'] == equipment_class].copy()
+
+        if len(class_data) > 0:
+            # Fit Kaplan-Meier
+            kmf = KaplanMeierFitter()
+            kmf.fit(
+                class_data['Time_To_Event'],
+                class_data['Event_Occurred'],
+                label=equipment_class
+            )
+
+            # Plot
+            kmf.plot_survival_function(ax=ax, ci_show=True)
+            ax.set_title(f'Survival Curve: {equipment_class}', fontsize=12, fontweight='bold')
+            ax.set_xlabel('Days', fontsize=10)
+            ax.set_ylabel('Survival Probability', fontsize=10)
+            ax.axhline(0.5, ls='--', color='red', alpha=0.5, label='50% survival')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+
+            # Add median survival time
+            median_survival = kmf.median_survival_time_
+            if not np.isnan(median_survival):
+                ax.axvline(median_survival, ls=':', color='orange', alpha=0.7)
+                ax.text(median_survival, 0.25, f'Median: {median_survival:.0f}d',
+                       fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout()
+    output_path = Path('outputs/survival_analysis/survival_curves_by_class.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"✓ Survival curves saved: {output_path}")
+else:
+    print("⚠️  Skipping survival curves (equipment class not available)")
 
 # ============================================================================
 # FINAL SUMMARY
