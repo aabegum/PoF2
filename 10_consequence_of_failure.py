@@ -192,37 +192,57 @@ else:
         df_faults[start_col] = pd.to_datetime(df_faults[start_col], errors='coerce')
         df_faults[end_col] = pd.to_datetime(df_faults[end_col], errors='coerce')
 
+        # Check how many valid timestamps we have
+        valid_start = df_faults[start_col].notna().sum()
+        valid_end = df_faults[end_col].notna().sum()
+        print(f"  Valid timestamps: {valid_start}/{len(df_faults)} start, {valid_end}/{len(df_faults)} end")
+
         # Calculate duration in minutes
         df_faults['Outage_Duration_Minutes'] = (
             (df_faults[end_col] - df_faults[start_col]).dt.total_seconds() / 60
         )
 
         # Filter valid durations (positive, < 1 week)
-        df_faults = df_faults[
+        valid_durations = df_faults[
             (df_faults['Outage_Duration_Minutes'] > 0) &
             (df_faults['Outage_Duration_Minutes'] < 10080)  # 7 days
         ]
 
-        # Calculate average per equipment
-        avg_duration = df_faults.groupby(equip_id_col)['Outage_Duration_Minutes'].mean()
+        print(f"  Valid durations (0 < duration < 7 days): {len(valid_durations):,}/{len(df_faults):,}")
 
-        print(f"\n✓ Calculated average outage duration for {len(avg_duration):,} equipment")
-        print(f"  Mean duration: {avg_duration.mean():.1f} minutes")
-        print(f"  Median duration: {avg_duration.median():.1f} minutes")
-        print(f"  Range: {avg_duration.min():.1f} - {avg_duration.max():.1f} minutes")
+        if len(valid_durations) > 0:
+            # Calculate average per equipment
+            avg_duration = valid_durations.groupby(equip_id_col)['Outage_Duration_Minutes'].mean()
+
+            print(f"\n✓ Calculated average outage duration for {len(avg_duration):,} equipment")
+            print(f"  Mean duration: {avg_duration.mean():.1f} minutes")
+            print(f"  Median duration: {avg_duration.median():.1f} minutes")
+            print(f"  Range: {avg_duration.min():.1f} - {avg_duration.max():.1f} minutes")
+        else:
+            print(f"\n⚠️  Warning: No valid outage durations found!")
+            print(f"  Possible issues: Invalid timestamps, negative durations, or durations > 7 days")
+            print(f"  Using default outage duration: 120 minutes")
+            avg_duration = pd.Series(dtype=float)  # Empty series
 
         # Merge with equipment data
-        df_equip = df_equip.merge(
-            avg_duration.rename('Avg_Outage_Minutes'),
-            left_on='Ekipman_ID',
-            right_index=True,
-            how='left'
-        )
+        if len(avg_duration) > 0:
+            df_equip = df_equip.merge(
+                avg_duration.rename('Avg_Outage_Minutes'),
+                left_on='Ekipman_ID',
+                right_index=True,
+                how='left'
+            )
 
-        # Fill missing with median
-        median_duration = avg_duration.median()
-        df_equip['Avg_Outage_Minutes'].fillna(median_duration, inplace=True)
-        print(f"  ✓ Filled {df_equip['Avg_Outage_Minutes'].isna().sum()} missing values with median ({median_duration:.1f} min)")
+            # Fill missing with median
+            median_duration = avg_duration.median()
+            df_equip['Avg_Outage_Minutes'].fillna(median_duration, inplace=True)
+            missing_count = df_equip['Avg_Outage_Minutes'].isna().sum()
+            if missing_count > 0:
+                print(f"  ✓ Filled {missing_count} missing values with median ({median_duration:.1f} min)")
+        else:
+            # No valid durations - use default
+            print(f"  ✓ Using default outage duration for all equipment: 120 minutes")
+            df_equip['Avg_Outage_Minutes'] = 120
     else:
         print(f"\n⚠️  Warning: Could not find required columns - using default outage duration")
         df_equip['Avg_Outage_Minutes'] = 120
@@ -450,8 +470,8 @@ if '12M' in risk_results:
     print(f"\n🔥 TOP 10 HIGHEST RISK EQUIPMENT:")
     print("-" * 100)
     for idx, row in df_capex_top100.head(10).iterrows():
-        print(f"  #{row['Priority_Rank']:3d} | {row['Ekipman_ID']:10s} | "
-              f"{row['Ekipman_Sınıfı']:15s} | Risk={row['Risk_Score']:5.1f} | "
+        print(f"  #{row['Priority_Rank']:3.0f} | {str(row['Ekipman_ID']):>10s} | "
+              f"{str(row['Ekipman_Sınıfı']):15s} | Risk={row['Risk_Score']:5.1f} | "
               f"PoF={row['PoF_Probability_12M']:.2f} | CoF={row['CoF_Score']:.1f} | "
               f"{row['Risk_Category']}")
 
