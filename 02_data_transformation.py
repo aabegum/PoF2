@@ -88,7 +88,7 @@ print("\n" + "="*100)
 print("STEP 2: PARSING AND VALIDATING DATE COLUMNS (ENHANCED)")
 print("="*100)
 
-def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, max_year=MAX_VALID_YEAR, report=True):
+def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, max_year=MAX_VALID_YEAR, report=True, reject_recent_days=None):
     """
     Parse and validate dates with detailed diagnostics
 
@@ -98,6 +98,7 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         min_year: Minimum valid year (default: 1950)
         max_year: Maximum valid year (default: 2025)
         report: Whether to print statistics (default: True)
+        reject_recent_days: Reject dates within N days of reference date (for installation dates)
 
     Returns:
         Series of validated datetime values (invalid → NaT)
@@ -119,6 +120,14 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         (parsed.dt.year <= max_year)
     )
 
+    # Additional check: reject dates too close to reference date (likely Excel =TODAY() defaults)
+    invalid_recent = 0
+    if reject_recent_days is not None:
+        cutoff_date = REFERENCE_DATE - pd.Timedelta(days=reject_recent_days)
+        recent_mask = parsed >= cutoff_date
+        invalid_recent = (parsed.notna() & recent_mask).sum()
+        valid_mask = valid_mask & ~recent_mask
+
     # Categorize invalid dates
     invalid_old = (parsed.notna() & (parsed.dt.year < min_year)).sum()
     invalid_future = (parsed.notna() & (parsed.dt.year > max_year)).sum()
@@ -137,13 +146,17 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
             print(f"    Invalid (< {min_year}): {invalid_old:6,} ⚠️  (set to NaT)")
         if invalid_future > 0:
             print(f"    Invalid (> {max_year}): {invalid_future:6,} ⚠️  (set to NaT)")
+        if invalid_recent > 0:
+            print(f"    Invalid (too recent, < {reject_recent_days}d): {invalid_recent:6,} ⚠️  (likely Excel defaults, set to NaT)")
 
     return parsed
 
 # Parse and validate all date columns
 print("\nParsing installation date columns:")
-df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI')
-df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE')
+# Reject TESIS dates within 30 days of today (likely Excel =TODAY() defaults)
+df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI', reject_recent_days=30)
+# Reject EDBS dates within 30 days (same reason - database entry can't be today for equipment with faults)
+df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE', reject_recent_days=30)
 
 print("\nParsing fault timestamp columns:")
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True)
