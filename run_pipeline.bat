@@ -30,18 +30,18 @@ REM Start time
 set start_time=%time%
 
 REM ============================================================================
-REM STEP 1: DATA COLLECTION
+REM STEP 1: DATA PROFILING
 REM ============================================================================
 echo.
-echo [STEP 1/9] Running Data Collection...
-echo [STEP 1/9] Running Data Collection... >> "%MASTER_LOG%"
-python 01_data_collection.py > "%LOG_DIR%\01_data_collection.log" 2>&1
+echo [STEP 1/9] Running Data Profiling...
+echo [STEP 1/9] Running Data Profiling... >> "%MASTER_LOG%"
+python 01_data_profiling.py > "%LOG_DIR%\01_data_profiling.log" 2>&1
 if errorlevel 1 (
-    echo ERROR: Step 1 failed! Check %LOG_DIR%\01_data_collection.log
+    echo ERROR: Step 1 failed! Check %LOG_DIR%\01_data_profiling.log
     echo ERROR: Step 1 failed! >> "%MASTER_LOG%"
     goto :error
 )
-type "%LOG_DIR%\01_data_collection.log" >> "%MASTER_LOG%"
+type "%LOG_DIR%\01_data_profiling.log" >> "%MASTER_LOG%"
 echo [STEP 1/9] ✓ Completed
 
 REM ============================================================================
@@ -90,33 +90,33 @@ type "%LOG_DIR%\04_eda.log" >> "%MASTER_LOG%"
 echo [STEP 4/9] ✓ Completed
 
 REM ============================================================================
-REM STEP 5: DATA PREPROCESSING
+REM STEP 5: FEATURE SELECTION
 REM ============================================================================
 echo.
-echo [STEP 5/9] Running Data Preprocessing...
-echo [STEP 5/9] Running Data Preprocessing... >> "%MASTER_LOG%"
-python 05_data_preprocessing.py > "%LOG_DIR%\05_data_preprocessing.log" 2>&1
+echo [STEP 5/9] Running Feature Selection...
+echo [STEP 5/9] Running Feature Selection... >> "%MASTER_LOG%"
+python 05_feature_selection.py > "%LOG_DIR%\05_feature_selection.log" 2>&1
 if errorlevel 1 (
-    echo ERROR: Step 5 failed! Check %LOG_DIR%\05_data_preprocessing.log
+    echo ERROR: Step 5 failed! Check %LOG_DIR%\05_feature_selection.log
     echo ERROR: Step 5 failed! >> "%MASTER_LOG%"
     goto :error
 )
-type "%LOG_DIR%\05_data_preprocessing.log" >> "%MASTER_LOG%"
+type "%LOG_DIR%\05_feature_selection.log" >> "%MASTER_LOG%"
 echo [STEP 5/9] ✓ Completed
 
 REM ============================================================================
-REM STEP 6: CAUSE CODE FEATURES
+REM STEP 6: REMOVE LEAKY FEATURES
 REM ============================================================================
 echo.
-echo [STEP 6/9] Running Cause Code Feature Engineering...
-echo [STEP 6/9] Running Cause Code Feature Engineering... >> "%MASTER_LOG%"
-python 05b_cause_code_features.py > "%LOG_DIR%\05b_cause_code_features.log" 2>&1
+echo [STEP 6/9] Running Remove Leaky Features...
+echo [STEP 6/9] Running Remove Leaky Features... >> "%MASTER_LOG%"
+python 05b_remove_leaky_features.py > "%LOG_DIR%\05b_remove_leaky_features.log" 2>&1
 if errorlevel 1 (
-    echo ERROR: Step 6 failed! Check %LOG_DIR%\05b_cause_code_features.log
+    echo ERROR: Step 6 failed! Check %LOG_DIR%\05b_remove_leaky_features.log
     echo ERROR: Step 6 failed! >> "%MASTER_LOG%"
     goto :error
 )
-type "%LOG_DIR%\05b_cause_code_features.log" >> "%MASTER_LOG%"
+type "%LOG_DIR%\05b_remove_leaky_features.log" >> "%MASTER_LOG%"
 echo [STEP 6/9] ✓ Completed
 
 REM ============================================================================

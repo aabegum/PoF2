@@ -19,12 +19,12 @@ python run_pipeline.py
 ### Option 3: Manual Execution (Individual Scripts)
 
 ```bash
-python 01_data_collection.py
+python 01_data_profiling.py
 python 02_data_transformation.py
 python 03_feature_engineering.py
 python 04_eda.py
-python 05_data_preprocessing.py
-python 05b_cause_code_features.py
+python 05_feature_selection.py
+python 05b_remove_leaky_features.py
 python 06_model_training.py
 python 09_survival_analysis.py
 python 10_consequence_of_failure.py
@@ -34,12 +34,12 @@ python 10_consequence_of_failure.py
 
 | Step | Script | Purpose | Estimated Time |
 |------|--------|---------|----------------|
-| 1 | `01_data_collection.py` | Load raw fault data from Excel | ~30s |
+| 1 | `01_data_profiling.py` | Load and profile raw fault data | ~30s |
 | 2 | `02_data_transformation.py` | Transform to equipment-level data | ~1min |
 | 3 | `03_feature_engineering.py` | Create failure prediction features | ~1min |
 | 4 | `04_eda.py` | Generate 16 exploratory analyses | ~3-5min |
-| 5 | `05_data_preprocessing.py` | Prepare data for modeling | ~1min |
-| 6 | `05b_cause_code_features.py` | Engineer cause code features | ~1min |
+| 5 | `05_feature_selection.py` | Select relevant features for modeling | ~1min |
+| 6 | `05b_remove_leaky_features.py` | Remove features with data leakage | ~1min |
 | 7 | `06_model_training.py` | Train chronic repeater classifier (Model 2) | ~2-3min |
 | 8 | `09_survival_analysis.py` | Train temporal PoF predictor (Model 1) | ~2-3min |
 | 9 | `10_consequence_of_failure.py` | Calculate CoF & Risk scores | ~1min |
@@ -55,12 +55,12 @@ logs/
 └── run_YYYYMMDD_HHMMSS/          # Timestamped run directory
     ├── pipeline_master.log        # All outputs combined
     ├── pipeline_summary.txt       # Execution summary with timings
-    ├── 01_data_collection.log
+    ├── 01_data_profiling.log
     ├── 02_data_transformation.log
     ├── 03_feature_engineering.log
     ├── 04_eda.log
-    ├── 05_data_preprocessing.log
-    ├── 05b_cause_code_features.log
+    ├── 05_feature_selection.log
+    ├── 05b_remove_leaky_features.log
     ├── 06_model_training.log
     ├── 09_survival_analysis.log
     └── 10_consequence_of_failure.log

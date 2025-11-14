@@ -23,9 +23,9 @@ import time
 PIPELINE_STEPS = [
     {
         'step': 1,
-        'name': 'Data Collection',
-        'script': '01_data_collection.py',
-        'description': 'Loading raw fault data'
+        'name': 'Data Profiling',
+        'script': '01_data_profiling.py',
+        'description': 'Loading and profiling raw fault data'
     },
     {
         'step': 2,
@@ -47,15 +47,15 @@ PIPELINE_STEPS = [
     },
     {
         'step': 5,
-        'name': 'Data Preprocessing',
-        'script': '05_data_preprocessing.py',
-        'description': 'Preparing data for modeling'
+        'name': 'Feature Selection',
+        'script': '05_feature_selection.py',
+        'description': 'Selecting relevant features for modeling'
     },
     {
         'step': 6,
-        'name': 'Cause Code Features',
-        'script': '05b_cause_code_features.py',
-        'description': 'Engineering cause code features'
+        'name': 'Remove Leaky Features',
+        'script': '05b_remove_leaky_features.py',
+        'description': 'Removing features with data leakage'
     },
     {
         'step': 7,
