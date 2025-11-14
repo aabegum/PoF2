@@ -354,23 +354,25 @@ print(f"  Mean CoF: {df_equip['CoF_Raw'].mean():.0f}")
 print(f"  Median CoF: {df_equip['CoF_Raw'].median():.0f}")
 print(f"  Range: {df_equip['CoF_Raw'].min():.0f} - {df_equip['CoF_Raw'].max():.0f}")
 
-# Normalize CoF to 0-100 scale
-min_cof = df_equip['CoF_Raw'].min()
-max_cof = df_equip['CoF_Raw'].max()
+# Convert to percentile-based score (0-100) - robust to outliers
+df_equip['CoF_Score'] = df_equip['CoF_Raw'].rank(pct=True) * 100
 
-if max_cof > min_cof:
-    df_equip['CoF_Score'] = ((df_equip['CoF_Raw'] - min_cof) / (max_cof - min_cof)) * 100
-else:
-    df_equip['CoF_Score'] = 50.0  # All equal
-
-print(f"\n✓ Normalized CoF to 0-100 scale:")
+print(f"\n✓ Percentile-based CoF scores (0-100):")
 print(f"  Mean CoF Score: {df_equip['CoF_Score'].mean():.1f}")
 print(f"  Median CoF Score: {df_equip['CoF_Score'].median():.1f}")
 
-# CoF categories
+# Calculate percentile thresholds
+p75 = df_equip['CoF_Score'].quantile(0.75)
+p90 = df_equip['CoF_Score'].quantile(0.90)
+p95 = df_equip['CoF_Score'].quantile(0.95)
+
+print(f"  Percentile Thresholds: 75th={p75:.1f}, 90th={p90:.1f}, 95th={p95:.1f}")
+
+# CoF categories based on percentiles (industry standard)
+# DÜŞÜK: 0-75th percentile, ORTA: 75-90th, YÜKSEK: 90-95th, KRİTİK: 95-100th
 df_equip['CoF_Category'] = pd.cut(
     df_equip['CoF_Score'],
-    bins=[0, 40, 70, 90, 100],
+    bins=[0, 75, 90, 95, 100],
     labels=['DÜŞÜK', 'ORTA', 'YÜKSEK', 'KRİTİK'],
     include_lowest=True
 )
@@ -421,19 +423,14 @@ for horizon in HORIZONS:
     # Calculate raw risk
     df_risk['Risk_Raw'] = df_risk[pof_col] * df_risk['CoF_Raw']
 
-    # Normalize to 0-100 scale
-    min_risk = df_risk['Risk_Raw'].min()
-    max_risk = df_risk['Risk_Raw'].max()
+    # Convert to percentile-based score (0-100) - robust to outliers
+    df_risk['Risk_Score'] = df_risk['Risk_Raw'].rank(pct=True) * 100
 
-    if max_risk > min_risk:
-        df_risk['Risk_Score'] = ((df_risk['Risk_Raw'] - min_risk) / (max_risk - min_risk)) * 100
-    else:
-        df_risk['Risk_Score'] = 50.0
-
-    # Risk categories
+    # Risk categories based on percentiles (industry standard)
+    # DÜŞÜK: 0-75th percentile, ORTA: 75-90th, YÜKSEK: 90-95th, KRİTİK: 95-100th
     df_risk['Risk_Category'] = pd.cut(
         df_risk['Risk_Score'],
-        bins=[0, 40, 70, 90, 100],
+        bins=[0, 75, 90, 95, 100],
         labels=['DÜŞÜK', 'ORTA', 'YÜKSEK', 'KRİTİK'],
         include_lowest=True
     )
