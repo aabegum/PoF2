@@ -102,8 +102,15 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
     Returns:
         Series of validated datetime values (invalid → NaT)
     """
-    # Parse dates with Turkish date format support (DD/MM/YYYY)
-    parsed = pd.to_datetime(date_series, errors='coerce', dayfirst=True)
+    # Check if data is Excel serial date (integer/float format)
+    if pd.api.types.is_numeric_dtype(date_series):
+        # Excel serial dates: days since 1900-01-01 (Windows Excel)
+        # Valid range: ~18263 (1950) to ~45657 (2025)
+        # Origin = 1899-12-30 because Excel incorrectly treats 1900 as leap year
+        parsed = pd.to_datetime(date_series, unit='D', origin='1899-12-30', errors='coerce')
+    else:
+        # Parse dates with Turkish date format support (DD/MM/YYYY)
+        parsed = pd.to_datetime(date_series, errors='coerce', dayfirst=True)
 
     # Validation masks
     valid_mask = (
