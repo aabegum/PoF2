@@ -3,8 +3,8 @@ DATA TRANSFORMATION: FAULT-LEVEL → EQUIPMENT-LEVEL v3.1 (ENHANCED)
 Turkish EDAŞ PoF Prediction Project
 
 ENHANCEMENTS in v3.1:
-✓ Dual-track date validation (Option B): Separates Excel NULL detection from installation validation
-✓ Rejects 00:00:00 timestamps (Excel empty cells) for installation dates
+✓ Smart date validation: Rejects Excel NULL + suspicious recent dates (not all 00:00:00)
+✓ Preserves valid dates with 00:00:00 timestamps (normal Excel date storage)
 ✓ Simplified Equipment ID (prevents grouping bug): cbs_id → Ekipman ID → Generated unique ID
 ✓ Day-precision age calculation (not just year)
 ✓ Optional first work order fallback for missing ages
@@ -15,7 +15,7 @@ Key Features:
 ✓ Smart Equipment ID (SIMPLIFIED - prevents grouping bug)
 ✓ Unified Equipment Classification (Equipment_Type → Ekipman Sınıfı → fallbacks)
 ✓ Age source tracking (TESIS_TARIHI vs EDBS_IDATE vs FIRST_WORKORDER_PROXY)
-✓ Professional date validation (Excel NULL + 00:00:00 timestamp detection)
+✓ Professional date validation (rejects Excel NULL + suspicious recent dates only)
 ✓ Failure history aggregation (3/6/12 months)
 ✓ MTBF calculation
 ✓ Recurring fault detection (30/90 days)
@@ -26,7 +26,7 @@ Priority Logic:
 - Equipment ID: cbs_id → Ekipman ID → Generated unique ID (no grouping)
 - Equipment Class: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı
 - Installation Date: TESIS_TARIHI → EDBS_IDATE → First Work Order (optional)
-- Date Validation: Rejects 1900-01-01 + 00:00:00 timestamps (Excel defaults)
+- Date Validation: Rejects Excel NULL (1900-01-01) + suspicious recent dates with 00:00:00
 
 Input:  data/combined_data.xlsx (fault records)
 Output: data/equipment_level_data.csv (equipment records with ~30+ features)
@@ -94,8 +94,8 @@ print("="*100)
 def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, max_year=MAX_VALID_YEAR,
                             report=True, is_installation_date=False):
     """
-    Parse and validate dates with dual-track validation (Option B)
-    Separate handling for NULL dates vs installation dates
+    Parse and validate dates with smart validation
+    Rejects Excel NULL + suspicious recent dates (preserves valid 00:00:00 timestamps)
 
     Args:
         date_series: Series of date values
@@ -103,10 +103,15 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         min_year: Minimum valid year (default: 1950)
         max_year: Maximum valid year (default: 2025)
         report: Whether to print statistics (default: True)
-        is_installation_date: If True, apply stricter validation for installation dates
+        is_installation_date: If True, reject recent dates with 00:00:00 (likely defaults)
 
     Returns:
         Series of validated datetime values (invalid → NaT)
+
+    Note:
+        - ALWAYS rejects: 1900-01-01 (Excel NULL)
+        - For installation dates: Rejects recent (<30 days) dates with 00:00:00 only
+        - Preserves: Old dates with 00:00:00 (normal Excel date storage)
     """
     # Check if data is Excel serial date (integer/float format)
     if pd.api.types.is_numeric_dtype(date_series):
@@ -125,31 +130,35 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         (parsed.dt.year <= max_year)
     )
 
-    # 1. ALWAYS reject Excel NULL (1900-01-01)
+    # 1. ALWAYS reject Excel NULL (1900-01-01 exactly)
     excel_null_mask = (parsed == pd.Timestamp('1900-01-01'))
     invalid_excel_null = excel_null_mask.sum()
     valid_mask = valid_mask & ~excel_null_mask
 
-    # 2. ALWAYS reject dates with 00:00:00 timestamp (likely Excel defaults/empty cells)
-    zero_time_mask = (
-        parsed.notna() &
-        (parsed.dt.hour == 0) &
-        (parsed.dt.minute == 0) &
-        (parsed.dt.second == 0)
-    )
-    invalid_zero_time = zero_time_mask.sum()
-    valid_mask = valid_mask & ~zero_time_mask
-
-    # 3. For INSTALLATION dates only: additional validation
+    # 2. For INSTALLATION dates: Reject ONLY suspicious 00:00:00 timestamps
+    #    Valid: 2015-03-20 00:00:00 (normal date storage)
+    #    Invalid: Recent dates with 00:00:00 (likely Excel =TODAY() defaults)
+    invalid_zero_time = 0
     invalid_recent = 0
-    if is_installation_date:
-        # Flag very recent installations (within 30 days) for awareness
-        # These are kept in data but flagged - downstream logic can filter if needed
-        recent_mask = parsed >= (REFERENCE_DATE - pd.Timedelta(days=30))
-        invalid_recent = (parsed.notna() & recent_mask & valid_mask).sum()
 
-        # Note: We don't reject these automatically - they're flagged for review
-        # Equipment installed <30 days ago with faults is suspicious but possible
+    if is_installation_date:
+        # Identify dates with 00:00:00 timestamp
+        zero_time_mask = (
+            parsed.notna() &
+            (parsed.dt.hour == 0) &
+            (parsed.dt.minute == 0) &
+            (parsed.dt.second == 0)
+        )
+
+        # Only reject if ALSO within 30 days of reference date (suspicious)
+        recent_mask = parsed >= (REFERENCE_DATE - pd.Timedelta(days=30))
+        suspicious_recent = zero_time_mask & recent_mask
+
+        invalid_zero_time = suspicious_recent.sum()
+        invalid_recent = suspicious_recent.sum()
+        valid_mask = valid_mask & ~suspicious_recent
+
+        # Note: Old dates with 00:00:00 are KEPT (normal date storage)
 
     # Categorize other invalid dates
     invalid_old = (parsed.notna() & (parsed.dt.year < min_year) & ~excel_null_mask).sum()
@@ -172,13 +181,11 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         if invalid_excel_null > 0:
             issues.append(f"NULL:{invalid_excel_null}")
         if invalid_zero_time > 0:
-            issues.append(f"00:00:{invalid_zero_time}")
+            issues.append(f"Suspicious recent:{invalid_zero_time}")
         if invalid_old > 0:
             issues.append(f"<{min_year}:{invalid_old}")
         if invalid_future > 0:
             issues.append(f">{max_year}:{invalid_future}")
-        if invalid_recent > 0 and is_installation_date:
-            issues.append(f"Recent:{invalid_recent}")
 
         if issues:
             print(f"[{', '.join(issues)}]")
@@ -188,11 +195,11 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
     return parsed
 
 # Parse and validate all date columns
-print("\nInstallation Dates (strict: rejects NULL + 00:00:00):")
+print("\nInstallation Dates (rejects NULL + suspicious recent 00:00:00):")
 df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI', is_installation_date=True)
 df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE', is_installation_date=True)
 
-print("\nFault Timestamps (allows midnight 00:00:00):")
+print("\nFault Timestamps (normal validation):")
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True, is_installation_date=False)
 df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True, is_installation_date=False)
 
@@ -833,7 +840,7 @@ if optional_cols_found:
         print(f"   ✓ {col}: {coverage:,} ({pct:.1f}% coverage)")
 
 print(f"\n✅ ENHANCEMENTS IN v3.1:")
-print(f"   ✨ Dual-track date validation (Excel NULL + 00:00:00 detection)")
+print(f"   ✨ Smart date validation (rejects Excel NULL + suspicious recent dates)")
 unknown_equip_count = equipment_df['Ekipman_ID'].astype(str).str.startswith('UNKNOWN_', na=False).sum()
 print(f"   ✨ Simplified Equipment ID (prevents grouping bug for {unknown_equip_count} equipment)")
 print(f"   ✨ Day-precision age calculation (365.25 days/year)")
