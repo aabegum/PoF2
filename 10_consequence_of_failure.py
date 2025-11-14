@@ -176,31 +176,27 @@ else:
             equip_id_col = col
             break
 
-    # Find timestamp columns
-    start_col = None
-    end_col = None
-    for col in df_faults.columns:
-        if 'started at' in col.lower():
-            start_col = col
-        if 'ended at' in col.lower():
-            end_col = col
+    # Strategy 1: Try pre-calculated duration columns first (BEST!)
+    duration_col = None
+    avg_duration = pd.Series(dtype=float)  # Initialize as empty
 
-    if equip_id_col and start_col and end_col:
-        print(f"\n✓ Found columns: {equip_id_col}, {start_col}, {end_col}")
+    if 'duration time' in df_faults.columns:
+        duration_col = 'duration time'
+        print(f"\n✓ Found pre-calculated duration column: '{duration_col}'")
+    elif 'outage duration by hour' in df_faults.columns:
+        duration_col = 'outage duration by hour'
+        print(f"\n✓ Found pre-calculated duration column: '{duration_col}' (in hours)")
 
-        # Parse timestamps
-        df_faults[start_col] = pd.to_datetime(df_faults[start_col], errors='coerce')
-        df_faults[end_col] = pd.to_datetime(df_faults[end_col], errors='coerce')
+    if duration_col and equip_id_col:
+        print(f"→ Strategy 1: Using pre-calculated durations")
 
-        # Check how many valid timestamps we have
-        valid_start = df_faults[start_col].notna().sum()
-        valid_end = df_faults[end_col].notna().sum()
-        print(f"  Valid timestamps: {valid_start}/{len(df_faults)} start, {valid_end}/{len(df_faults)} end")
-
-        # Calculate duration in minutes
-        df_faults['Outage_Duration_Minutes'] = (
-            (df_faults[end_col] - df_faults[start_col]).dt.total_seconds() / 60
-        )
+        # Use pre-calculated durations
+        if 'hour' in duration_col.lower():
+            # Convert hours to minutes
+            df_faults['Outage_Duration_Minutes'] = pd.to_numeric(df_faults[duration_col], errors='coerce') * 60
+        else:
+            # Assume it's already in minutes
+            df_faults['Outage_Duration_Minutes'] = pd.to_numeric(df_faults[duration_col], errors='coerce')
 
         # Filter valid durations (positive, < 1 week)
         valid_durations = df_faults[
@@ -208,7 +204,7 @@ else:
             (df_faults['Outage_Duration_Minutes'] < 10080)  # 7 days
         ]
 
-        print(f"  Valid durations (0 < duration < 7 days): {len(valid_durations):,}/{len(df_faults):,}")
+        print(f"  Valid pre-calculated durations: {len(valid_durations):,}/{len(df_faults):,}")
 
         if len(valid_durations) > 0:
             # Calculate average per equipment
@@ -219,32 +215,87 @@ else:
             print(f"  Median duration: {avg_duration.median():.1f} minutes")
             print(f"  Range: {avg_duration.min():.1f} - {avg_duration.max():.1f} minutes")
         else:
-            print(f"\n⚠️  Warning: No valid outage durations found!")
-            print(f"  Possible issues: Invalid timestamps, negative durations, or durations > 7 days")
-            print(f"  Using default outage duration: 120 minutes")
-            avg_duration = pd.Series(dtype=float)  # Empty series
+            print(f"\n⚠️  Warning: No valid pre-calculated durations found!")
 
-        # Merge with equipment data
-        if len(avg_duration) > 0:
-            df_equip = df_equip.merge(
-                avg_duration.rename('Avg_Outage_Minutes'),
-                left_on='Ekipman_ID',
-                right_index=True,
-                how='left'
+    # Strategy 2: Calculate from actual timestamps (FALLBACK) - only if Strategy 1 failed
+    if len(avg_duration) == 0 and equip_id_col:
+        print(f"\n→ Strategy 2: Calculating from timestamps")
+
+        # Find actual timestamp columns (not planned/estimated)
+        start_col = None
+        end_col = None
+
+        # First try actual times
+        if 'started at' in df_faults.columns and 'ended at' in df_faults.columns:
+            start_col = 'started at'
+            end_col = 'ended at'
+            print(f"✓ Found actual timestamp columns: '{start_col}', '{end_col}'")
+        else:
+            # Fallback to planned/estimated
+            for col in df_faults.columns:
+                if 'started at' in col.lower() and not start_col:
+                    start_col = col
+                if 'ended at' in col.lower() and not end_col:
+                    end_col = col
+
+            if start_col and end_col:
+                print(f"✓ Found timestamp columns: '{start_col}', '{end_col}'")
+
+        if start_col and end_col:
+            # Parse timestamps
+            df_faults[start_col] = pd.to_datetime(df_faults[start_col], errors='coerce')
+            df_faults[end_col] = pd.to_datetime(df_faults[end_col], errors='coerce')
+
+            # Check how many valid timestamps we have
+            valid_start = df_faults[start_col].notna().sum()
+            valid_end = df_faults[end_col].notna().sum()
+            print(f"  Valid timestamps: {valid_start:,}/{len(df_faults):,} start, {valid_end:,}/{len(df_faults):,} end")
+
+            # Calculate duration in minutes
+            df_faults['Outage_Duration_Minutes'] = (
+                (df_faults[end_col] - df_faults[start_col]).dt.total_seconds() / 60
             )
 
-            # Fill missing with median
-            median_duration = avg_duration.median()
-            df_equip['Avg_Outage_Minutes'].fillna(median_duration, inplace=True)
-            missing_count = df_equip['Avg_Outage_Minutes'].isna().sum()
-            if missing_count > 0:
-                print(f"  ✓ Filled {missing_count} missing values with median ({median_duration:.1f} min)")
+            # Filter valid durations (positive, < 1 week)
+            valid_durations = df_faults[
+                (df_faults['Outage_Duration_Minutes'] > 0) &
+                (df_faults['Outage_Duration_Minutes'] < 10080)  # 7 days
+            ]
+
+            print(f"  Valid durations (0 < duration < 7 days): {len(valid_durations):,}/{len(df_faults):,}")
+
+            if len(valid_durations) > 0:
+                # Calculate average per equipment
+                avg_duration = valid_durations.groupby(equip_id_col)['Outage_Duration_Minutes'].mean()
+
+                print(f"\n✓ Calculated average outage duration for {len(avg_duration):,} equipment")
+                print(f"  Mean duration: {avg_duration.mean():.1f} minutes")
+                print(f"  Median duration: {avg_duration.median():.1f} minutes")
+                print(f"  Range: {avg_duration.min():.1f} - {avg_duration.max():.1f} minutes")
+            else:
+                print(f"\n⚠️  Warning: No valid timestamp-based durations found!")
+                print(f"  Possible issues: Invalid timestamps, negative durations, or durations > 7 days")
         else:
-            # No valid durations - use default
-            print(f"  ✓ Using default outage duration for all equipment: 120 minutes")
-            df_equip['Avg_Outage_Minutes'] = 120
+            print(f"\n⚠️  Warning: Could not find timestamp columns")
+
+    # Merge with equipment data or use default
+    if len(avg_duration) > 0:
+        df_equip = df_equip.merge(
+            avg_duration.rename('Avg_Outage_Minutes'),
+            left_on='Ekipman_ID',
+            right_index=True,
+            how='left'
+        )
+
+        # Fill missing with median
+        median_duration = avg_duration.median()
+        df_equip['Avg_Outage_Minutes'].fillna(median_duration, inplace=True)
+        missing_count = df_equip['Avg_Outage_Minutes'].isna().sum()
+        if missing_count > 0:
+            print(f"  ✓ Filled {missing_count:,} missing values with median ({median_duration:.1f} min)")
     else:
-        print(f"\n⚠️  Warning: Could not find required columns - using default outage duration")
+        # No valid durations from either strategy - use default
+        print(f"\n⚠️  Using default outage duration for all equipment: 120 minutes")
         df_equip['Avg_Outage_Minutes'] = 120
 
 # ============================================================================
