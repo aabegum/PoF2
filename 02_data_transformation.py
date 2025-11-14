@@ -214,11 +214,12 @@ results_edbs.columns = ['Ekipman_Yaşı_Gün_EDBS', 'Yaş_Kaynak_EDBS', 'Kurulum
 df[['Ekipman_Yaşı_Gün_EDBS', 'Yaş_Kaynak_EDBS', 'Kurulum_Tarihi_EDBS']] = results_edbs
 df['Ekipman_Yaşı_Yıl_EDBS'] = df['Ekipman_Yaşı_Gün_EDBS'] / 365.25
 
-# Create primary age columns for backward compatibility (default to EDBS since it's physical age)
-df['Ekipman_Yaşı_Gün'] = df['Ekipman_Yaşı_Gün_EDBS']
-df['Ekipman_Yaşı_Yıl'] = df['Ekipman_Yaşı_Yıl_EDBS']
-df['Yaş_Kaynak'] = df['Yaş_Kaynak_EDBS']
-df['Ekipman_Kurulum_Tarihi'] = df['Kurulum_Tarihi_EDBS']
+# Create primary age columns (default to TESIS since EDBS is just database entry date)
+# EDBS_IDATE = EdaBİS system entry date (2017+), not physical installation age
+df['Ekipman_Yaşı_Gün'] = df['Ekipman_Yaşı_Gün_TESIS']
+df['Ekipman_Yaşı_Yıl'] = df['Ekipman_Yaşı_Yıl_TESIS']
+df['Yaş_Kaynak'] = df['Yaş_Kaynak_TESIS']
+df['Ekipman_Kurulum_Tarihi'] = df['Kurulum_Tarihi_TESIS']
 
 # Statistics - TESIS-primary
 print("\n✓ TESIS-Primary Age Results (Commissioning/Database Age):")
@@ -233,7 +234,7 @@ if len(valid_ages_tesis) > 0:
     print(f"  Stats: Mean={valid_ages_tesis.mean():.1f}y, Median={valid_ages_tesis.median():.1f}y, Max={valid_ages_tesis.max():.1f}y")
 
 # Statistics - EDBS-primary
-print("\n✓ EDBS-Primary Age Results (Physical Installation Age):")
+print("\n✓ EDBS-Primary Age Results (Database Entry Age - EdaBİS System ~2017+):")
 print(f"  Source Distribution:")
 source_counts_edbs = df['Yaş_Kaynak_EDBS'].value_counts()
 for source, count in source_counts_edbs.items():
@@ -255,10 +256,10 @@ if len(valid_ages_tesis) > 0 and len(valid_ages_edbs) > 0:
         print(f"  Median difference: {age_diff.median():.1f} years")
         print(f"  Max difference: {age_diff.max():.1f} years")
 
-# Use EDBS as default (physical age)
+# Use TESIS as default (commissioning age - most meaningful for PoF)
 valid_ages = df[df['Yaş_Kaynak'] != 'MISSING']['Ekipman_Yaşı_Yıl']
 if len(valid_ages) > 0:
-    print(f"\n✓ Default Age (EDBS-primary) Distribution:")
+    print(f"\n✓ Default Age (TESIS-primary / Commissioning Age) Distribution:")
     age_bins = [0, 5, 10, 20, 30, 50, 75]
     age_labels = ['0-5 yrs', '5-10 yrs', '10-20 yrs', '20-30 yrs', '30-50 yrs', '50-75 yrs']
     age_dist = pd.cut(valid_ages, bins=age_bins, labels=age_labels).value_counts().sort_index()
@@ -556,13 +557,13 @@ print("\n" + "="*100)
 print("STEP 7: AGGREGATING TO EQUIPMENT LEVEL")
 print("="*100)
 
-# Sort by EDBS Age_Source to prioritize during aggregation (EDBS = physical age)
-source_priority_edbs = {'EDBS': 0, 'TESIS': 1, 'MISSING': 2}
-df['_source_priority'] = df['Yaş_Kaynak_EDBS'].map(source_priority_edbs).fillna(99)
+# Sort by TESIS Age_Source to prioritize during aggregation (TESIS = commissioning age)
+source_priority_tesis = {'TESIS': 0, 'EDBS': 1, 'WORKORDER': 2, 'MISSING': 3}
+df['_source_priority'] = df['Yaş_Kaynak_TESIS'].map(source_priority_tesis).fillna(99)
 df = df.sort_values('_source_priority')
 df = df.drop(columns=['_source_priority'])
 
-print("\n  ✓ Sorted data to prioritize EDBS_IDATE as primary age source during aggregation")
+print("\n  ✓ Sorted data to prioritize TESIS_TARIHI as primary age source during aggregation")
 
 # Build aggregation dictionary dynamically based on available columns
 agg_dict = {
@@ -579,19 +580,19 @@ agg_dict = {
     'İlçe': 'first',
     'Mahalle': 'first',
 
-    # DUAL Age data (both TESIS-primary and EDBS-primary)
+    # DUAL Age data (default = TESIS-primary commissioning age)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
     'Age_Source': 'first',
 
-    # TESIS-primary age (commissioning/database age)
+    # TESIS-primary age (commissioning age - DEFAULT for modeling)
     'Kurulum_Tarihi_TESIS': 'first',
     'Ekipman_Yaşı_Gün_TESIS': 'first',
     'Ekipman_Yaşı_Yıl_TESIS': 'first',
     'Yaş_Kaynak_TESIS': 'first',
 
-    # EDBS-primary age (physical installation age)
+    # EDBS-primary age (EdaBİS database entry age ~2017+, NOT physical installation)
     'Kurulum_Tarihi_EDBS': 'first',
     'Ekipman_Yaşı_Gün_EDBS': 'first',
     'Ekipman_Yaşı_Yıl_EDBS': 'first',
