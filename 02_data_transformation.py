@@ -29,7 +29,18 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
 import warnings
+import sys
 warnings.filterwarnings('ignore')
+
+# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 pd.set_option('display.max_columns', None)
 
