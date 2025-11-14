@@ -95,7 +95,7 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
                             report=True, is_installation_date=False):
     """
     Parse and validate dates with smart validation
-    Rejects Excel NULL + suspicious recent dates (preserves valid 00:00:00 timestamps)
+    Rejects Excel NULL + time-only values + suspicious recent dates
 
     Args:
         date_series: Series of date values
@@ -109,10 +109,18 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         Series of validated datetime values (invalid → NaT)
 
     Note:
-        - ALWAYS rejects: 1900-01-01 (Excel NULL)
+        - ALWAYS rejects: 1900-01-01 (Excel NULL), time-only values like "00:00:00"
         - For installation dates: Rejects recent (<30 days) dates with 00:00:00 only
         - Preserves: Old dates with 00:00:00 (normal Excel date storage)
     """
+    # PRE-CHECK: Reject time-only values (e.g., "00:00:00", "12:30:00") before parsing
+    time_only_mask = pd.Series([False] * len(date_series), index=date_series.index)
+    if pd.api.types.is_string_dtype(date_series) or pd.api.types.is_object_dtype(date_series):
+        # Check if value matches time pattern (HH:MM:SS or similar)
+        time_only_mask = date_series.astype(str).str.match(r'^\s*\d{1,2}:\d{2}(:\d{2})?\s*$', na=False)
+
+    invalid_time_only = time_only_mask.sum()
+
     # Check if data is Excel serial date (integer/float format)
     if pd.api.types.is_numeric_dtype(date_series):
         # Excel serial dates: days since 1900-01-01 (Windows Excel)
@@ -121,7 +129,10 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
         parsed = pd.to_datetime(date_series, unit='D', origin='1899-12-30', errors='coerce')
     else:
         # Parse dates with Turkish date format support (DD/MM/YYYY)
-        parsed = pd.to_datetime(date_series, errors='coerce', dayfirst=True)
+        # Set time-only values to NaT before parsing
+        date_series_clean = date_series.copy()
+        date_series_clean[time_only_mask] = None
+        parsed = pd.to_datetime(date_series_clean, errors='coerce', dayfirst=True)
 
     # Initialize validation masks
     valid_mask = (
@@ -171,13 +182,15 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
     if report:
         total = len(date_series)
         valid = valid_mask.sum()
-        invalid_total = invalid_excel_null + invalid_zero_time + invalid_old + invalid_future
+        invalid_total = invalid_time_only + invalid_excel_null + invalid_zero_time + invalid_old + invalid_future
 
         status = "✓" if valid/total > 0.95 else ("⚠" if valid/total > 0.80 else "❌")
         print(f"  {status} {column_name:28s}: {valid:6,}/{total:6,} ({valid/total*100:5.1f}%) ", end="")
 
         # Show only significant issues in one line
         issues = []
+        if invalid_time_only > 0:
+            issues.append(f"Time-only:{invalid_time_only}")
         if invalid_excel_null > 0:
             issues.append(f"NULL:{invalid_excel_null}")
         if invalid_zero_time > 0:
