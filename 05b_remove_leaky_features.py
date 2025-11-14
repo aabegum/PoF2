@@ -26,6 +26,16 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import warnings
+import sys
+# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 warnings.filterwarnings('ignore')
 
 # Display settings

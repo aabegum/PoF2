@@ -39,6 +39,16 @@ import seaborn as sns
 from datetime import datetime
 import pickle
 import warnings
+import sys
+# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 warnings.filterwarnings('ignore')
 
 # Model libraries
