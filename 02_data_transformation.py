@@ -53,11 +53,11 @@ pd.set_option('display.max_columns', None)
 # CONFIGURATION
 # ============================================================================
 
-# Constants
-CURRENT_YEAR = 2025
+# Constants (dynamic - updates based on current date)
+CURRENT_YEAR = datetime.now().year
 MIN_VALID_YEAR = 1950
-MAX_VALID_YEAR = 2025
-REFERENCE_DATE = pd.Timestamp('2025-06-25')
+MAX_VALID_YEAR = datetime.now().year + 1  # Allow dates up to next year for data entry flexibility
+REFERENCE_DATE = pd.Timestamp(datetime.now())  # Use current date as reference
 
 # Feature flags
 USE_FIRST_WORKORDER_FALLBACK = True  # Set to True to enable Option 3 (first work order as age proxy)
