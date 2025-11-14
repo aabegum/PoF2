@@ -502,6 +502,15 @@ print("\n" + "="*100)
 print("STEP 7: AGGREGATING TO EQUIPMENT LEVEL")
 print("="*100)
 
+# Sort by Age_Source to prioritize TESIS_TARIHI when aggregating with 'first'
+# This ensures that for equipment with multiple faults, we prefer TESIS_TARIHI over EDBS_IDATE
+source_priority = {'TESIS_TARIHI': 0, 'EDBS_IDATE': 1, 'FIRST_WORKORDER_PROXY': 2, 'MISSING': 3}
+df['_source_priority'] = df['Age_Source'].map(source_priority).fillna(99)
+df = df.sort_values('_source_priority')
+df = df.drop(columns=['_source_priority'])
+
+print("\n  ✓ Sorted data to prioritize TESIS_TARIHI as age source during aggregation")
+
 # Build aggregation dictionary dynamically based on available columns
 agg_dict = {
     # Equipment identification & classification
@@ -517,7 +526,7 @@ agg_dict = {
     'İlçe': 'first',
     'Mahalle': 'first',
 
-    # Age data (ENHANCED - includes install date and days)
+    # Age data (ENHANCED - TESIS_TARIHI prioritized via pre-sort)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
