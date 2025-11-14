@@ -735,7 +735,27 @@ if has_customer_cols:
         (df['total_customer_count_Avg'] + 1)
     )
 
-    print(f"✓ Customer ratios calculated:")
+    # Validation: Check for invalid ratios >100% (Simpson's Paradox from averaging)
+    invalid_urban = (df['Kentsel_Müşteri_Oranı'] > 1.0).sum()
+    invalid_rural = (df['Kırsal_Müşteri_Oranı'] > 1.0).sum()
+    invalid_og = (df['OG_Müşteri_Oranı'] > 1.0).sum()
+
+    if invalid_urban > 0 or invalid_rural > 0 or invalid_og > 0:
+        print(f"⚠ WARNING: Detected ratios >100% (Simpson's Paradox from averaging):")
+        if invalid_urban > 0:
+            print(f"    Urban ratio >100%: {invalid_urban} equipment (max={df['Kentsel_Müşteri_Oranı'].max():.2%})")
+        if invalid_rural > 0:
+            print(f"    Rural ratio >100%: {invalid_rural} equipment (max={df['Kırsal_Müşteri_Oranı'].max():.2%})")
+        if invalid_og > 0:
+            print(f"    MV ratio >100%: {invalid_og} equipment (max={df['OG_Müşteri_Oranı'].max():.2%})")
+        print(f"  Capping at 100% (defensive fix for modeling)...")
+
+        # Cap ratios at 1.0 (100%)
+        df['Kentsel_Müşteri_Oranı'] = df['Kentsel_Müşteri_Oranı'].clip(upper=1.0)
+        df['Kırsal_Müşteri_Oranı'] = df['Kırsal_Müşteri_Oranı'].clip(upper=1.0)
+        df['OG_Müşteri_Oranı'] = df['OG_Müşteri_Oranı'].clip(upper=1.0)
+
+    print(f"✓ Customer ratios calculated (capped at 100%):")
     print(f"  Urban customer ratio: Mean={df['Kentsel_Müşteri_Oranı'].mean():.2%}, Max={df['Kentsel_Müşteri_Oranı'].max():.2%}")
     print(f"  Rural customer ratio: Mean={df['Kırsal_Müşteri_Oranı'].mean():.2%}, Max={df['Kırsal_Müşteri_Oranı'].max():.2%}")
     print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
