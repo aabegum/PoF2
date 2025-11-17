@@ -146,7 +146,12 @@ for feat, info in REDUNDANT_FEATURES.items():
         print(f"\n❌ {feat}")
         print(f"   Reason: {info['reason']}")
         print(f"   Keep instead: {info['keep_instead']}")
-        print(f"   Correlation: r={info['correlation']:.2f}")
+        # Handle both numeric and string correlation values
+        corr = info['correlation']
+        if isinstance(corr, (int, float)):
+            print(f"   Correlation: r={corr:.2f}")
+        else:
+            print(f"   Correlation: {corr}")
     else:
         print(f"\n⚠️  {feat} - Not in dataset (already removed)")
 
