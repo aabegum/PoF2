@@ -227,15 +227,26 @@ high_vif_count = (vif_before['VIF'] > VIF_THRESHOLD).sum()
 print(f"\n⚠ Features with VIF > {VIF_THRESHOLD}: {high_vif_count}")
 
 # Protected features (critical domain features that should never be removed)
+# OPTIMIZED FOR DUAL MODELS: Chronic Repeater Classification + Survival Analysis
 PROTECTED_FEATURES = [
-    'Arıza_Sayısı_12ay',              # 12-month failure count (PRIMARY predictor)
-    'MTBF_Gün',                        # Mean Time Between Failures (core reliability metric)
-    'Tekrarlayan_Arıza_90gün_Flag',   # Chronic repeater flag
-    'Ilk_Arizaya_Kadar_Yil',          # Time to first failure (infant mortality)
-    'Son_Arıza_Gun_Sayisi',           # Days since last failure (recency)
-    'Ekipman_Yaşı_Yıl',               # Equipment age (fundamental predictor)
-    'Ekipman_Yaşı_Yıl_TESIS_first',   # TESIS age (alternative age source)
-    'Ekipman_Yaşı_Yıl_EDBS_first',    # EDBS age (alternative age source)
+    # === CHRONIC REPEATER INDICATORS (Model 2) ===
+    'Tekrarlayan_Arıza_90gün_Flag',   # 🔴 CRITICAL: 94 equipment (12%) - replace vs repair decision
+    'Arıza_Sayısı_12ay',              # 12-month failure count (PRIMARY predictor for classification)
+
+    # === SURVIVAL ANALYSIS COVARIATES (Model 1) ===
+    'MTBF_Gün',                        # Mean Time Between Failures (classical reliability metric)
+    'Ilk_Arizaya_Kadar_Yil',          # Time to first failure (infant mortality detection)
+    'Son_Arıza_Gun_Sayisi',           # Days since last failure (recency - key for Cox model)
+
+    # === EQUIPMENT CHARACTERISTICS (Both Models) ===
+    'Ekipman_Yaşı_Yıl',               # Equipment age (fundamental predictor - bathtub curve)
+    'Ekipman_Yaşı_Yıl_TESIS_first',   # TESIS age (TESIS_TARIHI priority - commissioning date)
+    'Ekipman_Yaşı_Yıl_EDBS_first',    # EDBS age (alternative source)
+
+    # === INTERPRETABLE RISK SCORES (Business Value) ===
+    'Composite_PoF_Risk_Score',       # 🎯 BEST risk score for stakeholder communication
+    'Failure_Free_3M',                # Failure-free indicator (safe - calculated before cutoff)
+    'Neden_Değişim_Flag',             # Cause code changes (failure pattern instability)
 ]
 
 # Filter to only include protected features that exist in the dataset
@@ -463,21 +474,36 @@ else:
     plt.close()
     print(f"✓ Feature importance plot saved to: {output_dir / 'feature_importance.png'}")
     
-    # Remove low-importance features
+    # Remove low-importance features (EXCEPT protected features)
     print(f"\n--- Removing Low-Importance Features (< {IMPORTANCE_THRESHOLD}) ---")
-    
+    print(f"    Note: Protected features will NOT be removed even if below threshold")
+
     low_importance = feature_importance_df[feature_importance_df['Importance'] < IMPORTANCE_THRESHOLD]
-    
+
     if len(low_importance) > 0:
         print(f"  Features below threshold: {len(low_importance)}")
+
+        # Separate protected vs removable low-importance features
+        removable = []
+        protected_low = []
+
         for feat, imp in low_importance[['Feature', 'Importance']].values:
-            print(f"    ❌ {feat}: {imp:.4f}")
-        
-        features_to_keep = feature_importance_df[
-            feature_importance_df['Importance'] >= IMPORTANCE_THRESHOLD
-        ]['Feature'].tolist()
-        
-        print(f"\n✓ Removed {len(low_importance)} low-importance features")
+            if feat in protected_in_data:
+                protected_low.append((feat, imp))
+                print(f"    🔒 {feat}: {imp:.4f} (PROTECTED - keeping despite low importance)")
+            else:
+                removable.append(feat)
+                print(f"    ❌ {feat}: {imp:.4f}")
+
+        # Keep features that are either above threshold OR protected
+        features_to_keep = (
+            feature_importance_df[feature_importance_df['Importance'] >= IMPORTANCE_THRESHOLD]['Feature'].tolist() +
+            [f for f, _ in protected_low]  # Add back protected features
+        )
+
+        print(f"\n✓ Removed {len(removable)} low-importance features")
+        if len(protected_low) > 0:
+            print(f"✓ Kept {len(protected_low)} protected features despite low importance")
     else:
         print(f"✓ All features meet importance threshold")
 
