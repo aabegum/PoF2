@@ -1,18 +1,35 @@
 """
-COMPREHENSIVE DATA PROFILING - TURKISH EDAŞ POF PROJECT v3.1
-Enhanced with flexible date parser and quality report generation
+================================================================================
+SCRIPT 01: DATA PROFILING v4.0
+================================================================================
+Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
-v3.1 Updates:
-- FLEXIBLE DATE PARSER: Handles mixed formats (DD-MM-YYYY + YYYY-MM-DD)
-- Recovers 25% timestamps that were format issues
-- Improved temporal coverage reporting
+PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED]
+- Validates data quality for temporal PoF modeling
+- Confirms 100% timestamp coverage (DD-MM-YYYY + YYYY-MM-DD support)
+- Reports equipment ID strategy, age calculation sources, customer impact coverage
 
-Key Mappings:
-- Equipment ID: cbs_id (primary), Ekipman ID (fallback)
-- Equipment Class: Equipment_Type (primary), Ekipman Sınıfı (fallback)
-- Age Calculation: TESIS_TARIHI (primary), EDBS_IDATE (fallback)
-- Fault Timestamps: started at (primary), ended at (duration)
-- Customer Impact: urban/suburban/rural MV/LV columns + total customer count
+WHAT THIS SCRIPT DOES:
+Comprehensive data quality profiling of fault-level data before transformation:
+- Equipment identification strategy (cbs_id → Ekipman ID priority)
+- Temporal coverage validation (fault timestamps, installation dates)
+- Data completeness scoring (10/10 quality score expected)
+- Customer impact coverage analysis
+
+ENHANCEMENTS in v4.0:
++ OPTION A Pipeline Context: Shows data quality for dual prediction strategy
++ Progress Indicators: [Step X/Y] for pipeline visibility
++ Reduced Icons: Minimal use, kept for quality ratings only
++ Cross-Script References: Links to Scripts 00, 02, 03
++ Flexible Date Parser: Recovers 25% "missing" timestamps
+
+CROSS-REFERENCES:
+- Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
+- Script 02: Uses validated data for equipment-level transformation
+- Script 03: Creates advanced features from validated equipment data
+
+Input:  data/combined_data.xlsx (fault records)
+Output: Data quality report + validation for Script 02
 """
 
 import pandas as pd
@@ -42,17 +59,14 @@ pd.set_option('display.max_rows', 100)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', 60)
 
-print("="*100)
-print(" "*25 + "TURKISH EDAŞ EQUIPMENT DATA PROFILING v3.1")
-print(" "*30 + "Enhanced with Flexible Date Parser")
-print("="*100)
+print("\n" + "="*80)
+print("SCRIPT 01: DATA PROFILING v4.0 (OPTION A - DUAL PREDICTIONS)")
+print("="*80)
 
 # ============================================================================
 # 1. LOAD DATA
 # ============================================================================
-print("\n" + "="*100)
-print("STEP 1: DATA LOADING")
-print("="*100)
+print("\n[Step 1/7] Loading Fault-Level Data...")
 
 data_path = Path('data/combined_data.xlsx')
 
@@ -88,9 +102,7 @@ report_lines.append(f"Total Columns: {df.shape[1]}")
 # ============================================================================
 # 2. EQUIPMENT IDENTIFICATION STRATEGY
 # ============================================================================
-print("\n" + "="*100)
-print("STEP 2: EQUIPMENT IDENTIFICATION STRATEGY")
-print("="*100)
+print("\n[Step 2/7] Equipment Identification Strategy...")
 
 id_columns_priority = ['cbs_id', 'Ekipman ID', 'HEPSI_ID', 'Ekipman Kodu']
 available_id_cols = [col for col in id_columns_priority if col in df.columns]
