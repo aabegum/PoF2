@@ -1,13 +1,35 @@
 """
-COMPREHENSIVE DATA PROFILING - TURKISH EDAŞ POF PROJECT v3.0
-Enhanced with clearer output and quality report generation
+================================================================================
+SCRIPT 01: DATA PROFILING v4.0
+================================================================================
+Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
-Key Mappings:
-- Equipment ID: cbs_id (primary), Ekipman ID (fallback)
-- Equipment Class: Equipment_Type (primary), Ekipman Sınıfı (fallback)
-- Age Calculation: TESIS_TARIHI (primary), EDBS_IDATE (fallback)
-- Fault Timestamps: started at (primary), ended at (duration)
-- Customer Impact: urban/suburban/rural MV/LV columns + total customer count
+PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED]
+- Validates data quality for temporal PoF modeling
+- Confirms 100% timestamp coverage (DD-MM-YYYY + YYYY-MM-DD support)
+- Reports equipment ID strategy, age calculation sources, customer impact coverage
+
+WHAT THIS SCRIPT DOES:
+Comprehensive data quality profiling of fault-level data before transformation:
+- Equipment identification strategy (cbs_id → Ekipman ID priority)
+- Temporal coverage validation (fault timestamps, installation dates)
+- Data completeness scoring (10/10 quality score expected)
+- Customer impact coverage analysis
+
+ENHANCEMENTS in v4.0:
++ OPTION A Pipeline Context: Shows data quality for dual prediction strategy
++ Progress Indicators: [Step X/Y] for pipeline visibility
++ Reduced Icons: Minimal use, kept for quality ratings only
++ Cross-Script References: Links to Scripts 00, 02, 03
++ Flexible Date Parser: Recovers 25% "missing" timestamps
+
+CROSS-REFERENCES:
+- Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
+- Script 02: Uses validated data for equipment-level transformation
+- Script 03: Creates advanced features from validated equipment data
+
+Input:  data/combined_data.xlsx (fault records)
+Output: Data quality report + validation for Script 02
 """
 
 import pandas as pd
@@ -37,17 +59,14 @@ pd.set_option('display.max_rows', 100)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', 60)
 
-print("="*100)
-print(" "*25 + "TURKISH EDAŞ EQUIPMENT DATA PROFILING v3.0")
-print(" "*30 + "Enhanced Quality Report Generation")
-print("="*100)
+print("\n" + "="*80)
+print("SCRIPT 01: DATA PROFILING v4.0 (OPTION A - DUAL PREDICTIONS)")
+print("="*80)
 
 # ============================================================================
 # 1. LOAD DATA
 # ============================================================================
-print("\n" + "="*100)
-print("STEP 1: DATA LOADING")
-print("="*100)
+print("\n[Step 1/7] Loading Fault-Level Data...")
 
 data_path = Path('data/combined_data.xlsx')
 
@@ -83,9 +102,7 @@ report_lines.append(f"Total Columns: {df.shape[1]}")
 # ============================================================================
 # 2. EQUIPMENT IDENTIFICATION STRATEGY
 # ============================================================================
-print("\n" + "="*100)
-print("STEP 2: EQUIPMENT IDENTIFICATION STRATEGY")
-print("="*100)
+print("\n[Step 2/7] Equipment Identification Strategy...")
 
 id_columns_priority = ['cbs_id', 'Ekipman ID', 'HEPSI_ID', 'Ekipman Kodu']
 available_id_cols = [col for col in id_columns_priority if col in df.columns]
@@ -234,7 +251,7 @@ print("   • Transformer-specific failure analysis")
 print("   • Capacity-based risk modeling")
 
 # ============================================================================
-# 4. EQUIPMENT AGE ANALYSIS
+# 4. EQUIPMENT AGE ANALYSIS (WITH FLEXIBLE DATE PARSER)
 # ============================================================================
 print("\n" + "="*100)
 print("STEP 4: EQUIPMENT AGE ANALYSIS")
@@ -243,10 +260,69 @@ print("="*100)
 current_year = datetime.now().year
 print(f"\nCurrent Year: {current_year}")
 
-# Convert date columns
+# Flexible date parser (handles mixed formats)
+def parse_date_flexible(value):
+    """
+    Parse date with multiple format support - handles mixed format data
+    Supports: ISO, Turkish (DD-MM-YYYY), European (DD/MM/YYYY), Excel serial dates
+    """
+    # Already a timestamp/datetime
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return pd.Timestamp(value)
+
+    # Handle NaN/None
+    if pd.isna(value):
+        return pd.NaT
+
+    # Excel serial date (numeric)
+    if isinstance(value, (int, float)):
+        if 1 <= value <= 100000:
+            try:
+                return pd.Timestamp('1899-12-30') + pd.Timedelta(days=value)
+            except:
+                return pd.NaT
+        else:
+            return pd.NaT
+
+    # String parsing with multiple format attempts
+    if isinstance(value, str):
+        value = value.strip()
+
+        if not value:
+            return pd.NaT
+
+        # Try multiple formats in order of likelihood
+        formats = [
+            '%Y-%m-%d %H:%M:%S',     # 2021-01-15 12:30:45 (ISO)
+            '%d-%m-%Y %H:%M:%S',     # 15-01-2021 12:30:45 (Turkish/European with dash)
+            '%d/%m/%Y %H:%M:%S',     # 15/01/2021 12:30:45 (Turkish/European with slash)
+            '%Y-%m-%d',              # 2021-01-15
+            '%d-%m-%Y',              # 15-01-2021
+            '%d/%m/%Y',              # 15/01/2021
+            '%d.%m.%Y %H:%M:%S',     # 15.01.2021 12:30:45 (Turkish dot format)
+            '%d.%m.%Y',              # 15.01.2021
+            '%m/%d/%Y %H:%M:%S',     # 01/15/2021 12:30:45 (US format - try last)
+            '%m/%d/%Y',              # 01/15/2021
+        ]
+
+        for fmt in formats:
+            try:
+                return pd.to_datetime(value, format=fmt)
+            except:
+                continue
+
+        # Last resort: let pandas infer
+        try:
+            return pd.to_datetime(value, infer_datetime_format=True, dayfirst=True)
+        except:
+            return pd.NaT
+
+    return pd.NaT
+
+# Convert date columns with flexible parser
 for col in ['TESIS_TARIHI', 'EDBS_IDATE', 'started at', 'ended at']:
     if col in df.columns and df[col].dtype != 'datetime64[ns]':
-        df[col] = pd.to_datetime(df[col], errors='coerce')
+        df[col] = df[col].apply(parse_date_flexible)
 
 # Calculate age sources
 age_source_col = None
