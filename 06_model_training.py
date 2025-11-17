@@ -178,11 +178,20 @@ print("\n" + "="*100)
 print("STEP 1: LOADING SELECTED FEATURES")
 print("="*100)
 
-data_path = Path('data/features_selected_clean.csv')  # Use clean features
+# Try reduced features first (fixes data leakage), fall back to clean features
+data_path_reduced = Path('data/features_reduced.csv')
+data_path_clean = Path('data/features_selected_clean.csv')
 
-if not data_path.exists():
-    print(f"\n❌ ERROR: File not found at {data_path}")
-    print("Please run 05_feature_selection.py first!")
+if data_path_reduced.exists():
+    data_path = data_path_reduced
+    print(f"\n✓ Using REDUCED features (data leakage fixed)")
+elif data_path_clean.exists():
+    data_path = data_path_clean
+    print(f"\n⚠️  Using CLEAN features (may have data leakage - run 05c_reduce_feature_redundancy.py)")
+else:
+    print(f"\n❌ ERROR: No feature files found!")
+    print("Please run: python 05c_reduce_feature_redundancy.py")
+    print("Or: python 05b_remove_leaky_features.py")
     exit(1)
 
 print(f"\n✓ Loading from: {data_path}")
