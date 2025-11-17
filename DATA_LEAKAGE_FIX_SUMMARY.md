@@ -36,6 +36,13 @@
 - **Why leaky:** Equipment with recent failures → flag=0, and also likely to have future failures → target=1
 - **Status:** ✅ REMOVED in second pass
 
+**3. Ekipman_Yoğunluk_Skoru** (Equipment Density Score)
+- **Correlation with 6M target:** r=0.7082 (high)
+- **Correlation with 12M target:** r=0.9860 (CRITICAL!)
+- **Problem:** Fault density score (faults per time period) calculated using ALL faults (including after cutoff)
+- **Why leaky:** Equipment with high fault density in 2024 → high score, and also fail in future → target=1
+- **Status:** ✅ REMOVED in third pass
+
 ---
 
 ## ✅ SOLUTION IMPLEMENTED
@@ -70,17 +77,18 @@ PROTECTED_FEATURES = [
 ```
 
 #### 3. Updated Feature Counts
-- **Total features removed:** 6 (was 5)
+- **Total features removed:** 7
   1. Reliability_Score (redundant with MTBF_Gün)
   2. Failure_Rate_Per_Year (redundant with failure counts)
   3. MTBF_Gün_Cluster_Avg (aggregation)
   4. Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg (aggregation + leakage)
-  5. Tekrarlayan_Arıza_90gün_Flag (DATA LEAKAGE)
-  6. **Failure_Free_3M (DATA LEAKAGE)** ← NEW
+  5. **Tekrarlayan_Arıza_90gün_Flag (DATA LEAKAGE)** - Pass 1
+  6. **Failure_Free_3M (DATA LEAKAGE)** - Pass 2
+  7. **Ekipman_Yoğunluk_Skoru (DATA LEAKAGE)** - Pass 3
 
-- **Features remaining:** 20 (was 21)
+- **Features remaining:** 19
 - **Input:** `data/features_selected_clean.csv` (26 features)
-- **Output:** `data/features_reduced.csv` (20 features)
+- **Output:** `data/features_reduced.csv` (19 features)
 
 ---
 
@@ -98,19 +106,20 @@ python 05c_reduce_feature_redundancy.py
 
 **Expected Output:**
 ```
-Redundant features to remove: 6  ← Was 5
-Features to keep: 20             ← Was 21
+Redundant features to remove: 7
+Features to keep: 19
 
 ❌ Reliability_Score
 ❌ Failure_Rate_Per_Year
 ❌ MTBF_Gün_Cluster_Avg
 ❌ Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg
 ❌ Tekrarlayan_Arıza_90gün_Flag
-❌ Failure_Free_3M                ← NEW!
+❌ Failure_Free_3M
+❌ Ekipman_Yoğunluk_Skoru         ← NEW - Third leaky feature!
 
 ✅ Successfully saved!
    Records: 789
-   Features: 20                   ← Was 21
+   Features: 19
 ```
 
 ### Step 3: Re-run Temporal PoF Training
@@ -121,15 +130,15 @@ python 06_model_training.py
 **Expected Output:**
 ```
 ✓ Using REDUCED features (data leakage fixed)
-✓ Loaded: 789 equipment × 20 features  ← Was 21
+✓ Loaded: 789 equipment × 19 features
 
 ================================================================================
 Training XGBoost for 6M Horizon
 ================================================================================
 
 ✅ XGBoost 6M Test Set Results:
-   AUC: 0.75-0.85                      ← Was 0.9996
-   Average Precision: 0.70-0.85         ← Was 0.9986
+   AUC: 0.75-0.85                      ← Was 0.9989 (leaky!)
+   Average Precision: 0.70-0.85         ← Was 0.9963
    Precision: 0.60-0.75
    Recall: 0.65-0.80
    F1-Score: 0.60-0.75
@@ -141,7 +150,7 @@ Training XGBoost for 12M Horizon
 ================================================================================
 
 ✅ XGBoost 12M Test Set Results:
-   AUC: 0.78-0.88                      ← Was 1.0000
+   AUC: 0.78-0.88                      ← Was 1.0000 (perfect = leaky!)
    Average Precision: 0.75-0.90         ← Was 1.0000
    Precision: 0.65-0.80
    Recall: 0.70-0.85
@@ -178,11 +187,12 @@ Training XGBoost for 12M Horizon
 
 After re-running the pipeline, verify:
 
-- [ ] `features_reduced.csv` has **20 features** (not 21)
-- [ ] Console shows **"6 redundant features removed"** (not 5)
+- [ ] `features_reduced.csv` has **19 features** (not 16)
+- [ ] Console shows **"7 redundant features removed"**
 - [ ] `Failure_Free_3M` appears in removal list
-- [ ] AUC 6M drops to **0.75-0.85** range
-- [ ] AUC 12M drops to **0.78-0.88** range
+- [ ] `Ekipman_Yoğunluk_Skoru` appears in removal list
+- [ ] AUC 6M drops to **0.75-0.85** range (was 0.9989)
+- [ ] AUC 12M drops to **0.78-0.88** range (was 1.0000)
 - [ ] No warnings about "very high AUC may indicate data leakage"
 - [ ] Model trains successfully without errors
 
@@ -191,9 +201,10 @@ After re-running the pipeline, verify:
 ## 📁 FILES MODIFIED
 
 1. **05c_reduce_feature_redundancy.py**
-   - Added `Failure_Free_3M` to REDUNDANT_FEATURES
+   - Added `Failure_Free_3M` to REDUNDANT_FEATURES (Pass 2)
+   - Added `Ekipman_Yoğunluk_Skoru` to REDUNDANT_FEATURES (Pass 3)
    - Removed `Failure_Free_3M` from PROTECTED_FEATURES
-   - Updated header documentation (6 removals, 20 output features)
+   - Updated header documentation (7 removals, 19 output features)
 
 2. **diagnostic_find_leaky_features.py** (NEW)
    - Correlation analysis tool
