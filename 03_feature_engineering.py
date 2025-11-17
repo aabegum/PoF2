@@ -417,33 +417,61 @@ print("\n--- Building PoF Risk Score (0-100) ---")
 # Components of risk score
 risk_components = []
 
-# 1. Age risk (30% weight)
+# 1. Age risk (50% weight) - NON-LINEAR for wear-out failures
 if 'Yas_Beklenen_Omur_Orani' in df.columns:
-    df['Age_Risk_Score'] = df['Yas_Beklenen_Omur_Orani'].clip(0, 2) * 50  # 0-100 scale
-    risk_components.append(('Age_Risk_Score', 0.30))
-    print("  ✓ Age risk (30% weight)")
+    def calculate_age_risk(age_ratio):
+        """
+        Non-linear age risk calculation (captures bathtub curve wear-out region)
 
-# 2. Recent failure history (40% weight)
+        Rationale:
+        - 0-70% life: Linear increase (0-50 risk)
+        - 70-100% life: Accelerating risk (50-85 risk)
+        - >100% life: Critical wear-out zone (85-100 risk)
+
+        This prevents old equipment with no recent failures from getting low risk scores.
+        """
+        if pd.isna(age_ratio):
+            return 50  # Default medium risk for missing age
+
+        if age_ratio < 0.7:
+            # Early life: Linear (0-50 risk)
+            return age_ratio / 0.7 * 50
+        elif age_ratio < 1.0:
+            # Approaching end-of-life: Accelerating (50-85 risk)
+            # Quadratic scaling: risk increases faster as equipment ages
+            normalized = (age_ratio - 0.7) / 0.3  # 0-1 scale from 70-100%
+            return 50 + (normalized ** 1.5) * 35  # Exponential acceleration
+        else:
+            # Past design life: Critical wear-out zone (85-100 risk)
+            # Cap at 2x life (200%) = 100 risk
+            excess = min(age_ratio - 1.0, 1.0)  # 0-100% over life
+            return 85 + excess * 15  # 85-100 risk
+
+    df['Age_Risk_Score'] = df['Yas_Beklenen_Omur_Orani'].apply(calculate_age_risk)
+    risk_components.append(('Age_Risk_Score', 0.50))
+    print("  ✓ Age risk (50% weight, non-linear wear-out curve)")
+
+# 2. Recent failure history (30% weight)
 if 'Arıza_Sayısı_6ay' in df.columns:
     # Normalize to 0-100 (assume 5+ failures = max risk)
     df['Recent_Failure_Risk_Score'] = df['Arıza_Sayısı_6ay'].clip(0, 5) * 20
-    risk_components.append(('Recent_Failure_Risk_Score', 0.40))
-    print("  ✓ Recent failure risk (40% weight)")
+    risk_components.append(('Recent_Failure_Risk_Score', 0.30))
+    print("  ✓ Recent failure risk (30% weight)")
 
-# 3. Reliability degradation (20% weight)
+# 3. Reliability degradation (15% weight)
 if 'MTBF_Gün' in df.columns:
     # Inverse MTBF score (lower MTBF = higher risk)
     df['MTBF_Risk_Score'] = df['MTBF_Gün'].apply(
         lambda x: max(0, 100 - (x / 365 * 100)) if pd.notna(x) else 50
     )
-    risk_components.append(('MTBF_Risk_Score', 0.20))
-    print("  ✓ MTBF risk (20% weight)")
+    risk_components.append(('MTBF_Risk_Score', 0.15))
+    print("  ✓ MTBF risk (15% weight)")
 
-# 4. Recurrence pattern (10% weight)
+# 4. Recurrence pattern (5% weight)
 if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns:
     df['Recurrence_Risk_Score'] = df['Tekrarlayan_Arıza_90gün_Flag'] * 100
-    risk_components.append(('Recurrence_Risk_Score', 0.10))
-    print("  ✓ Recurrence risk (10% weight)")
+    risk_components.append(('Recurrence_Risk_Score', 0.05))
+    print("  ✓ Recurrence risk (5% weight)")
 
 # Calculate composite score
 if risk_components:
@@ -474,6 +502,20 @@ if risk_components:
         pct = count / len(df) * 100
         icon = "✅" if "Low" in category else ("⚠" if "Medium" in category else "❌")
         print(f"    {icon} {category}: {count:,} ({pct:.1f}%)")
+
+    # Validation: Equipment past design life should have elevated risk
+    if 'Yas_Beklenen_Omur_Orani' in df.columns:
+        past_life = df[df['Yas_Beklenen_Omur_Orani'] > 1.0]
+        if len(past_life) > 0:
+            print(f"\n  Wear-out Zone Validation (Age Ratio > 100%):")
+            print(f"    Equipment past design life: {len(past_life):,} ({len(past_life)/len(df)*100:.1f}%)")
+            print(f"    Their risk score: Mean={past_life['Composite_PoF_Risk_Score'].mean():.1f}, Median={past_life['Composite_PoF_Risk_Score'].median():.1f}")
+
+            # Risk distribution for old equipment
+            for category in ['Low (0-25)', 'Medium (25-50)', 'High (50-75)', 'Critical (75-100)']:
+                count = (past_life['Risk_Category'] == category).sum()
+                pct = count / len(past_life) * 100 if len(past_life) > 0 else 0
+                print(f"      {category}: {count:,} ({pct:.1f}%)")
 
 # ============================================================================
 # STEP 9: INTERACTION FEATURES
@@ -668,40 +710,62 @@ else:
 # ============================================================================
 print("\n--- Customer Type Ratios ---")
 
-# Check for customer impact columns
+# Check for customer impact columns (used later for customer-weighted risk)
 has_customer_cols = all(col in df.columns for col in ['urban_mv_Avg', 'urban_lv_Avg',
                                                         'suburban_mv_Avg', 'suburban_lv_Avg',
                                                         'rural_mv_Avg', 'rural_lv_Avg',
                                                         'total_customer_count_Avg'])
 
-if has_customer_cols:
-    # Urban customer ratio
-    df['Kentsel_Müşteri_Oranı'] = (
-        (df['urban_mv_Avg'].fillna(0) + df['urban_lv_Avg'].fillna(0)) /
-        (df['total_customer_count_Avg'] + 1)  # +1 to avoid division by zero
-    )
+# Check if fault-level ratios were calculated (proper method - no Simpson's Paradox)
+has_fault_level_ratios = all(col in df.columns for col in ['Urban_Customer_Ratio_mean',
+                                                             'Rural_Customer_Ratio_mean',
+                                                             'MV_Customer_Ratio_mean'])
 
-    # Rural customer ratio
-    df['Kırsal_Müşteri_Oranı'] = (
-        (df['rural_mv_Avg'].fillna(0) + df['rural_lv_Avg'].fillna(0)) /
-        (df['total_customer_count_Avg'] + 1)
-    )
+if has_fault_level_ratios:
+    # Use pre-calculated fault-level ratios (averaged from fault level)
+    # This avoids Simpson's Paradox - ratios were calculated BEFORE averaging
+    df['Kentsel_Müşteri_Oranı'] = df['Urban_Customer_Ratio_mean']
+    df['Kırsal_Müşteri_Oranı'] = df['Rural_Customer_Ratio_mean']
+    df['OG_Müşteri_Oranı'] = df['MV_Customer_Ratio_mean']
 
-    # MV customer ratio (across all areas)
-    df['OG_Müşteri_Oranı'] = (
-        (df['urban_mv_Avg'].fillna(0) + df['suburban_mv_Avg'].fillna(0) + df['rural_mv_Avg'].fillna(0)) /
-        (df['total_customer_count_Avg'] + 1)
-    )
-
-    print(f"✓ Customer ratios calculated:")
+    print(f"✓ Customer ratios loaded (fault-level calculated - no Simpson's Paradox):")
     print(f"  Urban customer ratio: Mean={df['Kentsel_Müşteri_Oranı'].mean():.2%}, Max={df['Kentsel_Müşteri_Oranı'].max():.2%}")
     print(f"  Rural customer ratio: Mean={df['Kırsal_Müşteri_Oranı'].mean():.2%}, Max={df['Kırsal_Müşteri_Oranı'].max():.2%}")
     print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
+
 else:
-    print("⚠ Customer impact columns not found")
-    df['Kentsel_Müşteri_Oranı'] = 0
-    df['Kırsal_Müşteri_Oranı'] = 0
-    df['OG_Müşteri_Oranı'] = 0
+    # Fallback: Use old method (equipment-level averaged counts)
+    if has_customer_cols:
+        print("⚠ WARNING: Using old method (equipment-level averaged counts)")
+        print("  This can cause Simpson's Paradox. Run 02_data_transformation.py to fix.")
+
+        # Urban customer ratio
+        df['Kentsel_Müşteri_Oranı'] = (
+            (df['urban_mv_Avg'].fillna(0) + df['urban_lv_Avg'].fillna(0)) /
+            (df['total_customer_count_Avg'] + 1)  # +1 to avoid division by zero
+        ).clip(upper=1.0)
+
+        # Rural customer ratio
+        df['Kırsal_Müşteri_Oranı'] = (
+            (df['rural_mv_Avg'].fillna(0) + df['rural_lv_Avg'].fillna(0)) /
+            (df['total_customer_count_Avg'] + 1)
+        ).clip(upper=1.0)
+
+        # MV customer ratio (across all areas)
+        df['OG_Müşteri_Oranı'] = (
+            (df['urban_mv_Avg'].fillna(0) + df['suburban_mv_Avg'].fillna(0) + df['rural_mv_Avg'].fillna(0)) /
+            (df['total_customer_count_Avg'] + 1)
+        ).clip(upper=1.0)
+
+        print(f"✓ Customer ratios calculated (capped at 100% - defensive fix):")
+        print(f"  Urban customer ratio: Mean={df['Kentsel_Müşteri_Oranı'].mean():.2%}, Max={df['Kentsel_Müşteri_Oranı'].max():.2%}")
+        print(f"  Rural customer ratio: Mean={df['Kırsal_Müşteri_Oranı'].mean():.2%}, Max={df['Kırsal_Müşteri_Oranı'].max():.2%}")
+        print(f"  MV customer ratio: Mean={df['OG_Müşteri_Oranı'].mean():.2%}, Max={df['OG_Müşteri_Oranı'].max():.2%}")
+    else:
+        print("⚠ Customer impact columns not found")
+        df['Kentsel_Müşteri_Oranı'] = 0
+        df['Kırsal_Müşteri_Oranı'] = 0
+        df['OG_Müşteri_Oranı'] = 0
 
 # ============================================================================
 # 5. LOADING INTENSITY METRICS (Leakage-Safe)
