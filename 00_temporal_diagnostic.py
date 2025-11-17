@@ -65,11 +65,72 @@ print(f"✓ Loaded: {len(df):,} fault records")
 print(f"✓ Columns: {len(df.columns)}")
 
 # ============================================================================
-# STEP 2: PARSE TEMPORAL COLUMNS
+# STEP 2: PARSE TEMPORAL COLUMNS (WITH FLEXIBLE PARSER)
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 2: PARSING TEMPORAL COLUMNS")
+print("STEP 2: PARSING TEMPORAL COLUMNS (WITH FLEXIBLE PARSER)")
 print("="*100)
+
+def parse_date_flexible(value):
+    """
+    Parse date with multiple format support - handles mixed format data
+    Supports: ISO, Turkish (DD-MM-YYYY), European (DD/MM/YYYY), Excel serial dates
+
+    This function solves the 25% "missing" timestamp issue caused by mixed date formats
+    """
+    # Already a timestamp/datetime
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return pd.Timestamp(value)
+
+    # Handle NaN/None
+    if pd.isna(value):
+        return pd.NaT
+
+    # Excel serial date (numeric)
+    if isinstance(value, (int, float)):
+        if 1 <= value <= 100000:
+            try:
+                # Excel epoch starts at 1900-01-01
+                return pd.Timestamp('1899-12-30') + pd.Timedelta(days=value)
+            except:
+                return pd.NaT
+        else:
+            return pd.NaT
+
+    # String parsing with multiple format attempts
+    if isinstance(value, str):
+        value = value.strip()
+
+        if not value:
+            return pd.NaT
+
+        # Try multiple formats in order of likelihood
+        formats = [
+            '%Y-%m-%d %H:%M:%S',     # 2021-01-15 12:30:45 (ISO)
+            '%d-%m-%Y %H:%M:%S',     # 15-01-2021 12:30:45 (Turkish/European with dash)
+            '%d/%m/%Y %H:%M:%S',     # 15/01/2021 12:30:45 (Turkish/European with slash)
+            '%Y-%m-%d',              # 2021-01-15
+            '%d-%m-%Y',              # 15-01-2021
+            '%d/%m/%Y',              # 15/01/2021
+            '%d.%m.%Y %H:%M:%S',     # 15.01.2021 12:30:45 (Turkish dot format)
+            '%d.%m.%Y',              # 15.01.2021
+            '%m/%d/%Y %H:%M:%S',     # 01/15/2021 12:30:45 (US format - try last)
+            '%m/%d/%Y',              # 01/15/2021
+        ]
+
+        for fmt in formats:
+            try:
+                return pd.to_datetime(value, format=fmt)
+            except:
+                continue
+
+        # Last resort: let pandas infer
+        try:
+            return pd.to_datetime(value, infer_datetime_format=True, dayfirst=True)
+        except:
+            return pd.NaT
+
+    return pd.NaT
 
 # Identify temporal column
 temporal_cols = ['started at', 'Arıza_Tarihi', 'Fault_Date', 'date', 'Date']
@@ -86,15 +147,18 @@ if fault_date_col is None:
     print("Available columns:", list(df.columns[:20]))
     exit(1)
 
-# Parse dates
-df[fault_date_col] = pd.to_datetime(df[fault_date_col], errors='coerce')
+# Parse dates with flexible multi-format parser
+print(f"  Parsing dates with flexible parser (handles DD-MM-YYYY + YYYY-MM-DD)...")
+original_count = len(df)
+df[fault_date_col] = df[fault_date_col].apply(parse_date_flexible)
 
 # Remove invalid dates
+valid_dates_before = df[fault_date_col].notna().sum()
 df = df.dropna(subset=[fault_date_col])
-print(f"✓ Valid dates: {len(df):,} fault records")
+print(f"✓ Valid dates: {len(df):,} / {original_count:,} fault records ({len(df)/original_count*100:.1f}%)")
 
 # Identify equipment ID column
-equip_id_cols = ['Ekipman_ID', 'Equipment_ID', 'equipment_id', 'ID', 'Asset_ID']
+equip_id_cols = ['cbs_id', 'Ekipman_ID', 'Equipment_ID', 'equipment_id', 'ID', 'Asset_ID']
 equip_id_col = None
 
 for col in equip_id_cols:
