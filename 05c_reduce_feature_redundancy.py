@@ -76,16 +76,23 @@ REDUNDANT_FEATURES = {
     },
 
     'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
-        'reason': 'Aggregation of Tekrarlayan_Arıza_90gün_Flag',
-        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag',
+        'reason': 'Aggregation of chronic repeater flag (also calculated from future data)',
+        'keep_instead': 'None (removed due to leakage)',
         'correlation': 0.58
+    },
+
+    # 🚨 DATA LEAKAGE: Chronic repeater flag calculated from FULL dataset
+    'Tekrarlayan_Arıza_90gün_Flag': {
+        'reason': '🚨 CRITICAL: Calculated using ALL faults (includes future failures after 2024-06-25)',
+        'keep_instead': 'None (use in 06_chronic_repeater.py separately)',
+        'correlation': 'N/A (causes AUC=1.0 data leakage)'
     },
 }
 
 # Protected features (NEVER remove, even if correlated)
 PROTECTED_FEATURES = [
     'Ekipman_ID',                      # ID column
-    'Tekrarlayan_Arıza_90gün_Flag',    # Critical for chronic repeater model
+    # NOTE: Tekrarlayan_Arıza_90gün_Flag REMOVED (data leakage - see REDUNDANT_FEATURES)
     'MTBF_Gün',                        # Primary reliability metric
     'Son_Arıza_Gun_Sayisi',            # Recency - critical for temporal PoF
     'Composite_PoF_Risk_Score',        # Stakeholder communication
