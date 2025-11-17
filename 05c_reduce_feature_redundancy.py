@@ -12,10 +12,12 @@ Strategy:
 - Remove Reliability_Score (keep MTBF_Gün - more interpretable)
 - Remove Failure_Rate_Per_Year (highly correlated with failure counts)
 - Remove cluster averages that duplicate individual features
+- Remove Tekrarlayan_Arıza_90gün_Flag (data leakage - uses ALL faults)
+- Remove Failure_Free_3M (data leakage - uses ALL faults)
 - Keep interpretable, business-critical features
 
 Input:  data/features_selected_clean.csv (26 features)
-Output: data/features_reduced.csv (~20-22 features)
+Output: data/features_reduced.csv (20 features)
 
 Author: Data Analytics Team
 Date: 2025
@@ -87,17 +89,24 @@ REDUNDANT_FEATURES = {
         'keep_instead': 'None (use in 06_chronic_repeater.py separately)',
         'correlation': 'N/A (causes AUC=1.0 data leakage)'
     },
+
+    # 🚨 DATA LEAKAGE: Failure-free 3M flag calculated from FULL dataset
+    'Failure_Free_3M': {
+        'reason': '🚨 CRITICAL: Binary flag for no failures in last 3M (uses ALL faults including after 2024-06-25)',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi (days since last failure)',
+        'correlation': 0.83  # r=-0.8281 with 12M target (inverse correlation)
+    },
 }
 
 # Protected features (NEVER remove, even if correlated)
 PROTECTED_FEATURES = [
     'Ekipman_ID',                      # ID column
     # NOTE: Tekrarlayan_Arıza_90gün_Flag REMOVED (data leakage - see REDUNDANT_FEATURES)
+    # NOTE: Failure_Free_3M REMOVED (data leakage - see REDUNDANT_FEATURES)
     'MTBF_Gün',                        # Primary reliability metric
     'Son_Arıza_Gun_Sayisi',            # Recency - critical for temporal PoF
     'Composite_PoF_Risk_Score',        # Stakeholder communication
     'Ilk_Arizaya_Kadar_Yil',          # Time to first failure
-    'Failure_Free_3M',                 # Recent activity indicator
     'Ekipman_Yaşı_Yıl_EDBS_first',    # Equipment age
     'Equipment_Class_Primary',         # Equipment type
     'Geographic_Cluster',              # Location
