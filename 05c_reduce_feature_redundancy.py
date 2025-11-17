@@ -14,10 +14,11 @@ Strategy:
 - Remove cluster averages that duplicate individual features
 - Remove Tekrarlayan_Arıza_90gün_Flag (data leakage - uses ALL faults)
 - Remove Failure_Free_3M (data leakage - uses ALL faults)
+- Remove Ekipman_Yoğunluk_Skoru (data leakage - uses ALL faults)
 - Keep interpretable, business-critical features
 
 Input:  data/features_selected_clean.csv (26 features)
-Output: data/features_reduced.csv (20 features)
+Output: data/features_reduced.csv (19 features)
 
 Author: Data Analytics Team
 Date: 2025
@@ -95,6 +96,13 @@ REDUNDANT_FEATURES = {
         'reason': '🚨 CRITICAL: Binary flag for no failures in last 3M (uses ALL faults including after 2024-06-25)',
         'keep_instead': 'Son_Arıza_Gun_Sayisi (days since last failure)',
         'correlation': 0.83  # r=-0.8281 with 12M target (inverse correlation)
+    },
+
+    # 🚨 DATA LEAKAGE: Equipment density score calculated from FULL dataset
+    'Ekipman_Yoğunluk_Skoru': {
+        'reason': '🚨 CRITICAL: Fault density score (faults per time) uses ALL faults including after 2024-06-25',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi (recency) or MTBF_Gün (reliability)',
+        'correlation': 0.99  # r=0.9860 with 12M target (near-perfect correlation)
     },
 }
 
