@@ -50,9 +50,9 @@ print("="*100)
 # CONFIGURATION
 # ============================================================================
 
-# VIF thresholds
+# VIF thresholds (RELAXED - tree models handle multicollinearity well)
 VIF_THRESHOLD = 10  # Features with VIF > 10 are highly collinear
-VIF_TARGET = 5      # Target VIF after iterative removal
+VIF_TARGET = 10     # Target VIF after iterative removal (relaxed from 5 to retain domain features)
 
 # Correlation threshold
 CORRELATION_THRESHOLD = 0.85  # Remove features with correlation > 0.85
@@ -226,39 +226,67 @@ print(vif_before.head(10).to_string(index=False))
 high_vif_count = (vif_before['VIF'] > VIF_THRESHOLD).sum()
 print(f"\n⚠ Features with VIF > {VIF_THRESHOLD}: {high_vif_count}")
 
+# Protected features (critical domain features that should never be removed)
+PROTECTED_FEATURES = [
+    'Arıza_Sayısı_12ay',              # 12-month failure count (PRIMARY predictor)
+    'MTBF_Gün',                        # Mean Time Between Failures (core reliability metric)
+    'Tekrarlayan_Arıza_90gün_Flag',   # Chronic repeater flag
+    'Ilk_Arizaya_Kadar_Yil',          # Time to first failure (infant mortality)
+    'Son_Arıza_Gun_Sayisi',           # Days since last failure (recency)
+    'Ekipman_Yaşı_Yıl',               # Equipment age (fundamental predictor)
+    'Ekipman_Yaşı_Yıl_TESIS_first',   # TESIS age (alternative age source)
+    'Ekipman_Yaşı_Yıl_EDBS_first',    # EDBS age (alternative age source)
+]
+
+# Filter to only include protected features that exist in the dataset
+protected_in_data = [f for f in PROTECTED_FEATURES if f in numeric_columns]
+print(f"\n✓ Protected features (will not be removed by VIF): {len(protected_in_data)}")
+for feat in protected_in_data:
+    print(f"  • {feat}")
+
 # Iterative VIF removal
 print(f"\n--- Iterative VIF Removal (Target VIF < {VIF_TARGET}) ---")
 
 features_to_keep = numeric_columns.copy()
 iteration = 0
-max_iterations = 20
+max_iterations = 10  # Reduced from 20 to prevent over-removal
 
 while True:
     iteration += 1
-    
+
     # Calculate VIF
     vif_current = calculate_vif(df_vif[features_to_keep], features_to_keep)
-    
-    # Find maximum VIF
-    max_vif = vif_current['VIF'].max()
-    max_vif_feature = vif_current.loc[vif_current['VIF'].idxmax(), 'Feature']
-    
+
+    # Find maximum VIF (excluding protected features)
+    vif_removable = vif_current[~vif_current['Feature'].isin(protected_in_data)]
+
+    if len(vif_removable) == 0:
+        print(f"  ✓ All remaining features are protected")
+        break
+
+    max_vif = vif_removable['VIF'].max()
+    max_vif_feature = vif_removable.loc[vif_removable['VIF'].idxmax(), 'Feature']
+
     print(f"\nIteration {iteration}:")
-    print(f"  Features: {len(features_to_keep)}")
+    print(f"  Features: {len(features_to_keep)} ({len([f for f in features_to_keep if f in protected_in_data])} protected)")
     print(f"  Max VIF: {max_vif:.2f} ({max_vif_feature})")
-    
+
     # Check stopping conditions
     if max_vif < VIF_TARGET:
         print(f"  ✓ Target VIF achieved!")
         break
-    
+
     if iteration >= max_iterations:
         print(f"  ⚠ Max iterations reached")
         break
-    
-    # Remove feature with highest VIF
-    features_to_keep.remove(max_vif_feature)
-    print(f"  ❌ Removed: {max_vif_feature}")
+
+    # Remove feature with highest VIF (only if not protected)
+    if max_vif_feature not in protected_in_data:
+        features_to_keep.remove(max_vif_feature)
+        print(f"  ❌ Removed: {max_vif_feature}")
+    else:
+        print(f"  🔒 Protected: {max_vif_feature} (keeping despite high VIF)")
+        break
 
 # Final VIF
 vif_after = calculate_vif(df_vif[features_to_keep], features_to_keep)

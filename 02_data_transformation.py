@@ -5,9 +5,12 @@ SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v4.0
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
 PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED]
-- Historical Window: All data up to 2025-06-25 (12 months before reference)
+- Cutoff Date: 2024-06-25 (from Script 00)
+- Historical Window: All data up to 2024-06-25 (for feature calculation)
+- Prediction Window: 2024-06-25 to 2025-06-25 (6M and 12M targets)
 - Dual Prediction Targets: 6-month + 12-month failure risk (EXCELLENT class balance)
 - Features Created: Temporal fault counts (3M/6M/12M), age, MTBF, reliability metrics
+- DATA LEAKAGE PREVENTION: All features calculated using data BEFORE cutoff date only
 
 WHAT THIS SCRIPT DOES:
 Transforms fault-level records (1,210 faults) → equipment-level records (789 equipment)
@@ -63,11 +66,14 @@ pd.set_option('display.max_columns', None)
 # CONFIGURATION
 # ============================================================================
 
-# Constants (dynamic - updates based on current date)
+# Constants (FIXED - uses OPTION A cutoff date from Script 00)
 CURRENT_YEAR = datetime.now().year
 MIN_VALID_YEAR = 1950
 MAX_VALID_YEAR = datetime.now().year + 1  # Allow dates up to next year for data entry flexibility
-REFERENCE_DATE = pd.Timestamp(datetime.now())  # Use current date as reference
+# CRITICAL: Use cutoff date from Script 00 OPTION A (2024-06-25)
+# This ensures features are calculated BEFORE the prediction window (no leakage)
+CUTOFF_DATE = pd.Timestamp('2024-06-25')  # OPTION A cutoff date
+REFERENCE_DATE = CUTOFF_DATE  # Use cutoff date as reference
 
 # Feature flags
 USE_FIRST_WORKORDER_FALLBACK = True  # Set to True to enable Option 3 (first work order as age proxy)
@@ -370,10 +376,12 @@ df['Summer_Peak_Flag'] = df['Fault_Month'].isin([6, 7, 8, 9]).astype(int)
 df['Winter_Peak_Flag'] = df['Fault_Month'].isin([12, 1, 2]).astype(int)
 df['Time_To_Repair_Hours'] = (df['ended at'] - df['started at']).dt.total_seconds() / 3600
 
-reference_date = df['started at'].max()
-cutoff_3m = reference_date - pd.Timedelta(days=90)
-cutoff_6m = reference_date - pd.Timedelta(days=180)
-cutoff_12m = reference_date - pd.Timedelta(days=365)
+# CRITICAL FIX: Use CUTOFF_DATE instead of df['started at'].max()
+# This ensures temporal features use ONLY historical data (before prediction window)
+reference_date = REFERENCE_DATE  # Use cutoff date from OPTION A (2024-06-25)
+cutoff_3m = reference_date - pd.Timedelta(days=90)   # 2024-03-27
+cutoff_6m = reference_date - pd.Timedelta(days=180)  # 2023-12-28
+cutoff_12m = reference_date - pd.Timedelta(days=365) # 2023-06-25
 
 df['Fault_Last_3M'] = (df['started at'] >= cutoff_3m).astype(int)
 df['Fault_Last_6M'] = (df['started at'] >= cutoff_6m).astype(int)
