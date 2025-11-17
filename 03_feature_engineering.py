@@ -9,8 +9,19 @@ Purpose:
 - Add temporal aggregations
 - Generate interaction features
 
-Input:  data/equipment_level_data.csv (1,313 equipment)
-Output: data/features_engineered.csv (~40-50 features)
+Input:  data/equipment_level_data.csv (default) or temporal output
+Output: data/features_engineered.csv (default, ~40-50 features)
+
+Usage:
+  # Default (original pipeline, has temporal leakage):
+  python 03_feature_engineering.py
+
+  # Temporal (no leakage, proper point-in-time features):
+  python 03_feature_engineering.py --input data/equipment_level_data_temporal_20240625.csv
+
+  # Custom output path:
+  python 03_feature_engineering.py --input data/equipment_level_data_temporal_20240625.csv \
+                                    --output data/features_engineered_temporal_20240625.csv
 
 Author: Data Analytics Team
 Date: 2025
@@ -23,6 +34,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import warnings
 import sys
+import argparse
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
     try:
@@ -42,6 +54,25 @@ print("="*100)
 print(" "*30 + "ADVANCED FEATURE ENGINEERING")
 print(" "*35 + "PoF Prediction")
 print("="*100)
+
+# ============================================================================
+# PARSE COMMAND LINE ARGUMENTS
+# ============================================================================
+
+parser = argparse.ArgumentParser(description='Advanced feature engineering for PoF prediction')
+parser.add_argument('--input', type=str, default='data/equipment_level_data.csv',
+                    help='Input CSV file path (default: data/equipment_level_data.csv). Use temporal output for no leakage.')
+parser.add_argument('--output', type=str, default='data/features_engineered.csv',
+                    help='Output CSV file path (default: data/features_engineered.csv)')
+
+args = parser.parse_args()
+
+input_path = Path(args.input)
+output_path = Path(args.output)
+
+print(f"\n⚙️  CONFIGURATION:")
+print(f"   Input:  {input_path}")
+print(f"   Output: {output_path}")
 
 # ============================================================================
 # CONFIGURATION: EXPECTED LIFE STANDARDS
@@ -85,15 +116,13 @@ print("\n" + "="*100)
 print("STEP 1: LOADING EQUIPMENT-LEVEL DATA")
 print("="*100)
 
-data_path = Path('data/equipment_level_data.csv')
-
-if not data_path.exists():
-    print(f"\n❌ ERROR: File not found at {data_path}")
-    print("Please run 02_data_transformation.py first!")
+if not input_path.exists():
+    print(f"\n❌ ERROR: File not found at {input_path}")
+    print("Please run 02_data_transformation.py or 02_data_transformation_temporal.py first!")
     exit(1)
 
-print(f"\n✓ Loading from: {data_path}")
-df = pd.read_csv(data_path)
+print(f"\n✓ Loading from: {input_path}")
+df = pd.read_csv(input_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
 # Verify Equipment_Class_Primary exists (created by 02_data_transformation.py)
@@ -937,8 +966,6 @@ print("\n" + "="*100)
 print("STEP 11: SAVING ENGINEERED DATASET")
 print("="*100)
 
-output_path = Path('data/features_engineered.csv')
-
 print(f"\n💾 Saving to: {output_path}")
 df.to_csv(output_path, index=False, encoding='utf-8-sig')
 
@@ -1050,7 +1077,7 @@ if 'Risk_Category' in df.columns:
         print(f"   {icon} {category:<20} {count:>4,} equipment ({pct:>5.1f}%)")
 
 print("\n📂 OUTPUT FILES:")
-print(f"   • data/features_engineered.csv ({df.shape[1]} features)")
+print(f"   • {output_path} ({df.shape[1]} features)")
 print(f"   • data/feature_catalog.csv (feature documentation)")
 if 'Risk_Category' in df.columns:
     high_risk_count = df[df['Risk_Category'].isin(['High (50-75)', 'Critical (75-100)'])].shape[0]
