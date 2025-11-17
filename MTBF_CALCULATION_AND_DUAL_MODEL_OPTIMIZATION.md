@@ -339,7 +339,22 @@ python 05b_remove_leaky_features.py
 
 ---
 
-### **2. Model Training (After Re-Run)**
+### **2. Update Leakage Detection (Option B - COMPLETED ✅)**
+
+```bash
+python 05b_remove_leaky_features.py
+```
+
+**What Changed:**
+- ✅ MTBF_Gün, Reliability_Score, Composite_PoF_Risk_Score now recognized as SAFE
+- ✅ Rules 9-11 commented out (MTBF was fixed in v4.1 to use only pre-cutoff failures)
+- ✅ Safe features: 22 → 25-26 (restored 3 critical features)
+
+**See `OPTION_B_IMPLEMENTATION.md` for full details.**
+
+---
+
+### **3. Model Training (After Re-Run)**
 
 ```bash
 # Model 2: Chronic Repeater Classification
@@ -358,7 +373,7 @@ python 10_consequence_of_failure.py
 
 ---
 
-### **3. Validate Results**
+### **4. Validate Results**
 
 **Key Validations:**
 1. ✅ **94 chronic repeaters** ranked in top 15% of CAPEX priority list
@@ -383,8 +398,8 @@ python 10_consequence_of_failure.py
 
 **Version History:**
 - **v4.0:** Original pipeline with OPTION A dual predictions
-- **v4.1:** Critical fixes (VIF, MTBF leakage, risk weights)
-- **v4.2:** Dual-model optimization (Chronic Repeater + Survival) ← **CURRENT**
+- **v4.1:** Critical fixes (VIF, MTBF leakage, risk weights, protected features)
+- **v4.2:** Option B - Restored MTBF + Composite as safe features ← **CURRENT**
 
 ---
 

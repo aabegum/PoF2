@@ -90,10 +90,9 @@ print("   • Failure patterns (seasonality, peak flags)")
 
 print("\n4. REMOVED - Lifetime-Based Features (LEAKY when predicting failure propensity):")
 print("   • Toplam_Arıza_Sayisi_Lifetime ← Used to CREATE target!")
-print("   • MTBF_Gün ← Calculated FROM Toplam_Arıza_Sayisi_Lifetime")
-print("   • MTBF_Risk_Score ← Calculated FROM MTBF_Gün")
-print("   • Reliability_Score ← Calculated FROM MTBF_Gün")
-print("   • Composite_PoF_Risk_Score ← Includes MTBF_Risk_Score")
+print("\n   ✅ RESTORED (v4.1 fix): MTBF, Reliability, Composite PoF Score")
+print("      → Now calculated using ONLY failures BEFORE cutoff (2024-06-25)")
+print("      → See 02_data_transformation.py lines 633-668 for safe MTBF calculation")
 
 print("\n5. SAFE - Static Attributes:")
 print("   • Ekipman_Yaşı_Yıl (equipment age)")
@@ -153,17 +152,22 @@ for col in original_features:
     elif 'Toplam_Arıza_Sayisi_Lifetime' in col or 'Toplam_Ariza_Sayisi_Lifetime' in col:
         reason = "Lifetime failure count (DIRECTLY used to create target!)"
 
-    # Rule 9: MTBF features (calculated FROM lifetime failure count)
-    elif 'MTBF' in col:
-        reason = "MTBF calculated from lifetime failure count (indirect leakage)"
+    # Rule 9: MTBF features - NOW SAFE (v4.1 fix)
+    # ✅ RESTORED: MTBF was fixed in 02_data_transformation.py (lines 633-668)
+    #    to use ONLY failures BEFORE cutoff date (2024-06-25)
+    # elif 'MTBF' in col:
+    #     reason = "MTBF calculated from lifetime failure count (indirect leakage)"
 
-    # Rule 10: Reliability Score (calculated FROM MTBF)
-    elif 'Reliability_Score' in col:
-        reason = "Reliability calculated from MTBF (indirect leakage)"
+    # Rule 10: Reliability Score - NOW SAFE (v4.1 fix)
+    # ✅ RESTORED: Calculated from safe MTBF (which uses only pre-cutoff failures)
+    # elif 'Reliability_Score' in col:
+    #     reason = "Reliability calculated from MTBF (indirect leakage)"
 
-    # Rule 11: Composite Risk Score (includes MTBF_Risk_Score)
-    elif 'Composite_PoF_Risk_Score' in col or 'Composite_Risk' in col:
-        reason = "Composite score includes MTBF_Risk_Score (indirect leakage)"
+    # Rule 11: Composite Risk Score - NOW SAFE (v4.1 fix)
+    # ✅ RESTORED: Uses safe MTBF_Risk_Score + historical age/recurrence data
+    #    See 03_feature_engineering.py lines 420-478 for updated risk weights
+    # elif 'Composite_PoF_Risk_Score' in col or 'Composite_Risk' in col:
+    #     reason = "Composite score includes MTBF_Risk_Score (indirect leakage)"
 
     if reason:
         leaky_features.append(col)
@@ -255,8 +259,9 @@ review_needed = []
 for feat in safe_features:
     if 'Risk_Category' in feat:
         review_needed.append((feat, "Verify Risk_Category is not based on target period"))
-    elif 'Composite_PoF_Risk_Score' in feat:
-        review_needed.append((feat, "Verify composite score doesn't use recent failures"))
+    # Composite_PoF_Risk_Score is now SAFE (v4.1 fix) - no manual review needed
+    # elif 'Composite_PoF_Risk_Score' in feat:
+    #     review_needed.append((feat, "Verify composite score doesn't use recent failures"))
     elif 'Class_Avg' in feat or 'Cluster_Avg' in feat:
         if not any(x in feat for x in ['12ay', '6ay', '3ay']):  # Already filtered
             review_needed.append((feat, "Verify aggregation period doesn't overlap with target"))
