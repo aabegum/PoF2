@@ -630,15 +630,41 @@ if has_cause_code and 'cause code' in df.columns:
 # ============================================================================
 print("\n[Step 10/12] Calculating MTBF & Time Until First Failure [6M/12M]...")
 
-def calculate_mtbf(row):
-    if pd.notna(row['İlk_Arıza_Tarihi']) and pd.notna(row['Son_Arıza_Tarihi']):
-        total_days = (row['Son_Arıza_Tarihi'] - row['İlk_Arıza_Tarihi']).days
-        total_faults = row['Toplam_Arıza_Sayisi_Lifetime']
-        if total_faults > 1 and total_days > 0:
-            return total_days / (total_faults - 1)
+def calculate_mtbf_safe(equipment_id):
+    """
+    Calculate MTBF using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage - MTBF is calculated from historical data only
+
+    MTBF = Total operating time BEFORE cutoff / (Number of failures BEFORE cutoff - 1)
+    """
+    # Get all fault dates for this equipment BEFORE cutoff
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna().sort_values()
+
+    if len(equip_faults) < 2:
+        # Need at least 2 faults to calculate MTBF (mean time BETWEEN failures)
+        return None
+
+    # Calculate time span from first to last failure (before cutoff)
+    first_fault = equip_faults.iloc[0]
+    last_fault = equip_faults.iloc[-1]
+    total_days = (last_fault - first_fault).days
+
+    # Number of intervals = number of faults - 1
+    num_faults = len(equip_faults)
+
+    if total_days > 0 and num_faults > 1:
+        return total_days / (num_faults - 1)
+
     return None
 
-equipment_df['MTBF_Gün'] = equipment_df.apply(calculate_mtbf, axis=1)
+# Calculate safe MTBF (no leakage)
+print("  Calculating MTBF (using failures BEFORE cutoff only - leakage-safe)...")
+equipment_df['MTBF_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_safe)
+
+# Days since last failure (safe - uses reference date)
 equipment_df['Son_Arıza_Gun_Sayisi'] = (REFERENCE_DATE - equipment_df['Son_Arıza_Tarihi']).dt.days
 
 # NEW FEATURE v4.0: Time Until First Failure (Infant Mortality Detection)

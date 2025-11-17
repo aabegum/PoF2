@@ -244,12 +244,30 @@ print(f"\n✓ Protected features (will not be removed by VIF): {len(protected_in
 for feat in protected_in_data:
     print(f"  • {feat}")
 
-# Iterative VIF removal
-print(f"\n--- Iterative VIF Removal (Target VIF < {VIF_TARGET}) ---")
+# STEP 5A: Remove exact mathematical duplicates FIRST (Age_Days = Age_Years * 365)
+print(f"\n--- Step 5A: Removing Exact Mathematical Duplicates ---")
 
-features_to_keep = numeric_columns.copy()
+exact_duplicates = [
+    'Ekipman_Yaşı_Gün',           # = Ekipman_Yaşı_Yıl * 365 (keep years version)
+    'Ekipman_Yaşı_Gün_TESIS',     # = Ekipman_Yaşı_Yıl_TESIS * 365
+    'Ekipman_Yaşı_Gün_EDBS',      # = Ekipman_Yaşı_Yıl_EDBS * 365
+    'Ilk_Arizaya_Kadar_Gun',      # = Ilk_Arizaya_Kadar_Yil * 365
+]
+
+duplicates_removed = [f for f in exact_duplicates if f in numeric_columns]
+features_to_keep = [f for f in numeric_columns if f not in exact_duplicates]
+
+print(f"  Removed {len(duplicates_removed)} mathematical duplicates:")
+for feat in duplicates_removed:
+    print(f"    ❌ {feat} (exact conversion from year version)")
+
+print(f"  Features remaining: {len(features_to_keep)}")
+
+# Iterative VIF removal
+print(f"\n--- Step 5B: Iterative VIF Removal (Target VIF < {VIF_TARGET}) ---")
+
 iteration = 0
-max_iterations = 10  # Reduced from 20 to prevent over-removal
+max_iterations = 50  # Increased from 10 to ensure convergence
 
 while True:
     iteration += 1

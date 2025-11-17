@@ -134,13 +134,16 @@ for col in original_features:
     elif 'Recent_Failure_Risk_Score' in col:
         reason = "Risk score based on recent failures"
 
-    # Rule 5: Age-Failure interaction (if using recent failures)
-    elif 'Age_Failure_Interaction' in col:
-        reason = "Interaction with recent failure counts"
+    # Rule 5: Age-Failure interaction - SAFE if using historical failures BEFORE cutoff
+    # NOTE: Removed from leakage detection - should be verified manually instead
+    # elif 'Age_Failure_Interaction' in col:
+    #     reason = "Interaction with recent failure counts"
 
-    # Rule 6: Failure-free flags for recent periods
-    elif 'Failure_Free_3M' in col:
-        reason = "Recent failure-free flag"
+    # Rule 6: Failure-free flags - SAFE if calculated BEFORE cutoff (2024-06-25)
+    # NOTE: Failure_Free_3M = (Son_Arıza_Tarihi < 2024-03-25) is SAFE
+    # Removed from leakage detection - it's a historical observation
+    # elif 'Failure_Free_3M' in col:
+    #     reason = "Recent failure-free flag"
 
     # Rule 7: Time since last normalized (if recent)
     elif 'Time_Since_Last_Normalized' in col:

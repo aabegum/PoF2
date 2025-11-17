@@ -417,7 +417,8 @@ print("\n--- Building PoF Risk Score (0-100) ---")
 # Components of risk score
 risk_components = []
 
-# 1. Age risk (50% weight) - NON-LINEAR for wear-out failures
+# 1. Age risk (40% weight) - NON-LINEAR for wear-out failures
+# UPDATED: Reduced from 50% to 40% to give more weight to recurring failures
 if 'Yas_Beklenen_Omur_Orani' in df.columns:
     def calculate_age_risk(age_ratio):
         """
@@ -448,17 +449,19 @@ if 'Yas_Beklenen_Omur_Orani' in df.columns:
             return 85 + excess * 15  # 85-100 risk
 
     df['Age_Risk_Score'] = df['Yas_Beklenen_Omur_Orani'].apply(calculate_age_risk)
-    risk_components.append(('Age_Risk_Score', 0.50))
-    print("  ✓ Age risk (50% weight, non-linear wear-out curve)")
+    risk_components.append(('Age_Risk_Score', 0.40))  # UPDATED: 50% → 40%
+    print("  ✓ Age risk (40% weight, non-linear wear-out curve)")
 
-# 2. Recent failure history (30% weight)
+# 2. Recent failure history (25% weight)
+# UPDATED: Reduced from 30% to 25%
 if 'Arıza_Sayısı_6ay' in df.columns:
     # Normalize to 0-100 (assume 5+ failures = max risk)
     df['Recent_Failure_Risk_Score'] = df['Arıza_Sayısı_6ay'].clip(0, 5) * 20
-    risk_components.append(('Recent_Failure_Risk_Score', 0.30))
-    print("  ✓ Recent failure risk (30% weight)")
+    risk_components.append(('Recent_Failure_Risk_Score', 0.25))  # UPDATED: 30% → 25%
+    print("  ✓ Recent failure risk (25% weight)")
 
 # 3. Reliability degradation (15% weight)
+# UNCHANGED: Remains at 15%
 if 'MTBF_Gün' in df.columns:
     # Inverse MTBF score (lower MTBF = higher risk)
     df['MTBF_Risk_Score'] = df['MTBF_Gün'].apply(
@@ -467,11 +470,12 @@ if 'MTBF_Gün' in df.columns:
     risk_components.append(('MTBF_Risk_Score', 0.15))
     print("  ✓ MTBF risk (15% weight)")
 
-# 4. Recurrence pattern (5% weight)
+# 4. Recurrence pattern (20% weight)
+# UPDATED: INCREASED from 5% to 20% - recurring failures are strong indicator
 if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns:
     df['Recurrence_Risk_Score'] = df['Tekrarlayan_Arıza_90gün_Flag'] * 100
-    risk_components.append(('Recurrence_Risk_Score', 0.05))
-    print("  ✓ Recurrence risk (5% weight)")
+    risk_components.append(('Recurrence_Risk_Score', 0.20))  # UPDATED: 5% → 20%
+    print("  ✓ Recurrence risk (20% weight) [INCREASED from 5% - chronic repeaters priority]")
 
 # Calculate composite score
 if risk_components:
