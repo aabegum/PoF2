@@ -664,14 +664,52 @@ def calculate_mtbf_safe(equipment_id):
 print("  Calculating MTBF (using failures BEFORE cutoff only - leakage-safe)...")
 equipment_df['MTBF_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_safe)
 
-# Days since last failure (safe - uses reference date)
-equipment_df['Son_Arıza_Gun_Sayisi'] = (REFERENCE_DATE - equipment_df['Son_Arıza_Tarihi']).dt.days
+# 🔧 FIX: Calculate last failure date using ONLY failures BEFORE cutoff (no leakage)
+def calculate_last_failure_date_safe(equipment_id):
+    """
+    Get last failure date using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage - we don't look into the future
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna()
+
+    if len(equip_faults) > 0:
+        return equip_faults.max()
+    else:
+        return None  # No failures before cutoff
+
+print("  Calculating last failure date (using failures BEFORE cutoff only - leakage-safe)...")
+equipment_df['Son_Arıza_Tarihi_Safe'] = equipment_df['Ekipman_ID'].apply(calculate_last_failure_date_safe)
+
+# Days since last failure (safe - uses ONLY pre-cutoff failures)
+equipment_df['Son_Arıza_Gun_Sayisi'] = (REFERENCE_DATE - equipment_df['Son_Arıza_Tarihi_Safe']).dt.days
+
+# 🔧 FIX: Calculate first failure date using ONLY failures BEFORE cutoff (no leakage)
+def calculate_first_failure_date_safe(equipment_id):
+    """
+    Get first failure date using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage for equipment whose first failure is after cutoff
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna()
+
+    if len(equip_faults) > 0:
+        return equip_faults.min()
+    else:
+        return None  # No failures before cutoff
+
+print("  Calculating first failure date (using failures BEFORE cutoff only - leakage-safe)...")
+equipment_df['İlk_Arıza_Tarihi_Safe'] = equipment_df['Ekipman_ID'].apply(calculate_first_failure_date_safe)
 
 # NEW FEATURE v4.0: Time Until First Failure (Infant Mortality Detection)
 # Calculates: Installation Date → First Fault Date
 # Uses same priority as equipment age: TESIS → EDBS → WORKORDER (via Ekipman_Kurulum_Tarihi)
 equipment_df['Ilk_Arizaya_Kadar_Gun'] = (
-    equipment_df['İlk_Arıza_Tarihi'] - equipment_df['Ekipman_Kurulum_Tarihi']
+    equipment_df['İlk_Arıza_Tarihi_Safe'] - equipment_df['Ekipman_Kurulum_Tarihi']
 ).dt.days
 equipment_df['Ilk_Arizaya_Kadar_Yil'] = equipment_df['Ilk_Arizaya_Kadar_Gun'] / 365.25
 
