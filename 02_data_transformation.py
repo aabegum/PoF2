@@ -492,6 +492,14 @@ df['_source_priority'] = df['Yaş_Kaynak_TESIS'].map(source_priority_tesis).fill
 df = df.sort_values('_source_priority')
 df = df.drop(columns=['_source_priority'])
 
+# 🔧 CRITICAL FIX: Filter to ONLY pre-cutoff faults for aggregation
+# This prevents data leakage in cause codes (first/last) and all other aggregations
+print(f"  Filtering faults for aggregation (using ONLY faults BEFORE {REFERENCE_DATE.date()})...")
+print(f"    Total faults: {len(df):,}")
+df_pre_cutoff = df[df['started at'] <= REFERENCE_DATE].copy()
+print(f"    Pre-cutoff faults: {len(df_pre_cutoff):,}")
+print(f"    Excluded post-cutoff: {len(df) - len(df_pre_cutoff):,} faults")
+
 # Build aggregation dictionary dynamically based on available columns
 agg_dict = {
     # Equipment identification & classification
@@ -542,11 +550,11 @@ agg_dict = {
 
 # Add customer ratio columns if they were created
 for ratio_col in ['Urban_Customer_Ratio', 'Rural_Customer_Ratio', 'MV_Customer_Ratio']:
-    if ratio_col in df.columns:
+    if ratio_col in df_pre_cutoff.columns:
         agg_dict[ratio_col] = 'mean'  # Average the pre-calculated ratios
 
-# Add cause code column if available
-if 'cause code' in df.columns:
+# Add cause code column if available (now safe - uses only pre-cutoff faults)
+if 'cause code' in df_pre_cutoff.columns:
     agg_dict['cause code'] = ['first', 'last', lambda x: x.mode()[0] if len(x.mode()) > 0 else None]
 
 # Add customer impact columns if available
@@ -555,7 +563,7 @@ customer_impact_cols = [
     'suburban mv', 'suburban lv', 'rural mv', 'rural lv', 'total customer count'
 ]
 for col in customer_impact_cols:
-    if col in df.columns:
+    if col in df_pre_cutoff.columns:
         agg_dict[col] = ['mean', 'max']
 
 # Add optional specification columns if available
@@ -564,13 +572,14 @@ optional_spec_cols = {
     'MARKA': 'first', 'MARKA_MODEL': 'first', 'FIRMA': 'first'
 }
 for col, agg_func in optional_spec_cols.items():
-    if col in df.columns:
+    if col in df_pre_cutoff.columns:
         agg_dict[col] = agg_func
 
-equipment_df = df.groupby(equipment_id_col).agg(agg_dict).reset_index()
+# ✅ Aggregate using ONLY pre-cutoff faults (prevents cause code leakage)
+equipment_df = df_pre_cutoff.groupby(equipment_id_col).agg(agg_dict).reset_index()
 equipment_df.columns = ['_'.join(col).strip('_') if col[1] else col[0] for col in equipment_df.columns.values]
 
-print(f"Aggregated {original_fault_count:,} faults → {len(equipment_df):,} equipment records ({len(agg_dict)} aggregated features)")
+print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_df):,} equipment records ({len(agg_dict)} aggregated features)")
 
 # ============================================================================
 # STEP 8: RENAME COLUMNS
