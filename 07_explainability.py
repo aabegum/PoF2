@@ -103,7 +103,22 @@ print("="*100)
 
 # Identify feature types
 id_column = 'Ekipman_ID'
-categorical_features = ['Equipment_Class_Primary', 'Risk_Category']
+
+# Dynamically detect categorical features (don't hardcode!)
+categorical_features = []
+for col in df.columns:
+    if col != id_column:
+        # Check if column is categorical/object type
+        if df[col].dtype == 'object' or df[col].dtype.name == 'category':
+            categorical_features.append(col)
+
+# If no categorical features detected, add known ones that exist
+known_categoricals = ['Equipment_Class_Primary', 'Risk_Category', 'Voltage_Class', 'Bölge_Tipi']
+for cat in known_categoricals:
+    if cat in df.columns and cat not in categorical_features:
+        categorical_features.append(cat)
+
+print(f"\n✓ Detected categorical features: {categorical_features}")
 
 # Numeric features
 feature_columns = [col for col in df.columns
