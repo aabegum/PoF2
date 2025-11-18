@@ -451,15 +451,28 @@ def get_equipment_class(row):
 
 df['Equipment_Class_Primary'] = df.apply(get_equipment_class, axis=1)
 equipment_class_mapping = {
-    'aghat': 'AG Hat', 'AG Hat': 'AG Hat',
-    'REKORTMAN': 'Rekortman', 'Rekortman': 'Rekortman',
-    'agdirek': 'AG Direk', 'AG Direk': 'AG Direk',
-    'OGAGTRF': 'OG/AG Trafo', 'OG/AG Trafo': 'OG/AG Trafo', 'Trafo Bina Tip': 'OG/AG Trafo',
-    'SDK': 'AG Pano Box', 'AG Pano': 'AG Pano Box',
+    'aghat': 'AG Hat',
+    'AG Hat': 'AG Hat',
+    'REKORTMAN': 'Rekortman',
+    'Rekortman': 'Rekortman',
+    'agdirek': 'AG Direk',
+    'AG Direk': 'AG Direk',
+    'OGAGTRF': 'OG/AG Trafo',
+    'OG/AG Trafo': 'OG/AG Trafo',
+    'Trafo Bina Tip': 'Trafo Bina Tip',
+    'SDK': 'AG Pano Box',
+    'AG Pano': 'AG Pano',
+    'AG Pano Box': 'AG Pano Box',
     'Ayırıcı': 'Ayırıcı',
-    'anahtar': 'AG Anahtar', 'AG Anahtar': 'AG Anahtar',
-    'KESİCİ': 'Kesici', 'Kesici': 'Kesici',
-    'OGHAT': 'OG Hat', 'PANO': 'Pano', 'Bina': 'Bina', 'Armatür': 'Armatür', 'ENHDirek': 'ENH Direk',
+    'anahtar': 'AG Anahtar',
+    'AG Anahtar': 'AG Anahtar',
+    'KESİCİ': 'Kesici',
+    'Kesici': 'Kesici',
+    'OGHAT': 'OG Hat',
+    'PANO': 'Pano',
+    'Bina': 'Bina',
+    'Armatür': 'Armatür',
+    'ENHDirek': 'ENH Direk',
 }
 
 df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(lambda x: equipment_class_mapping.get(x, x) if pd.notna(x) else x)
