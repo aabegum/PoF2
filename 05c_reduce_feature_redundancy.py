@@ -104,6 +104,20 @@ REDUNDANT_FEATURES = {
         'keep_instead': 'Son_Arıza_Gun_Sayisi (recency) or MTBF_Gün (reliability)',
         'correlation': 0.99  # r=0.9860 with 12M target (near-perfect correlation)
     },
+
+    # 🚨 DATA LEAKAGE: Composite score contains leaky components from Script 03
+    'Composite_PoF_Risk_Score': {
+        'reason': '🚨 CRITICAL: Created in Script 03 using Arıza_Sayısı_6ay (leaky 6M fault count)',
+        'keep_instead': 'MTBF_Gün + Son_Arıza_Gun_Sayisi + Age features (individual components)',
+        'correlation': 0.22  # Appears safe but contains leaked information "baked in"
+    },
+
+    # Derived from leaky composite score
+    'Risk_Category': {
+        'reason': 'Categorical bins derived from Composite_PoF_Risk_Score (which contains leaked data)',
+        'keep_instead': 'Individual risk components or Equipment_Class_Primary',
+        'correlation': 'N/A (categorical derived feature)'
+    },
 }
 
 # Protected features (NEVER remove, even if correlated)
@@ -111,9 +125,9 @@ PROTECTED_FEATURES = [
     'Ekipman_ID',                      # ID column
     # NOTE: Tekrarlayan_Arıza_90gün_Flag REMOVED (data leakage - see REDUNDANT_FEATURES)
     # NOTE: Failure_Free_3M REMOVED (data leakage - see REDUNDANT_FEATURES)
+    # NOTE: Composite_PoF_Risk_Score REMOVED (contains leaked data - see REDUNDANT_FEATURES)
     'MTBF_Gün',                        # Primary reliability metric
     'Son_Arıza_Gun_Sayisi',            # Recency - critical for temporal PoF
-    'Composite_PoF_Risk_Score',        # Stakeholder communication
     'Ilk_Arizaya_Kadar_Yil',          # Time to first failure
     'Ekipman_Yaşı_Yıl_EDBS_first',    # Equipment age
     'Equipment_Class_Primary',         # Equipment type
