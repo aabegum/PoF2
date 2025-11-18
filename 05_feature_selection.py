@@ -183,12 +183,21 @@ if len(missing_features) > 0:
     for feat, count in missing_features.head(10).items():
         pct = count / len(df) * 100
         print(f"  {feat:<45} {count:>5,} ({pct:>5.1f}%)")
-    
-    # Strategy: Fill with median for now
-    print("\n✓ Strategy: Filling missing values with median")
+
+    # 🔧 FIX: Do NOT fill Son_Arıza_Gun_Sayisi or MTBF_Gün with median
+    # Equipment with NaN have no pre-cutoff failures → cannot predict with temporal PoF
+    temporal_features = ['Son_Arıza_Gun_Sayisi', 'MTBF_Gün']
+
+    print("\n✓ Strategy: Filling missing values with median (except temporal features)")
+    print(f"   Note: {temporal_features} will remain NaN for equipment with no pre-cutoff failures")
+
     for col in numeric_columns:
         if df[col].isnull().sum() > 0:
-            df[col].fillna(df[col].median(), inplace=True)
+            if col in temporal_features:
+                # Keep NaN for temporal features - indicates no failure history
+                print(f"   ⚠️  Skipping {col} (will filter out NaN equipment later)")
+            else:
+                df[col].fillna(df[col].median(), inplace=True)
 else:
     print("✓ No missing values in numeric features")
 
@@ -554,8 +563,30 @@ print("="*100)
 # Create output dataframe
 df_selected = df[final_features].copy()
 
+# 🔧 FIX: Add flag for equipment with no pre-cutoff failure history
+# These equipment cannot be predicted using temporal PoF
+if 'Son_Arıza_Gun_Sayisi' in df_selected.columns:
+    no_history_mask = df_selected['Son_Arıza_Gun_Sayisi'].isna()
+    no_history_count = no_history_mask.sum()
+
+    if no_history_count > 0:
+        print(f"\n⚠️  IMPORTANT: Found {no_history_count} equipment with NO pre-cutoff failures")
+        print(f"   These had their first failure AFTER 2024-06-25")
+        print(f"   They will be EXCLUDED from temporal PoF training")
+        print(f"   (Cannot predict when equipment will fail if no failure history)")
+
+        # Save list of excluded equipment for analysis
+        excluded_equipment = df_selected[no_history_mask][['Ekipman_ID']].copy()
+        excluded_equipment['Exclusion_Reason'] = 'No pre-cutoff failures'
+        excluded_equipment['First_Failure'] = 'After 2024-06-25'
+
+        excluded_path = Path('data/excluded_equipment_no_history.csv')
+        excluded_equipment.to_csv(excluded_path, index=False)
+        print(f"   ✓ Saved excluded equipment list: {excluded_path}")
+
 output_path = Path('data/features_selected.csv')
 print(f"\n💾 Saving to: {output_path}")
+print(f"   Note: Includes ALL {len(df_selected)} equipment (will filter during training)")
 df_selected.to_csv(output_path, index=False, encoding='utf-8-sig')
 
 print(f"✅ Successfully saved!")
