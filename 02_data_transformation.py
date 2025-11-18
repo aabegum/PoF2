@@ -93,6 +93,56 @@ original_fault_count = len(df)
 print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns")
 
 # ============================================================================
+# STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
+# ============================================================================
+print("\n[Step 1B/12] Detecting and Removing Duplicates...")
+print("⚠️  CRITICAL: Combining TESIS, EDBS, WORKORDER sources - same fault may appear multiple times")
+
+# Identify equipment ID column
+equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
+equip_id_col = next((col for col in equip_id_cols if col in df.columns), None)
+
+if not equip_id_col:
+    print("❌ ERROR: No equipment ID column found!")
+    print(f"Available columns: {list(df.columns)}")
+    sys.exit(1)
+
+print(f"Using equipment ID column: {equip_id_col}")
+
+# CHECK 1: Exact duplicates (all columns identical)
+exact_dup_mask = df.duplicated(keep='first')
+exact_dup_count = exact_dup_mask.sum()
+
+if exact_dup_count > 0:
+    print(f"  Found {exact_dup_count:,} exact duplicates ({exact_dup_count/len(df)*100:.1f}%) - removing...")
+    df = df[~exact_dup_mask].copy()
+else:
+    print(f"  ✓ No exact duplicates found")
+
+# CHECK 2: Same equipment + same start time (likely same fault from different sources)
+# This is the CRITICAL check for multi-source data
+if 'started at' in df.columns:
+    time_dup_mask = df.duplicated(subset=[equip_id_col, 'started at'], keep='first')
+    time_dup_count = time_dup_mask.sum()
+
+    if time_dup_count > 0:
+        print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
+        print(f"    (These are likely the same fault appearing in TESIS, EDBS, and WORKORDER)")
+        df = df[~time_dup_mask].copy()
+    else:
+        print(f"  ✓ No same-equipment+time duplicates found")
+else:
+    print("  ⚠️  WARNING: 'started at' column not found - skipping time-based duplicate check")
+
+# Summary
+removed = original_fault_count - len(df)
+if removed > 0:
+    print(f"  ✅ Removed {removed:,} duplicate records ({removed/original_fault_count*100:.1f}%)")
+    print(f"  Final fault count: {len(df):,} (from {original_fault_count:,})")
+else:
+    print(f"  ✅ No duplicates detected - data quality looks good!")
+
+# ============================================================================
 # STEP 2: ENHANCED DATE PARSING & VALIDATION
 # ============================================================================
 print("\n[Step 2/12] Parsing Dates (Flexible Multi-Format Parser)...")
