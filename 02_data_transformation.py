@@ -738,19 +738,29 @@ print(f"MTBF: {mtbf_valid:,}/{len(equipment_df):,} valid | Time-to-First-Failure
 # STEP 11: DETECT RECURRING FAULTS
 # ============================================================================
 print("\n[Step 11/12] Detecting Recurring Fault Patterns (30/90 day windows) [6M/12M]...")
+print("  Calculating recurring faults (using failures BEFORE cutoff only - leakage-safe)...")
 
-def calculate_recurrence(equipment_id):
-    equip_faults = df[df[equipment_id_col] == equipment_id]['started at'].dropna().sort_values()
+def calculate_recurrence_safe(equipment_id):
+    """
+    Detect recurring faults using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage - we don't look into the future
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)  # ← CRITICAL FILTER!
+    ]['started at'].dropna().sort_values()
+
     if len(equip_faults) < 2:
         return 0, 0
+
     time_diffs = equip_faults.diff().dt.days.dropna()
     return int((time_diffs <= 30).any()), int((time_diffs <= 90).any())
 
-recurrence_results = equipment_df['Ekipman_ID'].apply(calculate_recurrence)
+recurrence_results = equipment_df['Ekipman_ID'].apply(calculate_recurrence_safe)
 equipment_df['Tekrarlayan_Arıza_30gün_Flag'] = [r[0] for r in recurrence_results]
 equipment_df['Tekrarlayan_Arıza_90gün_Flag'] = [r[1] for r in recurrence_results]
 
-print(f"Recurring faults: 30-day={equipment_df['Tekrarlayan_Arıza_30gün_Flag'].sum():,} | 90-day={equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
+print(f"Recurring faults (pre-cutoff only): 30-day={equipment_df['Tekrarlayan_Arıza_30gün_Flag'].sum():,} | 90-day={equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
 
 # ============================================================================
 # STEP 12: SAVE RESULTS
