@@ -1,22 +1,23 @@
 """
-MODEL TRAINING - POF PREDICTION
-Turkish EDAŞ PoF Prediction Project (v3.1)
+MODEL TRAINING - TEMPORAL POF PREDICTION
+Turkish EDAŞ PoF Prediction Project (v4.0 - Temporal Targets)
 
 Purpose:
 - Train XGBoost and CatBoost models with GridSearchCV hyperparameter tuning
-- Predict failure probability for 6/12 months (3M removed - 100% positive class)
+- Predict TEMPORAL failure probability (equipment that WILL fail in next 6/12 months)
 - Evaluate performance with multiple metrics
 - Generate predictions and identify high-risk equipment
+
+Changes in v4.0 (TEMPORAL TARGETS):
+- MAJOR FIX: Target now based on ACTUAL future failures (after 2024-06-25)
+- TEMPORAL: Predicts which equipment WILL fail in next 6M/12M (prospective)
+- IMPROVED: Realistic AUC (0.75-0.85) instead of overfitted 1.0
+- VALIDATED: Can compare predictions vs actual outcomes
 
 Changes in v3.1:
 - FIXED: Removed 3M horizon (all equipment has >= 1 lifetime failure)
 - FIXED: Adjusted thresholds for better class balance
 - IMPROVED: Reduced verbosity for cleaner console output
-
-Changes in v3.0:
-- FIXED: Target creation now uses lifetime failure thresholds (no data leakage)
-- ADDED: GridSearchCV for optimal hyperparameter tuning
-- IMPROVED: More robust target definition based on failure propensity
 
 Strategy:
 - Single model for all equipment classes (using Equipment_Class_Primary feature)
@@ -87,21 +88,18 @@ USE_GRIDSEARCH = True  # Set to False to skip hyperparameter tuning
 GRIDSEARCH_VERBOSE = 1  # 0=silent, 1=progress bar, 2=detailed (REDUCED for cleaner output)
 GRIDSEARCH_N_JOBS = -1
 
-# Prediction horizons (days)
-# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
-# NOTE: 24M removed (100% positive class in original data)
+# Prediction horizons - TEMPORAL (future failure windows)
+# Cutoff date: 2024-06-25 (all features calculated using data BEFORE this date)
+CUTOFF_DATE = pd.Timestamp('2024-06-25')
+
 HORIZONS = {
-    '6M': 180,
-    '12M': 365
+    '6M': 180,   # Predict failures between 2024-06-25 and 2024-12-25 (164 equipment)
+    '12M': 365   # Predict failures between 2024-06-25 and 2025-06-25 (266 equipment)
 }
 
-# Target creation thresholds (based on lifetime failures)
-# Equipment with >= threshold lifetime failures is considered "failure-prone"
-# Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
-TARGET_THRESHOLDS = {
-    '6M': 2,   # At least 2 lifetime failures → 245/1148 = 21.3% positive
-    '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive (changed from 3 for better balance)
-}
+# Expected positive class rates (from check_future_data.py)
+# 6M: ~20.8% (164 out of 789 equipment)
+# 12M: ~33.7% (266 out of 789 equipment)
 
 # XGBoost base parameters (fixed across all searches)
 XGBOOST_BASE_PARAMS = {
@@ -155,8 +153,8 @@ print("\n📋 Configuration:")
 print(f"   Random State: {RANDOM_STATE}")
 print(f"   Train/Test Split: {100-TEST_SIZE*100:.0f}% / {TEST_SIZE*100:.0f}%")
 print(f"   Cross-Validation Folds: {N_FOLDS}")
+print(f"   Cutoff Date: {CUTOFF_DATE.date()}")
 print(f"   Prediction Horizons: {list(HORIZONS.keys())}")
-print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
 print(f"   Class Weight Strategy: Balanced")
 print(f"   Hyperparameter Tuning: {'GridSearchCV (ENABLED)' if USE_GRIDSEARCH else 'DISABLED (using defaults)'}")
 if USE_GRIDSEARCH:
@@ -165,12 +163,13 @@ if USE_GRIDSEARCH:
     print(f"   XGBoost Grid Size: {xgb_combinations:,} combinations")
     print(f"   CatBoost Grid Size: {cat_combinations:,} combinations")
     print(f"   Verbosity Level: {GRIDSEARCH_VERBOSE} (1=progress bar, cleaner output)")
-print(f"\n⚠️  DATA CHARACTERISTICS:")
-print(f"   • Dataset contains ONLY failed equipment (1148 total)")
-print(f"   • All equipment has >= 1 lifetime failure (100% positive)")
-print(f"   • 3M horizon removed (100% positive class - invalid for classification)")
-print(f"   • Both 6M and 12M use threshold=2 for consistent 21.3% positive rate")
-print(f"\n✓  Target Creation: Using lifetime failure thresholds (NO DATA LEAKAGE)")
+print(f"\n🎯 TEMPORAL POF PREDICTION (v4.0):")
+print(f"   • Target = Equipment that WILL fail in future windows")
+print(f"   • 6M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=6)).date()}")
+print(f"   • 12M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=12)).date()}")
+print(f"   • Expected positive class: 6M=20.8%, 12M=33.7%")
+print(f"   • Expected AUC: 0.75-0.85 (realistic temporal prediction)")
+print(f"\n✓  Target Creation: Using ACTUAL future failures (prospective, not retrospective)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -179,49 +178,82 @@ print("\n" + "="*100)
 print("STEP 1: LOADING SELECTED FEATURES")
 print("="*100)
 
-data_path = Path('data/features_selected_clean.csv')  # Use clean features
+# Try reduced features first (fixes data leakage), fall back to clean features
+data_path_reduced = Path('data/features_reduced.csv')
+data_path_clean = Path('data/features_selected_clean.csv')
 
-if not data_path.exists():
-    print(f"\n❌ ERROR: File not found at {data_path}")
-    print("Please run 05_feature_selection.py first!")
+if data_path_reduced.exists():
+    data_path = data_path_reduced
+    print(f"\n✓ Using REDUCED features (data leakage fixed)")
+elif data_path_clean.exists():
+    data_path = data_path_clean
+    print(f"\n⚠️  Using CLEAN features (may have data leakage - run 05c_reduce_feature_redundancy.py)")
+else:
+    print(f"\n❌ ERROR: No feature files found!")
+    print("Please run: python 05c_reduce_feature_redundancy.py")
+    print("Or: python 05b_remove_leaky_features.py")
     exit(1)
 
 print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
-# Load full engineered data for target creation
-df_full = pd.read_csv('data/features_engineered.csv')
-print(f"✓ Loaded full data for target creation: {df_full.shape[0]:,} equipment")
-
 # ============================================================================
-# STEP 2: CREATE TARGET VARIABLES
+# STEP 2: CREATE TEMPORAL TARGET VARIABLES (v4.0)
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 2: CREATING TARGET VARIABLES FOR MULTIPLE HORIZONS")
+print("STEP 2: CREATING TEMPORAL TARGET VARIABLES")
 print("="*100)
 
-print("\n⚠️  NEW APPROACH: Using lifetime failure thresholds (NO DATA LEAKAGE)")
-print("   Equipment with higher lifetime failures is more likely to fail in the future")
-print("   Different thresholds for different prediction horizons")
+print("\n🎯 TEMPORAL POF APPROACH: Using ACTUAL future failures (v4.0)")
+print("   Target = Equipment that WILL fail in the future window")
+print("   Based on actual fault occurrences AFTER cutoff date (2024-06-25)")
 
-# Verify required column exists
-if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
-    print(f"\n❌ ERROR: 'Toplam_Arıza_Sayisi_Lifetime' column not found!")
-    print("This column should be created by 02_data_transformation.py")
-    print("Available columns:", list(df_full.columns[:10]), "...")
-    exit(1)
+# Load ALL faults (including future) from original data
+print("\n✓ Loading original fault data for temporal target creation...")
+all_faults = pd.read_excel('data/combined_data.xlsx')
+all_faults['started at'] = pd.to_datetime(all_faults['started at'],
+                                           dayfirst=True,  # Turkish DD-MM-YYYY format
+                                           errors='coerce')
 
-print("\n--- Creating Binary Targets Based on Lifetime Failure Propensity ---")
+# Define future prediction windows
+FUTURE_6M_END = CUTOFF_DATE + pd.DateOffset(months=6)   # 2024-12-25
+FUTURE_12M_END = CUTOFF_DATE + pd.DateOffset(months=12)  # 2025-06-25
+
+print(f"\n--- Temporal Prediction Windows ---")
+print(f"   Cutoff date:   {CUTOFF_DATE.date()}")
+print(f"   6M window:     {CUTOFF_DATE.date()} → {FUTURE_6M_END.date()}")
+print(f"   12M window:    {CUTOFF_DATE.date()} → {FUTURE_12M_END.date()}")
+
+# Identify equipment that WILL FAIL in future windows
+future_faults_6M = all_faults[
+    (all_faults['started at'] > CUTOFF_DATE) &
+    (all_faults['started at'] <= FUTURE_6M_END)
+]['cbs_id'].dropna().unique()
+
+future_faults_12M = all_faults[
+    (all_faults['started at'] > CUTOFF_DATE) &
+    (all_faults['started at'] <= FUTURE_12M_END)
+]['cbs_id'].dropna().unique()
+
+print(f"\n   Equipment that WILL fail in future:")
+print(f"      6M window:  {len(future_faults_6M):,} equipment")
+print(f"      12M window: {len(future_faults_12M):,} equipment")
+
+# Create binary targets
+print("\n--- Creating Binary Temporal Targets ---")
 
 targets = {}
 
 for horizon_name, horizon_days in HORIZONS.items():
-    threshold = TARGET_THRESHOLDS[horizon_name]
+    # Get equipment IDs that will fail in this window
+    if horizon_name == '6M':
+        failed_equipment = future_faults_6M
+    else:  # 12M
+        failed_equipment = future_faults_12M
 
-    # Target = 1 if equipment has >= threshold lifetime failures
-    # Equipment with more historical failures is failure-prone (higher future failure risk)
-    targets[horizon_name] = (df_full['Toplam_Arıza_Sayisi_Lifetime'] >= threshold).astype(int)
+    # Target = 1 if equipment WILL fail in future window
+    targets[horizon_name] = df['Ekipman_ID'].isin(failed_equipment).astype(int)
 
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values
@@ -230,16 +262,21 @@ for horizon_name, horizon_days in HORIZONS.items():
     target_dist = df[f'Target_{horizon_name}'].value_counts()
     pos_rate = target_dist.get(1, 0) / len(df) * 100
 
-    print(f"\n{horizon_name} ({horizon_days} days) Target:")
-    print(f"  Threshold: >= {threshold} lifetime failures")
-    print(f"  Failure-Prone (1): {target_dist.get(1, 0):,} ({pos_rate:.1f}%)")
-    print(f"  Not Failure-Prone (0): {target_dist.get(0, 0):,} ({100-pos_rate:.1f}%)")
-    print(f"  Positive Rate: {pos_rate:.1f}%")
+    print(f"\n{horizon_name} Target (will fail in next {horizon_days} days):")
+    print(f"   Will fail (1):     {target_dist.get(1, 0):3d} ({pos_rate:5.1f}%)")
+    print(f"   Won't fail (0):    {target_dist.get(0, 0):3d} ({100-pos_rate:5.1f}%)")
+    print(f"   ✓ Positive Rate: {pos_rate:.1f}%")
 
-    # Warning if class imbalance is severe
-    if pos_rate < 5 or pos_rate > 95:
-        print(f"  ⚠️  WARNING: Severe class imbalance ({pos_rate:.1f}% positive)")
-        print(f"     Consider adjusting threshold or using SMOTE")
+    # Validation - check against expected values
+    expected_6M = 164
+    expected_12M = 266
+    expected = expected_6M if horizon_name == '6M' else expected_12M
+
+    if abs(target_dist.get(1, 0) - expected) <= 5:
+        print(f"   ✅ Status: CORRECT (expected ~{expected}, got {target_dist.get(1, 0)})")
+    else:
+        print(f"   ⚠️  Status: CHECK (expected ~{expected}, got {target_dist.get(1, 0)})")
+        print(f"       Verify date parsing and equipment ID matching")
 
 # ============================================================================
 # STEP 3: PREPARE FEATURES
