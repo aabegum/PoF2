@@ -192,22 +192,18 @@ Changed 05_feature_selection.py:
 
 ## 📂 Updated Pipeline Execution Order
 
-### **Production Pipeline:**
+### **Production Pipeline (Core):**
 ```bash
 # Data Preparation
 python 01_data_profiling.py          # Data quality assessment
 python 02_data_transformation.py     # Fault → Equipment level + duplicate detection
-python 03_feature_engineering.py     # Create ~111 features
-
-# Exploratory Analysis (Optional)
-python 04_eda.py                     # Exploratory data analysis
+python 03_feature_engineering.py     # Create features
 
 # Feature Selection (ALL-IN-ONE)
 python 05_feature_selection.py       # Leakage removal + Redundancy + VIF → 12-18 features
 
 # Modeling
 python 06_model_training.py          # Temporal PoF (6M/12M windows) - MAIN MODEL
-python 06b_logistic_baseline.py     # Baseline comparison (optional)
 python 06_chronic_repeater.py        # Chronic repeater classification
 
 # Model Analysis
@@ -218,6 +214,30 @@ python 09_survival_analysis.py       # Cox Proportional Hazards
 # Risk Assessment
 python 10_consequence_of_failure.py  # PoF × CoF matrix
 ```
+
+### **Optional Scripts (Run Separately):**
+```bash
+# Exploratory Data Analysis
+python 04_eda.py                     # ⚠️ Run AFTER 05_feature_selection.py
+                                     # Analyzes final features (not all 111)
+                                     # For research/understanding, not production
+
+# Baseline Models
+python 06b_logistic_baseline.py     # Logistic regression baseline
+                                     # For comparison only
+```
+
+### **⚠️ Important: EDA Execution Order**
+
+**Problem with old order:**
+- Old: 02 → 03 → **04 (EDA)** → 05 (Feature Selection) → 06 (Modeling)
+- Issue: EDA analyzes 111 features, then 99 of them are removed
+- Wasted: ~5 minutes of computation on features that aren't in final model
+
+**Recommended new order:**
+- New: 02 → 03 → **05 (Feature Selection)** → 04 (EDA - optional)
+- Benefit: EDA only analyzes the 12-18 final features
+- Use case: Run EDA separately for research/analysis, not in production pipeline
 
 ---
 
