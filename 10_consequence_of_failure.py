@@ -47,6 +47,17 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import sys
+
+# Import centralized configuration
+from config import (
+    INPUT_FILE,
+    EQUIPMENT_LEVEL_FILE,
+    PREDICTION_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    CUTOFF_DATE
+)
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
     try:
@@ -58,10 +69,9 @@ if sys.platform == 'win32':
         pass
 warnings.filterwarnings('ignore')
 
-# Configuration
-RANDOM_STATE = 42
-HORIZONS = ['3M', '12M', '24M']
-REFERENCE_DATE = pd.Timestamp('2025-06-25')
+# Configuration (from config.py): RANDOM_STATE, CUTOFF_DATE
+HORIZONS = ['3M', '12M', '24M']  # CoF analysis horizons
+REFERENCE_DATE = CUTOFF_DATE
 
 # Critical customer multipliers (can be customized)
 CRITICAL_MULTIPLIERS = {
@@ -80,8 +90,9 @@ RISK_CATEGORIES = {
 }
 
 # Output directories
-Path('results').mkdir(exist_ok=True)
-Path('outputs/risk_analysis').mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
+risk_analysis_dir = OUTPUT_DIR / 'risk_analysis'
+risk_analysis_dir.mkdir(parents=True, exist_ok=True)
 
 print("="*100)
 print("                    CONSEQUENCE OF FAILURE (CoF) & RISK SCORING")
@@ -102,8 +113,8 @@ print("="*100)
 
 # Try to load survival analysis predictions first (Model 1)
 pof_paths = [
-    'predictions/pof_multi_horizon_predictions.csv',
-    'predictions/failure_predictions_12m.csv'  # Fallback to Model 2
+    PREDICTION_DIR / 'pof_multi_horizon_predictions.csv',
+    PREDICTION_DIR / 'failure_predictions_12m.csv'  # Fallback to Model 2
 ]
 
 df_pof = None
@@ -141,7 +152,7 @@ print("\n" + "="*100)
 print("STEP 2: LOADING EQUIPMENT DATA FOR CoF CALCULATION")
 print("="*100)
 
-equip_path = Path('data/equipment_level_data.csv')
+equip_path = EQUIPMENT_LEVEL_FILE
 if not equip_path.exists():
     print(f"\n❌ ERROR: {equip_path} not found!")
     print("Please run 02_data_transformation.py first!")
@@ -165,7 +176,7 @@ print("STEP 3: CALCULATING AVERAGE OUTAGE DURATION PER EQUIPMENT")
 print("="*100)
 
 # Load fault-level data
-fault_paths = ['data/combined_data.xlsx', 'combined_data.xlsx']
+fault_paths = [INPUT_FILE, 'combined_data.xlsx']  # Try config path first, then fallback
 df_faults = None
 
 for fault_path in fault_paths:
@@ -474,7 +485,7 @@ for horizon in HORIZONS:
     df_risk_output = df_risk_output.sort_values('Risk_Score', ascending=False)
 
     # Save
-    output_path = Path(f'results/risk_assessment_{horizon}.csv')
+    output_path = RESULTS_DIR / f'risk_assessment_{horizon}.csv'
     df_risk_output.to_csv(output_path, index=False, encoding='utf-8-sig')
     print(f"\n💾 Saved: {output_path}")
 
@@ -520,7 +531,7 @@ if '12M' in risk_results:
         'Recommended_Action', 'Total_Customers_Affected', 'Avg_Outage_Minutes'
     ]
 
-    output_path = Path('results/capex_priority_list.csv')
+    output_path = RESULTS_DIR / 'capex_priority_list.csv'
     df_capex_top100[capex_cols].to_csv(output_path, index=False, encoding='utf-8-sig')
     print(f"\n💾 Saved: {output_path}")
 
@@ -590,7 +601,7 @@ for horizon, df_risk in risk_results.items():
     ax.grid(True, alpha=0.3)
 
     # Save
-    output_path = Path(f'outputs/risk_analysis/risk_matrix_{horizon}.png')
+    output_path = risk_analysis_dir / f'risk_matrix_{horizon}.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"  ✓ Saved risk matrix: {output_path}")
@@ -632,7 +643,7 @@ for horizon, df_risk in risk_results.items():
     plt.grid(True, alpha=0.3, axis='y')
 
     # Save
-    output_path = Path(f'outputs/risk_analysis/risk_distribution_by_class_{horizon}.png')
+    output_path = risk_analysis_dir / f'risk_distribution_by_class_{horizon}.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"  ✓ Saved distribution plot: {output_path}")
