@@ -263,10 +263,20 @@ feature_cols = [col for col in df_survival_features.columns if col not in exclud
 
 print(f"\n  Covariate features: {len(feature_cols)}")
 
-# Handle categorical features
-categorical_features = ['Equipment_Class_Primary', 'Risk_Category']
-categorical_features = [f for f in categorical_features if f in feature_cols]
+# Handle categorical features - dynamically detect
+categorical_features = []
+for col in feature_cols:
+    # Check if column is categorical/object type
+    if df_survival_features[col].dtype == 'object' or df_survival_features[col].dtype.name == 'category':
+        categorical_features.append(col)
 
+# If no categorical features detected, add known ones that exist
+known_categoricals = ['Equipment_Class_Primary', 'Risk_Category', 'Voltage_Class', 'Bölge_Tipi']
+for cat in known_categoricals:
+    if cat in feature_cols and cat not in categorical_features:
+        categorical_features.append(cat)
+
+print(f"  Detected categorical features: {categorical_features}")
 print(f"  Categorical features: {len(categorical_features)}")
 for cat_feat in categorical_features:
     print(f"    • {cat_feat}: {df_survival_features[cat_feat].nunique()} unique values")

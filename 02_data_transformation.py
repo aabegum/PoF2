@@ -93,6 +93,56 @@ original_fault_count = len(df)
 print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns")
 
 # ============================================================================
+# STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
+# ============================================================================
+print("\n[Step 1B/12] Detecting and Removing Duplicates...")
+print("⚠️  CRITICAL: Combining TESIS, EDBS, WORKORDER sources - same fault may appear multiple times")
+
+# Identify equipment ID column
+equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
+equip_id_col = next((col for col in equip_id_cols if col in df.columns), None)
+
+if not equip_id_col:
+    print("❌ ERROR: No equipment ID column found!")
+    print(f"Available columns: {list(df.columns)}")
+    sys.exit(1)
+
+print(f"Using equipment ID column: {equip_id_col}")
+
+# CHECK 1: Exact duplicates (all columns identical)
+exact_dup_mask = df.duplicated(keep='first')
+exact_dup_count = exact_dup_mask.sum()
+
+if exact_dup_count > 0:
+    print(f"  Found {exact_dup_count:,} exact duplicates ({exact_dup_count/len(df)*100:.1f}%) - removing...")
+    df = df[~exact_dup_mask].copy()
+else:
+    print(f"  ✓ No exact duplicates found")
+
+# CHECK 2: Same equipment + same start time (likely same fault from different sources)
+# This is the CRITICAL check for multi-source data
+if 'started at' in df.columns:
+    time_dup_mask = df.duplicated(subset=[equip_id_col, 'started at'], keep='first')
+    time_dup_count = time_dup_mask.sum()
+
+    if time_dup_count > 0:
+        print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
+        print(f"    (These are likely the same fault appearing in TESIS, EDBS, and WORKORDER)")
+        df = df[~time_dup_mask].copy()
+    else:
+        print(f"  ✓ No same-equipment+time duplicates found")
+else:
+    print("  ⚠️  WARNING: 'started at' column not found - skipping time-based duplicate check")
+
+# Summary
+removed = original_fault_count - len(df)
+if removed > 0:
+    print(f"  ✅ Removed {removed:,} duplicate records ({removed/original_fault_count*100:.1f}%)")
+    print(f"  Final fault count: {len(df):,} (from {original_fault_count:,})")
+else:
+    print(f"  ✅ No duplicates detected - data quality looks good!")
+
+# ============================================================================
 # STEP 2: ENHANCED DATE PARSING & VALIDATION
 # ============================================================================
 print("\n[Step 2/12] Parsing Dates (Flexible Multi-Format Parser)...")
@@ -451,15 +501,28 @@ def get_equipment_class(row):
 
 df['Equipment_Class_Primary'] = df.apply(get_equipment_class, axis=1)
 equipment_class_mapping = {
-    'aghat': 'AG Hat', 'AG Hat': 'AG Hat',
-    'REKORTMAN': 'Rekortman', 'Rekortman': 'Rekortman',
-    'agdirek': 'AG Direk', 'AG Direk': 'AG Direk',
-    'OGAGTRF': 'OG/AG Trafo', 'OG/AG Trafo': 'OG/AG Trafo', 'Trafo Bina Tip': 'OG/AG Trafo',
-    'SDK': 'AG Pano Box', 'AG Pano': 'AG Pano Box',
+    'aghat': 'AG Hat',
+    'AG Hat': 'AG Hat',
+    'REKORTMAN': 'Rekortman',
+    'Rekortman': 'Rekortman',
+    'agdirek': 'AG Direk',
+    'AG Direk': 'AG Direk',
+    'OGAGTRF': 'OG/AG Trafo',
+    'OG/AG Trafo': 'OG/AG Trafo',
+    'Trafo Bina Tip': 'Trafo Bina Tip',
+    'SDK': 'AG Pano Box',
+    'AG Pano': 'AG Pano',
+    'AG Pano Box': 'AG Pano Box',
     'Ayırıcı': 'Ayırıcı',
-    'anahtar': 'AG Anahtar', 'AG Anahtar': 'AG Anahtar',
-    'KESİCİ': 'Kesici', 'Kesici': 'Kesici',
-    'OGHAT': 'OG Hat', 'PANO': 'Pano', 'Bina': 'Bina', 'Armatür': 'Armatür', 'ENHDirek': 'ENH Direk',
+    'anahtar': 'AG Anahtar',
+    'AG Anahtar': 'AG Anahtar',
+    'KESİCİ': 'Kesici',
+    'Kesici': 'Kesici',
+    'OGHAT': 'OG Hat',
+    'PANO': 'Pano',
+    'Bina': 'Bina',
+    'Armatür': 'Armatür',
+    'ENHDirek': 'ENH Direk',
 }
 
 df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(lambda x: equipment_class_mapping.get(x, x) if pd.notna(x) else x)
@@ -478,6 +541,14 @@ source_priority_tesis = {'TESIS': 0, 'EDBS': 1, 'WORKORDER': 2, 'MISSING': 3}
 df['_source_priority'] = df['Yaş_Kaynak_TESIS'].map(source_priority_tesis).fillna(99)
 df = df.sort_values('_source_priority')
 df = df.drop(columns=['_source_priority'])
+
+# 🔧 CRITICAL FIX: Filter to ONLY pre-cutoff faults for aggregation
+# This prevents data leakage in cause codes (first/last) and all other aggregations
+print(f"  Filtering faults for aggregation (using ONLY faults BEFORE {REFERENCE_DATE.date()})...")
+print(f"    Total faults: {len(df):,}")
+df_pre_cutoff = df[df['started at'] <= REFERENCE_DATE].copy()
+print(f"    Pre-cutoff faults: {len(df_pre_cutoff):,}")
+print(f"    Excluded post-cutoff: {len(df) - len(df_pre_cutoff):,} faults")
 
 # Build aggregation dictionary dynamically based on available columns
 agg_dict = {
@@ -529,11 +600,11 @@ agg_dict = {
 
 # Add customer ratio columns if they were created
 for ratio_col in ['Urban_Customer_Ratio', 'Rural_Customer_Ratio', 'MV_Customer_Ratio']:
-    if ratio_col in df.columns:
+    if ratio_col in df_pre_cutoff.columns:
         agg_dict[ratio_col] = 'mean'  # Average the pre-calculated ratios
 
-# Add cause code column if available
-if 'cause code' in df.columns:
+# Add cause code column if available (now safe - uses only pre-cutoff faults)
+if 'cause code' in df_pre_cutoff.columns:
     agg_dict['cause code'] = ['first', 'last', lambda x: x.mode()[0] if len(x.mode()) > 0 else None]
 
 # Add customer impact columns if available
@@ -542,7 +613,7 @@ customer_impact_cols = [
     'suburban mv', 'suburban lv', 'rural mv', 'rural lv', 'total customer count'
 ]
 for col in customer_impact_cols:
-    if col in df.columns:
+    if col in df_pre_cutoff.columns:
         agg_dict[col] = ['mean', 'max']
 
 # Add optional specification columns if available
@@ -551,13 +622,14 @@ optional_spec_cols = {
     'MARKA': 'first', 'MARKA_MODEL': 'first', 'FIRMA': 'first'
 }
 for col, agg_func in optional_spec_cols.items():
-    if col in df.columns:
+    if col in df_pre_cutoff.columns:
         agg_dict[col] = agg_func
 
-equipment_df = df.groupby(equipment_id_col).agg(agg_dict).reset_index()
+# ✅ Aggregate using ONLY pre-cutoff faults (prevents cause code leakage)
+equipment_df = df_pre_cutoff.groupby(equipment_id_col).agg(agg_dict).reset_index()
 equipment_df.columns = ['_'.join(col).strip('_') if col[1] else col[0] for col in equipment_df.columns.values]
 
-print(f"Aggregated {original_fault_count:,} faults → {len(equipment_df):,} equipment records ({len(agg_dict)} aggregated features)")
+print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_df):,} equipment records ({len(agg_dict)} aggregated features)")
 
 # ============================================================================
 # STEP 8: RENAME COLUMNS
@@ -664,14 +736,52 @@ def calculate_mtbf_safe(equipment_id):
 print("  Calculating MTBF (using failures BEFORE cutoff only - leakage-safe)...")
 equipment_df['MTBF_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_safe)
 
-# Days since last failure (safe - uses reference date)
-equipment_df['Son_Arıza_Gun_Sayisi'] = (REFERENCE_DATE - equipment_df['Son_Arıza_Tarihi']).dt.days
+# 🔧 FIX: Calculate last failure date using ONLY failures BEFORE cutoff (no leakage)
+def calculate_last_failure_date_safe(equipment_id):
+    """
+    Get last failure date using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage - we don't look into the future
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna()
+
+    if len(equip_faults) > 0:
+        return equip_faults.max()
+    else:
+        return None  # No failures before cutoff
+
+print("  Calculating last failure date (using failures BEFORE cutoff only - leakage-safe)...")
+equipment_df['Son_Arıza_Tarihi_Safe'] = equipment_df['Ekipman_ID'].apply(calculate_last_failure_date_safe)
+
+# Days since last failure (safe - uses ONLY pre-cutoff failures)
+equipment_df['Son_Arıza_Gun_Sayisi'] = (REFERENCE_DATE - equipment_df['Son_Arıza_Tarihi_Safe']).dt.days
+
+# 🔧 FIX: Calculate first failure date using ONLY failures BEFORE cutoff (no leakage)
+def calculate_first_failure_date_safe(equipment_id):
+    """
+    Get first failure date using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage for equipment whose first failure is after cutoff
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna()
+
+    if len(equip_faults) > 0:
+        return equip_faults.min()
+    else:
+        return None  # No failures before cutoff
+
+print("  Calculating first failure date (using failures BEFORE cutoff only - leakage-safe)...")
+equipment_df['İlk_Arıza_Tarihi_Safe'] = equipment_df['Ekipman_ID'].apply(calculate_first_failure_date_safe)
 
 # NEW FEATURE v4.0: Time Until First Failure (Infant Mortality Detection)
 # Calculates: Installation Date → First Fault Date
 # Uses same priority as equipment age: TESIS → EDBS → WORKORDER (via Ekipman_Kurulum_Tarihi)
 equipment_df['Ilk_Arizaya_Kadar_Gun'] = (
-    equipment_df['İlk_Arıza_Tarihi'] - equipment_df['Ekipman_Kurulum_Tarihi']
+    equipment_df['İlk_Arıza_Tarihi_Safe'] - equipment_df['Ekipman_Kurulum_Tarihi']
 ).dt.days
 equipment_df['Ilk_Arizaya_Kadar_Yil'] = equipment_df['Ilk_Arizaya_Kadar_Gun'] / 365.25
 
@@ -687,19 +797,29 @@ print(f"MTBF: {mtbf_valid:,}/{len(equipment_df):,} valid | Time-to-First-Failure
 # STEP 11: DETECT RECURRING FAULTS
 # ============================================================================
 print("\n[Step 11/12] Detecting Recurring Fault Patterns (30/90 day windows) [6M/12M]...")
+print("  Calculating recurring faults (using failures BEFORE cutoff only - leakage-safe)...")
 
-def calculate_recurrence(equipment_id):
-    equip_faults = df[df[equipment_id_col] == equipment_id]['started at'].dropna().sort_values()
+def calculate_recurrence_safe(equipment_id):
+    """
+    Detect recurring faults using ONLY failures BEFORE cutoff date (2024-06-25)
+    This prevents data leakage - we don't look into the future
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)  # ← CRITICAL FILTER!
+    ]['started at'].dropna().sort_values()
+
     if len(equip_faults) < 2:
         return 0, 0
+
     time_diffs = equip_faults.diff().dt.days.dropna()
     return int((time_diffs <= 30).any()), int((time_diffs <= 90).any())
 
-recurrence_results = equipment_df['Ekipman_ID'].apply(calculate_recurrence)
+recurrence_results = equipment_df['Ekipman_ID'].apply(calculate_recurrence_safe)
 equipment_df['Tekrarlayan_Arıza_30gün_Flag'] = [r[0] for r in recurrence_results]
 equipment_df['Tekrarlayan_Arıza_90gün_Flag'] = [r[1] for r in recurrence_results]
 
-print(f"Recurring faults: 30-day={equipment_df['Tekrarlayan_Arıza_30gün_Flag'].sum():,} | 90-day={equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
+print(f"Recurring faults (pre-cutoff only): 30-day={equipment_df['Tekrarlayan_Arıza_30gün_Flag'].sum():,} | 90-day={equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
 
 # ============================================================================
 # STEP 12: SAVE RESULTS

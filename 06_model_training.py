@@ -198,6 +198,28 @@ print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
+# 🔧 FIX: Filter out equipment with no pre-cutoff failure history
+# These equipment cannot be predicted using temporal PoF (no historical failures to learn from)
+if 'Son_Arıza_Gun_Sayisi' in df.columns:
+    before_count = len(df)
+    no_history_mask = df['Son_Arıza_Gun_Sayisi'].isna()
+    no_history_count = no_history_mask.sum()
+
+    if no_history_count > 0:
+        print(f"\n⚠️  Excluding {no_history_count} equipment with NO pre-cutoff failures")
+        print(f"   These had their first failure AFTER 2024-06-25")
+        print(f"   Reason: Cannot predict temporal PoF without failure history")
+
+        # Keep only equipment with failure history
+        df = df[~no_history_mask].copy()
+
+        print(f"   ✓ Equipment for temporal PoF: {len(df)} (excluded {no_history_count})")
+        print(f"   ✓ Exclusion rate: {no_history_count/before_count*100:.1f}%")
+    else:
+        print(f"\n✓ All equipment have pre-cutoff failure history")
+else:
+    print(f"\n⚠️  WARNING: Son_Arıza_Gun_Sayisi not found - cannot filter equipment")
+
 # ============================================================================
 # STEP 2: CREATE TEMPORAL TARGET VARIABLES (v4.0)
 # ============================================================================
@@ -288,12 +310,27 @@ print("="*100)
 # Identify feature types
 id_column = 'Ekipman_ID'
 target_columns = [f'Target_{h}' for h in HORIZONS.keys()]
-categorical_features = ['Equipment_Class_Primary', 'Risk_Category']
+
+# Dynamically detect categorical features (don't hardcode!)
+categorical_features = []
+for col in df.columns:
+    if col not in [id_column] + target_columns:
+        # Check if column is categorical/object type
+        if df[col].dtype == 'object' or df[col].dtype.name == 'category':
+            categorical_features.append(col)
+
+# If no categorical features detected, add known ones that exist
+known_categoricals = ['Equipment_Class_Primary', 'Risk_Category', 'Voltage_Class', 'Bölge_Tipi']
+for cat in known_categoricals:
+    if cat in df.columns and cat not in categorical_features:
+        categorical_features.append(cat)
+
+print(f"\n✓ Detected categorical features: {categorical_features}")
 
 # Numeric features (all except ID, targets, and categoricals)
-feature_columns = [col for col in df.columns 
-                   if col != id_column 
-                   and col not in target_columns 
+feature_columns = [col for col in df.columns
+                   if col != id_column
+                   and col not in target_columns
                    and col not in categorical_features]
 
 print(f"\n✓ Feature Preparation:")
