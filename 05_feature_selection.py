@@ -180,14 +180,12 @@ REDUNDANT_FEATURES = {
     },
     'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
         'reason': 'Aggregation of chronic repeater flag',
-        'keep_instead': 'None',
+        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag (individual flag)',
         'correlation': 0.58
     },
-    'Tekrarlayan_Arıza_90gün_Flag': {
-        'reason': '🚨 CRITICAL: Calculated using ALL faults (includes future failures)',
-        'keep_instead': 'None (use in 06_chronic_repeater.py separately)',
-        'correlation': 'Causes AUC=1.0 leakage'
-    },
+    # NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
+    # Calculated safely using only pre-cutoff data (see 02_data_transformation.py calculate_recurrence_safe)
+    # Used in 06_chronic_repeater.py as the target label
     'Failure_Free_3M': {
         'reason': '🚨 CRITICAL: Binary flag for no failures in last 3M (uses ALL faults)',
         'keep_instead': 'Son_Arıza_Gun_Sayisi',
@@ -219,6 +217,7 @@ PROTECTED_FEATURES = [
     'Ekipman_Yaşı_Yıl_EDBS_first',
     'Equipment_Class_Primary',
     'Geographic_Cluster',
+    'Tekrarlayan_Arıza_90gün_Flag',  # TARGET for chronic repeater classification
 ]
 
 redundant_to_remove = []
