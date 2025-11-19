@@ -35,6 +35,19 @@ import pickle
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import centralized configuration
+from config import (
+    FEATURES_REDUCED_FILE,
+    FEATURES_ENGINEERED_FILE,
+    MODEL_DIR,
+    PREDICTION_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    TEST_SIZE,
+    HORIZONS
+)
+
 # Calibration libraries
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.model_selection import train_test_split
@@ -56,16 +69,12 @@ print(" "*25 + "Isotonic & Platt Scaling | Accurate Probabilities")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-RANDOM_STATE = 42
-TEST_SIZE = 0.30
-N_BINS = 10  # Number of bins for calibration curve
+# Parameters (from config.py): RANDOM_STATE, TEST_SIZE, HORIZONS
 
-# Prediction horizons
-# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
-HORIZONS = ['6M', '12M']
+N_BINS = 10  # Number of bins for calibration curve
 
 # Target thresholds based on lifetime failure count
 # Based on data: All 1148 equipment have >= 1 failure, 245 have >= 2, 104 have >= 3
@@ -78,9 +87,10 @@ TARGET_THRESHOLDS = {
 CALIBRATION_METHODS = ['isotonic', 'sigmoid']  # isotonic = Isotonic, sigmoid = Platt
 
 # Create output directories
-Path('models').mkdir(exist_ok=True)
-Path('outputs/calibration').mkdir(parents=True, exist_ok=True)
-Path('results').mkdir(exist_ok=True)
+MODEL_DIR.mkdir(exist_ok=True)
+calibration_dir = OUTPUT_DIR / 'calibration'
+calibration_dir.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
 
 print("\n📋 Configuration:")
 print(f"   Random State: {RANDOM_STATE}")
@@ -98,7 +108,7 @@ print("\n" + "="*100)
 print("STEP 1: LOADING DATA")
 print("="*100)
 
-data_path = Path('data/features_selected_clean.csv')
+data_path = FEATURES_REDUCED_FILE
 
 if not data_path.exists():
     print(f"\n❌ ERROR: File not found at {data_path}")
@@ -110,7 +120,7 @@ df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
 # Load full data for target creation
-df_full = pd.read_csv('data/features_engineered.csv')
+df_full = pd.read_csv(FEATURES_ENGINEERED_FILE)
 print(f"✓ Loaded full data: {df_full.shape[0]:,} equipment")
 
 # ============================================================================
@@ -217,7 +227,7 @@ print("="*100)
 uncalibrated_models = {}
 
 for horizon in HORIZONS:
-    model_path = f'models/monotonic_xgboost_{horizon.lower()}.pkl'
+    model_path = MODEL_DIR / f'monotonic_xgboost_{horizon.lower()}.pkl'
 
     if Path(model_path).exists():
         with open(model_path, 'rb') as f:
@@ -336,7 +346,7 @@ for horizon in HORIZONS:
         calibrated_models[horizon][method] = calibrated_model
 
         # Save calibrated model
-        model_path = f'models/calibrated_{method}_{horizon.lower()}.pkl'
+        model_path = MODEL_DIR / f'calibrated_{method}_{horizon.lower()}.pkl'
         with open(model_path, 'wb') as f:
             pickle.dump(calibrated_model, f)
         print(f"✓ Saved: {model_path}")
@@ -400,7 +410,7 @@ for idx, horizon in enumerate(HORIZONS):
 
 plt.suptitle('Calibration Curves: Uncalibrated vs Calibrated Models', fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
-plt.savefig('outputs/calibration/calibration_curves_comparison.png', dpi=300, bbox_inches='tight')
+plt.savefig(calibration_dir / 'calibration_curves_comparison.png', dpi=300, bbox_inches='tight')
 print("✓ Saved: outputs/calibration/calibration_curves_comparison.png")
 plt.close()
 
@@ -431,7 +441,7 @@ axes[1].grid(True, alpha=0.3, axis='y')
 axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=0)
 
 plt.tight_layout()
-plt.savefig('outputs/calibration/calibration_metrics_comparison.png', dpi=300, bbox_inches='tight')
+plt.savefig(calibration_dir / 'calibration_metrics_comparison.png', dpi=300, bbox_inches='tight')
 print("✓ Saved: outputs/calibration/calibration_metrics_comparison.png")
 plt.close()
 
@@ -474,7 +484,7 @@ for horizon in HORIZONS:
 
     plt.suptitle(f'Reliability Diagrams - {horizon} Horizon', fontsize=14, fontweight='bold', y=1.00)
     plt.tight_layout()
-    plt.savefig(f'outputs/calibration/reliability_diagram_{horizon.lower()}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(calibration_dir / f'reliability_diagram_{horizon.lower()}.png', dpi=300, bbox_inches='tight')
     print(f"✓ Saved: outputs/calibration/reliability_diagram_{horizon.lower()}.png")
     plt.close()
 
@@ -513,7 +523,7 @@ for horizon in HORIZONS:
     pred_df = pred_df.sort_values('Risk_Score', ascending=False)
 
     # Save
-    pred_path = f'predictions/calibrated_predictions_{horizon.lower()}.csv'
+    pred_path = PREDICTION_DIR / f'calibrated_predictions_{horizon.lower()}.csv'
     pred_df.to_csv(pred_path, index=False)
     print(f"✓ Saved: {pred_path}")
 
@@ -529,7 +539,7 @@ print("STEP 9: SAVING CALIBRATION RESULTS")
 print("="*100)
 
 # Save metrics
-metrics_df.to_csv('results/calibration_metrics.csv', index=False)
+metrics_df.to_csv(RESULTS_DIR / 'calibration_metrics.csv', index=False)
 print("✓ Saved: results/calibration_metrics.csv")
 
 # Calculate improvements
@@ -550,7 +560,7 @@ for horizon in HORIZONS:
     })
 
 improvements_df = pd.DataFrame(improvements)
-improvements_df.to_csv('results/calibration_improvements.csv', index=False)
+improvements_df.to_csv(RESULTS_DIR / 'calibration_improvements.csv', index=False)
 print("✓ Saved: results/calibration_improvements.csv")
 
 # ============================================================================

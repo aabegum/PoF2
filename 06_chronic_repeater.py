@@ -41,6 +41,18 @@ import pickle
 import warnings
 import sys
 
+# Import centralized configuration
+from config import (
+    FEATURES_REDUCED_FILE,
+    MODEL_DIR,
+    PREDICTION_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    TEST_SIZE,
+    N_FOLDS
+)
+
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
     try:
@@ -76,13 +88,11 @@ print(" "*20 + "Identify Failure-Prone Equipment | Replace vs Repair")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-# Model parameters
-RANDOM_STATE = 42
-TEST_SIZE = 0.30
-N_FOLDS = 3
+# Model parameters (from config.py):
+# RANDOM_STATE, TEST_SIZE, N_FOLDS
 
 # GridSearchCV settings
 USE_GRIDSEARCH = True
@@ -132,10 +142,10 @@ CATBOOST_PARAM_GRID = {
 }  # 24 combinations
 
 # Create output directories
-Path('models').mkdir(exist_ok=True)
-Path('predictions').mkdir(exist_ok=True)
-Path('outputs/chronic_repeater').mkdir(parents=True, exist_ok=True)
-Path('results').mkdir(exist_ok=True)
+MODEL_DIR.mkdir(exist_ok=True)
+PREDICTION_DIR.mkdir(exist_ok=True)
+(OUTPUT_DIR / 'chronic_repeater').mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
 
 print("\n📋 Configuration:")
 print(f"   Random State: {RANDOM_STATE}")
@@ -162,7 +172,8 @@ print("\n" + "="*100)
 print("STEP 1: LOADING SELECTED FEATURES")
 print("="*100)
 
-data_path = Path('data/features_selected_clean.csv')
+# Use reduced features (comprehensive feature selection)
+data_path = FEATURES_REDUCED_FILE
 
 if not data_path.exists():
     print(f"\n❌ ERROR: File not found at {data_path}")
@@ -380,7 +391,7 @@ else:
     print(f"\n   ⚠️  Low AUC ({xgb_auc:.4f}) - model may need more features or tuning")
 
 # Save model
-model_path = Path('models/chronic_repeater_xgboost.pkl')
+model_path = MODEL_DIR / 'chronic_repeater_xgboost.pkl'
 with open(model_path, 'wb') as f:
     pickle.dump(xgb_best, f)
 print(f"\n💾 Model saved: {model_path}")
@@ -450,7 +461,7 @@ print(f"   Recall: {cat_recall:.4f}")
 print(f"   F1-Score: {cat_f1:.4f}")
 
 # Save model
-model_path = Path('models/chronic_repeater_catboost.pkl')
+model_path = MODEL_DIR / 'chronic_repeater_catboost.pkl'
 cat_best.save_model(str(model_path))
 print(f"\n💾 Model saved: {model_path}")
 
@@ -474,7 +485,7 @@ print(f"\n📊 Model Performance Comparison:")
 print(comparison.to_string(index=False))
 
 # Save comparison
-comparison_path = Path('results/chronic_repeater_model_comparison.csv')
+comparison_path = RESULTS_DIR / 'chronic_repeater_model_comparison.csv'
 comparison.to_csv(comparison_path, index=False)
 print(f"\n✓ Comparison saved: {comparison_path}")
 
@@ -503,7 +514,7 @@ for i, row in importance_df.head(10).iterrows():
     print(f"  {i+1:2d}. {row['Feature']:<35} {row['Importance']:.4f}")
 
 # Save feature importance
-importance_path = Path('results/chronic_repeater_feature_importance.csv')
+importance_path = RESULTS_DIR / 'chronic_repeater_feature_importance.csv'
 importance_df.to_csv(importance_path, index=False)
 print(f"\n✓ Feature importance saved: {importance_path}")
 
@@ -533,7 +544,7 @@ predictions = pd.DataFrame({
 })
 
 # Save predictions
-pred_path = Path('predictions/chronic_repeaters.csv')
+pred_path = PREDICTION_DIR / 'chronic_repeaters.csv'
 predictions.to_csv(pred_path, index=False)
 
 # Distribution
@@ -585,7 +596,7 @@ for idx, (i, row) in enumerate(high_risk_full.head(10).iterrows(), 1):
           f"Probability: {row['Chronic_Repeater_Probability']*100:.1f}%")
 
 # Save high-risk report
-report_path = Path('results/high_risk_chronic_repeaters.csv')
+report_path = RESULTS_DIR / 'high_risk_chronic_repeaters.csv'
 high_risk_full.to_csv(report_path, index=False)
 print(f"\n✓ High-risk chronic repeater report saved: {report_path}")
 

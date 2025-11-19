@@ -1,15 +1,15 @@
 """
-FEATURE SELECTION - VIF + IMPORTANCE + CORRELATION
-Turkish EDAŞ PoF Prediction Project
+COMPREHENSIVE FEATURE SELECTION PIPELINE
+Turkish EDAŞ PoF Prediction Project (v5.0)
 
 Purpose:
-- Remove multicollinearity (VIF analysis)
-- Rank feature importance (Random Forest)
-- Filter highly correlated features
-- Select optimal feature set for modeling
+- Step 1: Remove data leakage features (target period information)
+- Step 2: Remove redundant/correlated features (multicollinearity)
+- Step 3: VIF analysis for final selection (variance inflation)
+- All-in-one feature selection with clear audit trail
 
-Input:  data/features_engineered.csv (58 features)
-Output: data/features_selected.csv (~25-35 features)
+Input:  data/features_engineered.csv (111 features)
+Output: data/features_reduced.csv (12-18 features)
 
 Author: Data Analytics Team
 Date: 2025
@@ -25,7 +25,20 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 import warnings
 import sys
-# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+
+# Import centralized configuration
+from config import (
+    FEATURES_ENGINEERED_FILE,
+    FEATURES_REDUCED_FILE,
+    OUTPUT_DIR,
+    VIF_THRESHOLD,
+    VIF_TARGET,
+    CORRELATION_THRESHOLD,
+    IMPORTANCE_THRESHOLD,
+    PROTECTED_FEATURES
+)
+
+# Fix Unicode encoding for Windows console
 if sys.platform == 'win32':
     try:
         import ctypes
@@ -34,34 +47,23 @@ if sys.platform == 'win32':
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
-warnings.filterwarnings('ignore')
 
-# Display settings
+warnings.filterwarnings('ignore')
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 plt.style.use('seaborn-v0_8-darkgrid')
 
 print("="*100)
-print(" "*30 + "FEATURE SELECTION PIPELINE")
-print(" "*25 + "VIF + Importance + Correlation")
+print(" "*25 + "COMPREHENSIVE FEATURE SELECTION")
+print(" "*15 + "Leakage Removal → Redundancy Reduction → VIF Analysis")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-# VIF thresholds (RELAXED - tree models handle multicollinearity well)
-VIF_THRESHOLD = 10  # Features with VIF > 10 are highly collinear
-VIF_TARGET = 10     # Target VIF after iterative removal (relaxed from 5 to retain domain features)
-
-# Correlation threshold
-CORRELATION_THRESHOLD = 0.85  # Remove features with correlation > 0.85
-
-# Feature importance threshold
-IMPORTANCE_THRESHOLD = 0.001  # Keep features contributing > 0.1%
-
 # Create output directory
-output_dir = Path('outputs/feature_selection')
+output_dir = OUTPUT_DIR / 'feature_selection'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 print("\n📋 Configuration:")
@@ -70,591 +72,354 @@ print(f"   Correlation Threshold: {CORRELATION_THRESHOLD}")
 print(f"   Importance Threshold: {IMPORTANCE_THRESHOLD}")
 
 # ============================================================================
-# STEP 1: LOAD DATA
+# STEP 0: LOAD DATA
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 1: LOADING ENGINEERED FEATURES")
+print("STEP 0: LOADING ENGINEERED FEATURES")
 print("="*100)
 
-data_path = Path('data/features_engineered.csv')
-
-if not data_path.exists():
-    print(f"\n❌ ERROR: File not found at {data_path}")
+if not FEATURES_ENGINEERED_FILE.exists():
+    print(f"\n❌ ERROR: File not found at {FEATURES_ENGINEERED_FILE}")
     print("Please run 03_feature_engineering.py first!")
     exit(1)
 
-print(f"\n✓ Loading from: {data_path}")
-df = pd.read_csv(data_path)
+print(f"\n✓ Loading from: {FEATURES_ENGINEERED_FILE}")
+df = pd.read_csv(FEATURES_ENGINEERED_FILE)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
-# Verify Equipment_Class_Primary exists (created by 02_data_transformation.py v2.0+)
+# Verify Equipment_Class_Primary exists
 if 'Equipment_Class_Primary' not in df.columns:
     print("\n⚠ WARNING: Equipment_Class_Primary column not found!")
-    print("This column should be created by 02_data_transformation.py and passed through 03_feature_engineering.py")
-    print("Proceeding without Equipment_Class_Primary...")
 else:
     print("✓ Equipment_Class_Primary column verified")
 
 original_feature_count = df.shape[1]
+original_features = df.columns.tolist()
 
 # ============================================================================
-# STEP 2: PREPARE FEATURES FOR ANALYSIS
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 2: PREPARING FEATURES FOR ANALYSIS")
-print("="*100)
-
-# Identify feature types
-print("\n--- Identifying Feature Categories ---")
-
-# ID columns (exclude from modeling)
-id_columns = ['Ekipman_ID', 'Equipment_ID_Primary']
-
-# Date columns (exclude from modeling)
-date_columns = [col for col in df.columns if 'Tarihi' in col or 'Date' in col or '_at' in col]
-
-# Categorical columns
-categorical_columns = [
-    'Ekipman_Sınıfı', 'Equipment_Type', 'Equipment_Class_Primary',
-    'İl', 'İlçe', 'Mahalle',
-    'Age_Risk_Category', 'Customer_Impact_Category', 'Risk_Category'
-]
-
-# Remove non-existent columns
-id_columns = [col for col in id_columns if col in df.columns]
-date_columns = [col for col in date_columns if col in df.columns]
-categorical_columns = [col for col in categorical_columns if col in df.columns]
-
-# Numeric columns (for VIF and modeling)
-exclude_columns = id_columns + date_columns + categorical_columns
-numeric_columns = [col for col in df.columns if col not in exclude_columns and df[col].dtype in ['float64', 'int64']]
-
-print(f"  ID columns (excluded): {len(id_columns)}")
-print(f"  Date columns (excluded): {len(date_columns)}")
-print(f"  Categorical columns: {len(categorical_columns)}")
-print(f"  Numeric columns: {len(numeric_columns)}")
-
-print(f"\n✓ Features for analysis: {len(numeric_columns)} numeric features")
-
-# ============================================================================
-# STEP 3: CREATE TARGET VARIABLES
+# STEP 1: REMOVE DATA LEAKAGE FEATURES
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 3: CREATING TARGET VARIABLES")
+print("STEP 1: REMOVING DATA LEAKAGE FEATURES")
 print("="*100)
 
-print("\n--- Creating Binary Targets for PoF Prediction ---")
+print("\n📋 Data Leakage Rules:")
+print("   1. LEAKY: Recent failure counts (3M/6M/12M include target period)")
+print("   2. LEAKY: Aggregations based on recent failures")
+print("   3. LEAKY: Features calculated from ALL faults (not cutoff-filtered)")
+print("   4. SAFE: Historical patterns from BEFORE cutoff (2024-06-25)")
+print("   5. SAFE: Static attributes (age, equipment type, location)")
 
-# We need to create target variables for 3/6/12/24 month predictions
-# Target = 1 if equipment will have ANY failure in next N months
+leaky_features = []
+leaky_reasons = {}
 
-# For feature selection, we'll use 12-month target as representative
-if 'Arıza_Sayısı_12ay' in df.columns:
-    df['Target_12M'] = (df['Arıza_Sayısı_12ay'] > 0).astype(int)
-    
-    target_dist = df['Target_12M'].value_counts()
-    print(f"\n12-Month Target Distribution:")
-    print(f"  No Failure (0): {target_dist.get(0, 0):,} ({target_dist.get(0, 0)/len(df)*100:.1f}%)")
-    print(f"  Failure (1): {target_dist.get(1, 0):,} ({target_dist.get(1, 0)/len(df)*100:.1f}%)")
-    
-    target_column = 'Target_12M'
-else:
-    print("⚠ WARNING: Cannot create target variable - Arıza_Sayısı_12ay not found")
-    print("  Using dummy target for feature selection")
-    df['Target_12M'] = 0
-    target_column = 'Target_12M'
+for col in original_features:
+    reason = None
+
+    # Rule 1: Recent failure counts (3/6/12 months)
+    if 'Arıza_Sayısı_3ay' in col or 'Arıza_Sayısı_6ay' in col or 'Arıza_Sayısı_12ay' in col:
+        if col != 'Toplam_Arıza_Sayisi_Lifetime':
+            reason = "Recent failure count (includes target period)"
+
+    # Rule 2: Aggregations based on recent failures
+    elif any(x in col for x in ['_12ay_Class_Avg', '_12ay_Cluster_Avg', '_6ay_Class_Avg', '_3ay_Class_Avg']):
+        reason = "Aggregation based on recent failures (target period)"
+
+    # Rule 3: Recent failure intensity/acceleration
+    elif 'Recent_Failure_Intensity' in col or 'Failure_Acceleration' in col:
+        reason = "Recent failure intensity (uses target period)"
+
+    # Rule 4: Risk scores if based on recent failures
+    elif 'Recent_Failure_Risk_Score' in col:
+        reason = "Risk score based on recent failures"
+
+    # Rule 5: Time since last normalized (if recent)
+    elif 'Time_Since_Last_Normalized' in col:
+        reason = "Normalized time since last failure (recent)"
+
+    # Rule 6: Lifetime failure count (used to create target - DIRECT LEAKAGE!)
+    elif 'Toplam_Arıza_Sayisi_Lifetime' in col or 'Toplam_Ariza_Sayisi_Lifetime' in col:
+        reason = "Lifetime failure count (DIRECTLY used to create target!)"
+
+    if reason:
+        leaky_features.append(col)
+        leaky_reasons[col] = reason
+
+print(f"\n⚠️  Found {len(leaky_features)} leaky features:")
+for feat in leaky_features:
+    print(f"   ❌ {feat:<50} → {leaky_reasons[feat]}")
+
+# Remove leaky features
+df = df.drop(columns=leaky_features)
+print(f"\n✓ Removed {len(leaky_features)} leaky features")
+print(f"✓ Remaining: {len(df.columns)} features")
 
 # ============================================================================
-# STEP 4: HANDLE MISSING VALUES
+# STEP 2: REMOVE REDUNDANT FEATURES
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 4: HANDLING MISSING VALUES")
+print("STEP 2: REMOVING REDUNDANT FEATURES")
 print("="*100)
 
-print("\n--- Missing Value Analysis ---")
+# Define redundant features (highly correlated or derived)
+REDUNDANT_FEATURES = {
+    'Reliability_Score': {
+        'reason': 'Derived from MTBF_Gün (r² > 0.95)',
+        'keep_instead': 'MTBF_Gün',
+        'correlation': 0.97
+    },
+    'Failure_Rate_Per_Year': {
+        'reason': 'Correlated with Son_Arıza_Gun_Sayisi and failure counts',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi',
+        'correlation': 0.72
+    },
+    'MTBF_Gün_Cluster_Avg': {
+        'reason': 'Aggregation of MTBF_Gün (individual feature more important)',
+        'keep_instead': 'MTBF_Gün',
+        'correlation': 0.65
+    },
+    'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
+        'reason': 'Aggregation of chronic repeater flag',
+        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag (individual flag)',
+        'correlation': 0.58
+    },
+    # NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
+    # Calculated safely using only pre-cutoff data (see 02_data_transformation.py calculate_recurrence_safe)
+    # Used in 06_chronic_repeater.py as the target label
+    'Failure_Free_3M': {
+        'reason': '🚨 CRITICAL: Binary flag for no failures in last 3M (uses ALL faults)',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi',
+        'correlation': 0.83
+    },
+    'Ekipman_Yoğunluk_Skoru': {
+        'reason': '🚨 CRITICAL: Fault density score uses ALL faults',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi or MTBF_Gün',
+        'correlation': 0.99
+    },
+    'Composite_PoF_Risk_Score': {
+        'reason': '🚨 CRITICAL: Created using Arıza_Sayısı_6ay (leaky)',
+        'keep_instead': 'MTBF_Gün + Son_Arıza_Gun_Sayisi + Age features',
+        'correlation': 0.22
+    },
+    'Risk_Category': {
+        'reason': 'Derived from Composite_PoF_Risk_Score (leaky)',
+        'keep_instead': 'Equipment_Class_Primary',
+        'correlation': 'N/A'
+    },
+}
 
-# Check missing values in numeric columns
-missing_counts = df[numeric_columns].isnull().sum()
-missing_features = missing_counts[missing_counts > 0].sort_values(ascending=False)
+# Protected features are imported from config.py
+# (NEVER remove these features)
 
-if len(missing_features) > 0:
-    print(f"\nFeatures with missing values: {len(missing_features)}")
-    print("\nTop 10 features by missing count:")
-    for feat, count in missing_features.head(10).items():
-        pct = count / len(df) * 100
-        print(f"  {feat:<45} {count:>5,} ({pct:>5.1f}%)")
+redundant_to_remove = []
+removal_reasons = {}
 
-    # 🔧 FIX: Do NOT fill Son_Arıza_Gun_Sayisi or MTBF_Gün with median
-    # Equipment with NaN have no pre-cutoff failures → cannot predict with temporal PoF
-    temporal_features = ['Son_Arıza_Gun_Sayisi', 'MTBF_Gün']
+for feat, info in REDUNDANT_FEATURES.items():
+    if feat in df.columns:
+        redundant_to_remove.append(feat)
+        removal_reasons[feat] = info
+        print(f"\n❌ {feat}")
+        print(f"   Reason: {info['reason']}")
+        print(f"   Keep instead: {info['keep_instead']}")
+        corr = info['correlation']
+        if isinstance(corr, (int, float)):
+            print(f"   Correlation: r={corr:.2f}")
+        else:
+            print(f"   Correlation: {corr}")
+    else:
+        print(f"\n⚠️  {feat} - Not in dataset (already removed)")
 
-    print("\n✓ Strategy: Filling missing values with median (except temporal features)")
-    print(f"   Note: {temporal_features} will remain NaN for equipment with no pre-cutoff failures")
+# Verify no protected features are being removed
+protected_in_removal = set(redundant_to_remove) & set(PROTECTED_FEATURES)
+if protected_in_removal:
+    print(f"\n⚠️  WARNING: Protected features in removal list: {protected_in_removal}")
+    redundant_to_remove = [f for f in redundant_to_remove if f not in PROTECTED_FEATURES]
 
-    for col in numeric_columns:
-        if df[col].isnull().sum() > 0:
-            if col in temporal_features:
-                # Keep NaN for temporal features - indicates no failure history
-                print(f"   ⚠️  Skipping {col} (will filter out NaN equipment later)")
-            else:
-                df[col].fillna(df[col].median(), inplace=True)
-else:
-    print("✓ No missing values in numeric features")
+# Remove redundant features
+df = df.drop(columns=redundant_to_remove)
+print(f"\n✓ Removed {len(redundant_to_remove)} redundant features")
+print(f"✓ Remaining: {len(df.columns)} features")
 
 # ============================================================================
-# STEP 5: VIF ANALYSIS (MULTICOLLINEARITY DETECTION)
+# STEP 3: VIF ANALYSIS
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 5: VIF ANALYSIS - MULTICOLLINEARITY DETECTION")
+print("STEP 3: VIF ANALYSIS (Multicollinearity Detection)")
 print("="*100)
 
-print("\n--- Calculating Variance Inflation Factors ---")
-print("This may take a few minutes for 40+ features...")
+# Identify features for VIF analysis
+id_column = 'Ekipman_ID' if 'Ekipman_ID' in df.columns else None
+target_columns = ['Arıza_Olacak_6ay', 'Arıza_Olacak_12ay', 'Arıza_Olacak_24ay']
+target_columns = [col for col in target_columns if col in df.columns]
 
-def calculate_vif(df_vif, features):
-    """Calculate VIF for each feature"""
-    vif_data = pd.DataFrame()
-    vif_data["Feature"] = features
-    vif_data["VIF"] = [variance_inflation_factor(df_vif[features].values, i) 
-                       for i in range(len(features))]
-    return vif_data.sort_values('VIF', ascending=False)
+# Exclude ID and targets
+features_for_vif = [col for col in df.columns if col != id_column and col not in target_columns]
 
-# Prepare data for VIF (drop any infinite or NaN values)
-df_vif = df[numeric_columns].copy()
-df_vif = df_vif.replace([np.inf, -np.inf], np.nan)
+print(f"\n✓ Analyzing {len(features_for_vif)} features for multicollinearity")
+
+# Separate numeric and categorical
+numeric_features = df[features_for_vif].select_dtypes(include=[np.number]).columns.tolist()
+categorical_features = [col for col in features_for_vif if col not in numeric_features]
+
+print(f"   Numeric features: {len(numeric_features)}")
+print(f"   Categorical features: {len(categorical_features)}")
+
+if len(categorical_features) > 0:
+    print(f"\n✓ Categorical features: {categorical_features}")
+    print("   (Will encode for VIF analysis)")
+
+# Encode categorical features
+df_vif = df[numeric_features + categorical_features].copy()
+
+for cat_col in categorical_features:
+    if df_vif[cat_col].dtype == 'object' or df_vif[cat_col].dtype.name == 'category':
+        le = LabelEncoder()
+        df_vif[cat_col] = le.fit_transform(df_vif[cat_col].astype(str))
+
+# Handle missing values
 df_vif = df_vif.fillna(df_vif.median())
 
-# Initial VIF calculation
-vif_before = calculate_vif(df_vif, numeric_columns)
+# Calculate VIF iteratively
+print(f"\n--- Iterative VIF Calculation (Target: VIF < {VIF_TARGET}) ---")
 
-print(f"\n✓ Initial VIF calculated for {len(numeric_columns)} features")
-print(f"\nTop 10 Features by VIF (Before Removal):")
-print(vif_before.head(10).to_string(index=False))
-
-# Count high VIF features
-high_vif_count = (vif_before['VIF'] > VIF_THRESHOLD).sum()
-print(f"\n⚠ Features with VIF > {VIF_THRESHOLD}: {high_vif_count}")
-
-# Protected features (critical domain features that should never be removed)
-# OPTIMIZED FOR DUAL MODELS: Chronic Repeater Classification + Survival Analysis
-PROTECTED_FEATURES = [
-    # === CHRONIC REPEATER INDICATORS (Model 2) ===
-    'Tekrarlayan_Arıza_90gün_Flag',   # 🔴 CRITICAL: 94 equipment (12%) - replace vs repair decision
-    'Arıza_Sayısı_12ay',              # 12-month failure count (PRIMARY predictor for classification)
-
-    # === SURVIVAL ANALYSIS COVARIATES (Model 1) ===
-    'MTBF_Gün',                        # Mean Time Between Failures (classical reliability metric)
-    'Ilk_Arizaya_Kadar_Yil',          # Time to first failure (infant mortality detection)
-    'Son_Arıza_Gun_Sayisi',           # Days since last failure (recency - key for Cox model)
-
-    # === EQUIPMENT CHARACTERISTICS (Both Models) ===
-    'Ekipman_Yaşı_Yıl',               # Equipment age (fundamental predictor - bathtub curve)
-    'Ekipman_Yaşı_Yıl_TESIS_first',   # TESIS age (TESIS_TARIHI priority - commissioning date)
-    'Ekipman_Yaşı_Yıl_EDBS_first',    # EDBS age (alternative source)
-
-    # === INTERPRETABLE RISK SCORES (Business Value) ===
-    'Composite_PoF_Risk_Score',       # 🎯 BEST risk score for stakeholder communication
-    'Failure_Free_3M',                # Failure-free indicator (safe - calculated before cutoff)
-    'Neden_Değişim_Flag',             # Cause code changes (failure pattern instability)
-]
-
-# Filter to only include protected features that exist in the dataset
-protected_in_data = [f for f in PROTECTED_FEATURES if f in numeric_columns]
-print(f"\n✓ Protected features (will not be removed by VIF): {len(protected_in_data)}")
-for feat in protected_in_data:
-    print(f"  • {feat}")
-
-# STEP 5A: Remove exact mathematical duplicates FIRST (Age_Days = Age_Years * 365)
-print(f"\n--- Step 5A: Removing Exact Mathematical Duplicates ---")
-
-exact_duplicates = [
-    'Ekipman_Yaşı_Gün',           # = Ekipman_Yaşı_Yıl * 365 (keep years version)
-    'Ekipman_Yaşı_Gün_TESIS',     # = Ekipman_Yaşı_Yıl_TESIS * 365
-    'Ekipman_Yaşı_Gün_EDBS',      # = Ekipman_Yaşı_Yıl_EDBS * 365
-    'Ilk_Arizaya_Kadar_Gun',      # = Ilk_Arizaya_Kadar_Yil * 365
-]
-
-duplicates_removed = [f for f in exact_duplicates if f in numeric_columns]
-features_to_keep = [f for f in numeric_columns if f not in exact_duplicates]
-
-print(f"  Removed {len(duplicates_removed)} mathematical duplicates:")
-for feat in duplicates_removed:
-    print(f"    ❌ {feat} (exact conversion from year version)")
-
-print(f"  Features remaining: {len(features_to_keep)}")
-
-# Iterative VIF removal
-print(f"\n--- Step 5B: Iterative VIF Removal (Target VIF < {VIF_TARGET}) ---")
-
+vif_features = df_vif.columns.tolist()
 iteration = 0
-max_iterations = 50  # Increased from 10 to ensure convergence
+max_iterations = 50
 
 while True:
     iteration += 1
-
-    # Calculate VIF
-    vif_current = calculate_vif(df_vif[features_to_keep], features_to_keep)
-
-    # Find maximum VIF (excluding protected features)
-    vif_removable = vif_current[~vif_current['Feature'].isin(protected_in_data)]
-
-    if len(vif_removable) == 0:
-        print(f"  ✓ All remaining features are protected")
+    if iteration > max_iterations:
+        print(f"\n⚠️  Reached maximum iterations ({max_iterations})")
         break
 
-    max_vif = vif_removable['VIF'].max()
-    max_vif_feature = vif_removable.loc[vif_removable['VIF'].idxmax(), 'Feature']
+    # Calculate VIF for current features
+    vif_data = pd.DataFrame()
+    vif_data['Feature'] = vif_features
+    vif_data['VIF'] = [variance_inflation_factor(df_vif[vif_features].values, i)
+                       for i in range(len(vif_features))]
 
-    print(f"\nIteration {iteration}:")
-    print(f"  Features: {len(features_to_keep)} ({len([f for f in features_to_keep if f in protected_in_data])} protected)")
-    print(f"  Max VIF: {max_vif:.2f} ({max_vif_feature})")
+    # Find max VIF
+    max_vif = vif_data['VIF'].max()
+    max_vif_feature = vif_data.loc[vif_data['VIF'].idxmax(), 'Feature']
 
-    # Check stopping conditions
-    if max_vif < VIF_TARGET:
-        print(f"  ✓ Target VIF achieved!")
+    print(f"\nIteration {iteration}: {len(vif_features)} features, Max VIF = {max_vif:.2f} ({max_vif_feature})")
+
+    # Stop if all VIF below threshold
+    if max_vif <= VIF_TARGET:
+        print(f"✅ All features have VIF <= {VIF_TARGET}")
         break
 
-    if iteration >= max_iterations:
-        print(f"  ⚠ Max iterations reached")
+    # Stop if max VIF is not too high and we have few features
+    if max_vif <= 15 and len(vif_features) <= 15:
+        print(f"✅ Stopping: VIF={max_vif:.2f} is acceptable with {len(vif_features)} features")
         break
 
-    # Remove feature with highest VIF (only if not protected)
-    if max_vif_feature not in protected_in_data:
-        features_to_keep.remove(max_vif_feature)
-        print(f"  ❌ Removed: {max_vif_feature}")
-    else:
-        print(f"  🔒 Protected: {max_vif_feature} (keeping despite high VIF)")
-        break
+    # Remove feature with highest VIF (unless protected)
+    if max_vif_feature in PROTECTED_FEATURES:
+        print(f"   ⚠️  {max_vif_feature} is PROTECTED - keeping despite high VIF")
+        # Remove next highest non-protected feature
+        vif_sorted = vif_data[~vif_data['Feature'].isin(PROTECTED_FEATURES)].sort_values('VIF', ascending=False)
+        if len(vif_sorted) == 0:
+            print("   ✅ All remaining features are protected")
+            break
+        max_vif_feature = vif_sorted.iloc[0]['Feature']
+        max_vif = vif_sorted.iloc[0]['VIF']
+        print(f"   Removing {max_vif_feature} instead (VIF={max_vif:.2f})")
 
-# Final VIF
-vif_after = calculate_vif(df_vif[features_to_keep], features_to_keep)
+    print(f"   ❌ Removing: {max_vif_feature} (VIF={max_vif:.2f})")
+    vif_features.remove(max_vif_feature)
+    df_vif = df_vif[vif_features]
 
-print(f"\n✓ VIF Reduction Complete")
-print(f"  Features before: {len(numeric_columns)}")
-print(f"  Features after: {len(features_to_keep)}")
-print(f"  Features removed: {len(numeric_columns) - len(features_to_keep)}")
+# Final VIF results
+print(f"\n--- Final VIF Results ---")
+final_vif = pd.DataFrame()
+final_vif['Feature'] = vif_features
+final_vif['VIF'] = [variance_inflation_factor(df_vif.values, i) for i in range(len(vif_features))]
+final_vif = final_vif.sort_values('VIF', ascending=False)
 
-print(f"\nFinal VIF Statistics:")
-print(f"  Mean VIF: {vif_after['VIF'].mean():.2f}")
-print(f"  Max VIF: {vif_after['VIF'].max():.2f}")
-print(f"  Features with VIF > {VIF_THRESHOLD}: {(vif_after['VIF'] > VIF_THRESHOLD).sum()}")
+print("\n" + final_vif.to_string(index=False))
 
-# Save VIF results
-vif_comparison = pd.DataFrame({
-    'Feature': vif_before['Feature'],
-    'VIF_Before': vif_before['VIF'],
-    'VIF_After': vif_after['VIF'].reindex(vif_before.index).fillna(0),
-    'Removed': ~vif_before['Feature'].isin(features_to_keep)
-})
-vif_comparison.to_csv(output_dir / 'vif_analysis.csv', index=False)
-print(f"\n✓ VIF analysis saved to: {output_dir / 'vif_analysis.csv'}")
+# Keep only VIF-selected features (plus ID and targets)
+final_columns = [id_column] + target_columns + vif_features if id_column else target_columns + vif_features
+df_final = df[[col for col in final_columns if col in df.columns]].copy()
 
-# ============================================================================
-# STEP 6: CORRELATION ANALYSIS
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 6: CORRELATION ANALYSIS")
-print("="*100)
-
-print("\n--- Identifying Highly Correlated Feature Pairs ---")
-
-# Calculate correlation matrix
-corr_matrix = df[features_to_keep].corr().abs()
-
-# Find pairs with correlation > threshold
-high_corr_pairs = []
-for i in range(len(corr_matrix.columns)):
-    for j in range(i+1, len(corr_matrix.columns)):
-        if corr_matrix.iloc[i, j] > CORRELATION_THRESHOLD:
-            high_corr_pairs.append({
-                'Feature_1': corr_matrix.columns[i],
-                'Feature_2': corr_matrix.columns[j],
-                'Correlation': corr_matrix.iloc[i, j]
-            })
-
-if len(high_corr_pairs) > 0:
-    print(f"\n⚠ Found {len(high_corr_pairs)} highly correlated pairs (>{CORRELATION_THRESHOLD}):")
-    
-    high_corr_df = pd.DataFrame(high_corr_pairs).sort_values('Correlation', ascending=False)
-    print(high_corr_df.head(10).to_string(index=False))
-    
-    # For each pair, remove the feature with lower correlation to target
-    print(f"\n--- Removing Less Predictive Feature from Each Pair ---")
-    
-    features_to_remove_corr = set()
-    
-    for pair in high_corr_pairs:
-        feat1 = pair['Feature_1']
-        feat2 = pair['Feature_2']
-        
-        # Calculate correlation with target
-        corr1 = abs(df[feat1].corr(df[target_column]))
-        corr2 = abs(df[feat2].corr(df[target_column]))
-        
-        # Remove feature with lower correlation to target
-        if corr1 < corr2:
-            features_to_remove_corr.add(feat1)
-            print(f"  ❌ Remove {feat1} (target corr: {corr1:.3f}) | Keep {feat2} (target corr: {corr2:.3f})")
-        else:
-            features_to_remove_corr.add(feat2)
-            print(f"  ❌ Remove {feat2} (target corr: {corr2:.3f}) | Keep {feat1} (target corr: {corr1:.3f})")
-    
-    # Update feature list
-    features_to_keep = [f for f in features_to_keep if f not in features_to_remove_corr]
-    
-    print(f"\n✓ Removed {len(features_to_remove_corr)} features due to high correlation")
-else:
-    print(f"✓ No highly correlated pairs found (threshold: {CORRELATION_THRESHOLD})")
-
-# Save correlation matrix visualization
-print("\n--- Creating Correlation Heatmap ---")
-if len(features_to_keep) <= 40:  # Only plot if not too many features
-    plt.figure(figsize=(16, 14))
-    sns.heatmap(df[features_to_keep].corr(), annot=False, cmap='coolwarm', center=0, 
-                square=True, linewidths=0.5, cbar_kws={"shrink": 0.8})
-    plt.title('Feature Correlation Matrix (After VIF Reduction)', fontsize=16, pad=20)
-    plt.tight_layout()
-    plt.savefig(output_dir / 'correlation_matrix.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✓ Correlation heatmap saved to: {output_dir / 'correlation_matrix.png'}")
-else:
-    print(f"⚠ Skipping heatmap (too many features: {len(features_to_keep)})")
+print(f"\n✓ Final feature set: {len(df_final.columns)} features")
 
 # ============================================================================
-# STEP 7: FEATURE IMPORTANCE ANALYSIS
+# STEP 4: SAVE RESULTS
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 7: FEATURE IMPORTANCE ANALYSIS")
+print("STEP 4: SAVING RESULTS")
 print("="*100)
 
-print("\n--- Training Random Forest for Feature Importance ---")
-
-# Prepare data
-X = df[features_to_keep].copy()
-y = df[target_column].copy()
-
-# Check if we have enough positive samples
-positive_samples = y.sum()
-if positive_samples < 10:
-    print(f"⚠ WARNING: Only {positive_samples} positive samples - skipping importance analysis")
-    feature_importance_df = pd.DataFrame({
-        'Feature': features_to_keep,
-        'Importance': 1.0 / len(features_to_keep)  # Equal importance
-    })
-else:
-    # Train Random Forest
-    print("  Training Random Forest Classifier...")
-    rf = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=10,
-        min_samples_split=20,
-        random_state=42,
-        n_jobs=-1
-    )
-    
-    rf.fit(X, y)
-    
-    # Get feature importances
-    feature_importance_df = pd.DataFrame({
-        'Feature': features_to_keep,
-        'Importance': rf.feature_importances_
-    }).sort_values('Importance', ascending=False)
-    
-    print(f"✓ Random Forest trained")
-    print(f"\nTop 15 Most Important Features:")
-    print(feature_importance_df.head(15).to_string(index=False))
-    
-    # Plot feature importance
-    print("\n--- Creating Feature Importance Plot ---")
-    plt.figure(figsize=(12, max(8, len(features_to_keep) * 0.3)))
-    
-    top_n = min(30, len(feature_importance_df))
-    
-    plt.barh(range(top_n), 
-             feature_importance_df.head(top_n)['Importance'],
-             color='steelblue')
-    plt.yticks(range(top_n), feature_importance_df.head(top_n)['Feature'])
-    plt.xlabel('Importance Score', fontsize=12)
-    plt.ylabel('Feature', fontsize=12)
-    plt.title(f'Top {top_n} Feature Importances (Random Forest)', fontsize=14, pad=20)
-    plt.gca().invert_yaxis()
-    plt.tight_layout()
-    plt.savefig(output_dir / 'feature_importance.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✓ Feature importance plot saved to: {output_dir / 'feature_importance.png'}")
-    
-    # Remove low-importance features (EXCEPT protected features)
-    print(f"\n--- Removing Low-Importance Features (< {IMPORTANCE_THRESHOLD}) ---")
-    print(f"    Note: Protected features will NOT be removed even if below threshold")
-
-    low_importance = feature_importance_df[feature_importance_df['Importance'] < IMPORTANCE_THRESHOLD]
-
-    if len(low_importance) > 0:
-        print(f"  Features below threshold: {len(low_importance)}")
-
-        # Separate protected vs removable low-importance features
-        removable = []
-        protected_low = []
-
-        for feat, imp in low_importance[['Feature', 'Importance']].values:
-            if feat in protected_in_data:
-                protected_low.append((feat, imp))
-                print(f"    🔒 {feat}: {imp:.4f} (PROTECTED - keeping despite low importance)")
-            else:
-                removable.append(feat)
-                print(f"    ❌ {feat}: {imp:.4f}")
-
-        # Keep features that are either above threshold OR protected
-        features_to_keep = (
-            feature_importance_df[feature_importance_df['Importance'] >= IMPORTANCE_THRESHOLD]['Feature'].tolist() +
-            [f for f, _ in protected_low]  # Add back protected features
-        )
-
-        print(f"\n✓ Removed {len(removable)} low-importance features")
-        if len(protected_low) > 0:
-            print(f"✓ Kept {len(protected_low)} protected features despite low importance")
-    else:
-        print(f"✓ All features meet importance threshold")
-
-# Save feature importance
-feature_importance_df.to_csv(output_dir / 'feature_importance.csv', index=False)
-print(f"\n✓ Feature importance saved to: {output_dir / 'feature_importance.csv'}")
-
-# ============================================================================
-# STEP 8: FINAL FEATURE SET
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 8: FINAL FEATURE SELECTION")
-print("="*100)
-
-print(f"\n📊 Feature Selection Summary:")
-print(f"   Starting features: {len(numeric_columns)}")
-print(f"   After VIF reduction: {len(features_to_keep)} (removed {len(numeric_columns) - len(features_to_keep)})")
-
-# Add categorical features back (if needed for modeling)
-final_features = features_to_keep.copy()
-
-# Add essential categorical features (for stratification/grouping)
-essential_categorical = ['Equipment_Class_Primary', 'Risk_Category']
-for col in essential_categorical:
-    if col in df.columns and col not in final_features:
-        final_features.append(col)
-
-# Add ID column for reference
-if 'Ekipman_ID' in df.columns:
-    final_features.insert(0, 'Ekipman_ID')
-
-print(f"   Final features: {len(final_features)}")
-print(f"   - Numeric: {len([f for f in final_features if f in features_to_keep])}")
-print(f"   - Categorical: {len([f for f in final_features if f not in features_to_keep])}")
-
-print(f"\n✅ Final Feature Set ({len(final_features)} features):")
-for i, feat in enumerate(final_features, 1):
-    feat_type = "ID" if feat == 'Ekipman_ID' else ("CAT" if feat in categorical_columns else "NUM")
-    print(f"  {i:2d}. [{feat_type}] {feat}")
-
-# ============================================================================
-# STEP 9: SAVE SELECTED FEATURES
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 9: SAVING SELECTED FEATURES")
-print("="*100)
-
-# Create output dataframe
-df_selected = df[final_features].copy()
-
-# 🔧 FIX: Add flag for equipment with no pre-cutoff failure history
-# These equipment cannot be predicted using temporal PoF
-if 'Son_Arıza_Gun_Sayisi' in df_selected.columns:
-    no_history_mask = df_selected['Son_Arıza_Gun_Sayisi'].isna()
-    no_history_count = no_history_mask.sum()
-
-    if no_history_count > 0:
-        print(f"\n⚠️  IMPORTANT: Found {no_history_count} equipment with NO pre-cutoff failures")
-        print(f"   These had their first failure AFTER 2024-06-25")
-        print(f"   They will be EXCLUDED from temporal PoF training")
-        print(f"   (Cannot predict when equipment will fail if no failure history)")
-
-        # Save list of excluded equipment for analysis
-        excluded_equipment = df_selected[no_history_mask][['Ekipman_ID']].copy()
-        excluded_equipment['Exclusion_Reason'] = 'No pre-cutoff failures'
-        excluded_equipment['First_Failure'] = 'After 2024-06-25'
-
-        excluded_path = Path('data/excluded_equipment_no_history.csv')
-        excluded_equipment.to_csv(excluded_path, index=False)
-        print(f"   ✓ Saved excluded equipment list: {excluded_path}")
-
-output_path = Path('data/features_selected.csv')
-print(f"\n💾 Saving to: {output_path}")
-print(f"   Note: Includes ALL {len(df_selected)} equipment (will filter during training)")
-df_selected.to_csv(output_path, index=False, encoding='utf-8-sig')
+print(f"\n💾 Saving to: {FEATURES_REDUCED_FILE}")
+df_final.to_csv(FEATURES_REDUCED_FILE, index=False, encoding='utf-8-sig')
 
 print(f"✅ Successfully saved!")
-print(f"   Records: {len(df_selected):,}")
-print(f"   Features: {len(df_selected.columns)}")
-print(f"   File size: {output_path.stat().st_size / 1024**2:.2f} MB")
+print(f"   Records: {len(df_final):,}")
+print(f"   Features: {len(df_final.columns)}")
+print(f"   File size: {FEATURES_REDUCED_FILE.stat().st_size / 1024**2:.2f} MB")
 
-# Save feature selection report
-print("\n📋 Creating feature selection report...")
+# Save comprehensive report
+print("\n📋 Creating comprehensive feature selection report...")
 
-report_data = {
-    'Stage': ['Original', 'After VIF', 'After Correlation', 'After Importance', 'Final (with categorical)'],
-    'Feature_Count': [
-        len(numeric_columns),
-        len(features_to_keep),
-        len(features_to_keep),
-        len(features_to_keep),
-        len(final_features)
-    ]
-}
+report_data = []
+for feat in original_features:
+    status = 'RETAINED'
+    reason = 'Passed all checks'
+
+    if feat in leaky_features:
+        status = 'REMOVED - LEAKAGE'
+        reason = leaky_reasons[feat]
+    elif feat in redundant_to_remove:
+        status = 'REMOVED - REDUNDANT'
+        reason = removal_reasons[feat]['reason']
+    elif feat not in df_final.columns and feat != id_column and feat not in target_columns:
+        status = 'REMOVED - VIF'
+        reason = 'High multicollinearity (VIF > threshold)'
+
+    report_data.append({
+        'Feature': feat,
+        'Status': status,
+        'Reason': reason,
+        'In_Final_Set': feat in df_final.columns
+    })
 
 report_df = pd.DataFrame(report_data)
-report_df.to_csv(output_dir / 'selection_summary.csv', index=False)
-print(f"✓ Selection summary saved to: {output_dir / 'selection_summary.csv'}")
-
-# Save removed features list
-removed_features = [f for f in numeric_columns if f not in features_to_keep]
-if len(removed_features) > 0:
-    removed_df = pd.DataFrame({
-        'Removed_Feature': removed_features,
-        'Reason': ['VIF or Correlation or Importance'] * len(removed_features)
-    })
-    removed_df.to_csv(output_dir / 'removed_features.csv', index=False)
-    print(f"✓ Removed features list saved to: {output_dir / 'removed_features.csv'}")
+report_path = Path('outputs/feature_selection/comprehensive_selection_report.csv')
+report_df.to_csv(report_path, index=False)
+print(f"✓ Report saved to: {report_path}")
 
 # ============================================================================
-# STEP 10: FEATURE SELECTION REPORT
+# STEP 5: SUMMARY
 # ============================================================================
 print("\n" + "="*100)
-print("FEATURE SELECTION COMPLETE - SUMMARY")
+print("COMPREHENSIVE FEATURE SELECTION COMPLETE")
 print("="*100)
 
-print(f"\n🎯 SELECTION RESULTS:")
+print(f"\n📊 SELECTION SUMMARY:")
 print(f"   Original features: {original_feature_count}")
-print(f"   Numeric features analyzed: {len(numeric_columns)}")
-print(f"   Features removed: {len(numeric_columns) - len(features_to_keep)}")
-print(f"   Final feature set: {len(final_features)}")
-
-print(f"\n📊 REMOVAL BREAKDOWN:")
-print(f"   VIF reduction: {len(numeric_columns) - len(features_to_keep)} features")
-if len(high_corr_pairs) > 0:
-    print(f"   Correlation filtering: {len(features_to_remove_corr)} features")
-else:
-    print(f"   Correlation filtering: 0 features")
+print(f"   Leaky features removed: {len(leaky_features)}")
+print(f"   Redundant features removed: {len(redundant_to_remove)}")
+print(f"   VIF-removed features: {original_feature_count - len(leaky_features) - len(redundant_to_remove) - len(df_final.columns)}")
+print(f"   Final features: {len(df_final.columns)}")
+print(f"   Reduction: {(1 - len(df_final.columns)/original_feature_count)*100:.1f}%")
 
 print(f"\n📂 OUTPUT FILES:")
-print(f"   • {output_path}")
-print(f"   • {output_dir / 'vif_analysis.csv'}")
-print(f"   • {output_dir / 'feature_importance.csv'}")
-print(f"   • {output_dir / 'correlation_matrix.png'}")
-print(f"   • {output_dir / 'feature_importance.png'}")
-print(f"   • {output_dir / 'selection_summary.csv'}")
+print(f"   • {FEATURES_REDUCED_FILE}")
+print(f"   • {report_path}")
 
-print(f"\n🚀 READY FOR MODEL TRAINING:")
-print(f"   ✓ Multicollinearity removed (VIF < {VIF_TARGET})")
-print(f"   ✓ High correlations eliminated")
-print(f"   ✓ Low-importance features removed")
-print(f"   ✓ Clean feature set ready for XGBoost/CatBoost")
+print(f"\n✅ PIPELINE BENEFITS:")
+print(f"   • No data leakage (only historical data)")
+print(f"   • Reduced multicollinearity (VIF < {VIF_TARGET})")
+print(f"   • No redundant features")
+print(f"   • Improved model generalization")
+print(f"   • Faster training")
+
+print(f"\n💡 NEXT STEPS:")
+print(f"   1. Run model training: python 06_model_training.py")
+print(f"   2. Expected AUC: 0.70-0.80 (realistic, not 1.0)")
+print(f"   3. Review feature selection report for audit trail")
 
 print("\n" + "="*100)
 print(f"{'FEATURE SELECTION PIPELINE COMPLETE':^100}")

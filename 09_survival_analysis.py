@@ -34,6 +34,19 @@ import seaborn as sns
 from datetime import datetime, timedelta
 import warnings
 import sys
+
+# Import centralized configuration
+from config import (
+    INPUT_FILE,
+    FEATURES_REDUCED_FILE,
+    PREDICTION_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    TEST_SIZE,
+    CUTOFF_DATE,
+    HORIZONS
+)
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
     try:
@@ -69,19 +82,14 @@ print(" "*35 + "Cox PH + Random Survival Forest")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-RANDOM_STATE = 42
-TEST_SIZE = 0.30
-REFERENCE_DATE = pd.Timestamp('2025-06-25')  # Analysis reference date
+# Parameters (from config.py): RANDOM_STATE, TEST_SIZE, CUTOFF_DATE, HORIZONS
 
-# Prediction horizons (days)
-HORIZONS = {
-    '3M': 90,
-    '12M': 365,
-    '24M': 730
-}
+REFERENCE_DATE = CUTOFF_DATE  # Use cutoff date as analysis reference
+
+# Horizons imported from config.py (6M: 180, 12M: 365, etc.)
 
 # Risk thresholds (probability of failure)
 RISK_THRESHOLDS = {
@@ -98,9 +106,10 @@ RISK_CATEGORIES = {
 }
 
 # Create output directories
-Path('predictions').mkdir(exist_ok=True)
-Path('results').mkdir(exist_ok=True)
-Path('outputs/survival_analysis').mkdir(parents=True, exist_ok=True)
+PREDICTION_DIR.mkdir(exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
+survival_dir = OUTPUT_DIR / 'survival_analysis'
+survival_dir.mkdir(parents=True, exist_ok=True)
 
 print("\n📋 Configuration:")
 print(f"   Random State: {RANDOM_STATE}")
@@ -122,7 +131,7 @@ print("STEP 1: LOADING DATA")
 print("="*100)
 
 # Load clean features
-features_path = Path('data/features_selected_clean.csv')
+features_path = FEATURES_REDUCED_FILE
 if not features_path.exists():
     print(f"\n❌ ERROR: {features_path} not found!")
     print("Please run 05b_remove_leaky_features.py first!")
@@ -133,7 +142,7 @@ df_features = pd.read_csv(features_path)
 print(f"✓ Loaded: {df_features.shape[0]:,} equipment × {df_features.shape[1]} features")
 
 # Load fault-level data with timestamps
-fault_paths = ['data/combined_data.xlsx', 'combined_data.xlsx']
+fault_paths = [INPUT_FILE, 'combined_data.xlsx']  # Try config path first, then fallback
 df_faults = None
 
 for fault_path in fault_paths:
@@ -145,7 +154,7 @@ for fault_path in fault_paths:
 
 if df_faults is None:
     print("\n❌ ERROR: Fault-level data not found!")
-    print("Please ensure 'data/combined_data.xlsx' or 'combined_data.xlsx' exists!")
+    print(f"Please ensure '{INPUT_FILE}' or 'combined_data.xlsx' exists!")
     exit(1)
 
 # ============================================================================
@@ -505,7 +514,7 @@ for category in ['DÜŞÜK', 'ORTA', 'YÜKSEK']:
     print(f"    {category:8s}: {count:4,} equipment ({pct:5.1f}%)")
 
 # Save predictions
-output_path = Path('predictions/pof_multi_horizon_predictions.csv')
+output_path = PREDICTION_DIR / 'pof_multi_horizon_predictions.csv'
 df_predictions.to_csv(output_path, index=False, encoding='utf-8-sig')
 print(f"\n💾 Saved: {output_path}")
 
@@ -560,7 +569,7 @@ print(f"\nTop 5 Highest Risk Categories:")
 print(df_category_agg[['Kategori', 'PoF_Mean', 'Ekipman_Sayisi']].head().to_string(index=False))
 
 # Save
-output_path = Path('results/pof_category_aggregation.csv')
+output_path = RESULTS_DIR / 'pof_category_aggregation.csv'
 df_category_agg.to_csv(output_path, index=False, encoding='utf-8-sig')
 print(f"\n💾 Saved: {output_path}")
 
@@ -622,7 +631,7 @@ for _, row in negative_outliers.iterrows():
     print(f"  {row['Ekipman_Kodu']}: PoF={row['PoF_Probability']:.3f}, Expected={row['Expected_PoF']:.3f}, Deviation={row['PoF_Deviation_Pct']:+.1f}%")
 
 # Save
-output_path = Path('results/pof_outlier_analysis.csv')
+output_path = RESULTS_DIR / 'pof_outlier_analysis.csv'
 df_outliers.to_csv(output_path, index=False, encoding='utf-8-sig')
 print(f"\n💾 Saved: {output_path}")
 
@@ -703,7 +712,7 @@ if len(top_classes) > 0:
                        fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
     plt.tight_layout()
-    output_path = Path('outputs/survival_analysis/survival_curves_by_class.png')
+    output_path = survival_dir / 'survival_curves_by_class.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 

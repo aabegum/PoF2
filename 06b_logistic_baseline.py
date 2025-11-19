@@ -39,6 +39,20 @@ import pickle
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import centralized configuration
+from config import (
+    FEATURES_REDUCED_FILE,
+    FEATURES_ENGINEERED_FILE,
+    MODEL_DIR,
+    PREDICTION_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    TEST_SIZE,
+    N_FOLDS,
+    HORIZONS
+)
+
 # Model libraries
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold, GridSearchCV
 from sklearn.linear_model import LogisticRegression, Ridge, Lasso
@@ -61,25 +75,19 @@ print(" "*28 + "Interpretable Models | 6/12 Months")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-# Model parameters
-RANDOM_STATE = 42
-TEST_SIZE = 0.30
-N_FOLDS = 3  # For GridSearchCV (reduced from 5 for speed)
+# Model parameters (from config.py):
+# RANDOM_STATE, TEST_SIZE, N_FOLDS, HORIZONS
 
 # GridSearchCV settings
 USE_GRIDSEARCH = True  # Set to False to skip hyperparameter tuning
 GRIDSEARCH_VERBOSE = 1
 GRIDSEARCH_N_JOBS = -1
 
-# Prediction horizons (days)
-# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
-HORIZONS = {
-    '6M': 180,
-    '12M': 365
-}
+# Prediction horizons imported from config.py
+# (6M: 180 days, 12M: 365 days, etc.)
 
 # Target creation thresholds (based on lifetime failures)
 # Equipment with >= threshold lifetime failures is considered "failure-prone"
@@ -117,9 +125,9 @@ LASSO_PARAM_GRID = {
 }
 
 # Create output directories
-Path('models').mkdir(exist_ok=True)
-Path('results').mkdir(exist_ok=True)
-Path('outputs/logistic_baseline').mkdir(parents=True, exist_ok=True)
+MODEL_DIR.mkdir(exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
+(OUTPUT_DIR / 'logistic_baseline').mkdir(parents=True, exist_ok=True)
 
 print("\n📋 Configuration:")
 print(f"   Random State: {RANDOM_STATE}")
@@ -146,7 +154,8 @@ print("\n" + "="*100)
 print("STEP 1: LOADING SELECTED FEATURES")
 print("="*100)
 
-data_path = Path('data/features_selected_clean.csv')
+# Use reduced features (comprehensive feature selection)
+data_path = FEATURES_REDUCED_FILE
 
 if not data_path.exists():
     print(f"\n❌ ERROR: File not found at {data_path}")
@@ -158,7 +167,7 @@ df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
 # Load full engineered data for target creation
-df_full = pd.read_csv('data/features_engineered.csv')
+df_full = pd.read_csv(FEATURES_ENGINEERED_FILE)
 print(f"✓ Loaded full data for target creation: {df_full.shape[0]:,} equipment")
 
 # ============================================================================
@@ -266,7 +275,7 @@ for cat_feat in categorical_features:
     print(f"\n✓ Encoded {cat_feat}: {len(le.classes_)} unique values")
 
 # Save encoders
-with open('models/label_encoders_logistic.pkl', 'wb') as f:
+with open(MODEL_DIR / 'label_encoders_logistic.pkl', 'wb') as f:
     pickle.dump(label_encoders, f)
 print("\n✓ Saved label encoders")
 
@@ -294,7 +303,7 @@ X_scaled = pd.DataFrame(
 )
 
 # Save scaler
-with open('models/scaler_logistic.pkl', 'wb') as f:
+with open(MODEL_DIR / 'scaler_logistic.pkl', 'wb') as f:
     pickle.dump(scaler, f)
 print("✓ Saved feature scaler")
 
@@ -510,7 +519,7 @@ for horizon_name in HORIZONS.keys():
                 print(f"  {direction} {row['Feature']:40s} | Coef: {row['Coefficient']:7.3f}")
 
         # Save model
-        model_path = f'models/{model_type.lower()}_{horizon_name.lower()}.pkl'
+        model_path = MODEL_DIR / f'{model_type.lower()}_{horizon_name.lower()}.pkl'
         with open(model_path, 'wb') as f:
             pickle.dump(model, f)
         print(f"\n💾 Model saved: {model_path}")
@@ -536,14 +545,14 @@ for horizon_name in HORIZONS.keys():
         labels=['Low', 'Medium', 'High', 'Critical']
     )
 
-    pred_path = f'predictions/logistic_predictions_{horizon_name.lower()}.csv'
+    pred_path = PREDICTION_DIR / f'logistic_predictions_{horizon_name.lower()}.csv'
     pred_df.to_csv(pred_path, index=False)
     print(f"\n✓ Predictions saved: {pred_path}")
 
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(best_params_all).T
-    best_params_df.to_csv('results/linear_models_best_params.csv')
+    best_params_df.to_csv(RESULTS_DIR / 'linear_models_best_params.csv')
     print(f"\n💾 Best parameters saved: results/linear_models_best_params.csv")
 
 # ============================================================================
@@ -668,12 +677,12 @@ print("="*100)
 
 # Save performance metrics
 perf_df = pd.DataFrame(performance_metrics)
-perf_df.to_csv('results/logistic_baseline_performance.csv', index=False)
+perf_df.to_csv(RESULTS_DIR / 'logistic_baseline_performance.csv', index=False)
 print("✓ Saved: results/logistic_baseline_performance.csv")
 
 # Save all coefficients
 coef_all_df = pd.concat(all_coefficients, ignore_index=True)
-coef_all_df.to_csv('results/logistic_coefficients.csv', index=False)
+coef_all_df.to_csv(RESULTS_DIR / 'logistic_coefficients.csv', index=False)
 print("✓ Saved: results/logistic_coefficients.csv")
 
 # ============================================================================

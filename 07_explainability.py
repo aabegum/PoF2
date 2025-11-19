@@ -35,6 +35,16 @@ import pickle
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import centralized configuration
+from config import (
+    FEATURES_REDUCED_FILE,
+    MODEL_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    HORIZONS
+)
+
 # SHAP library
 import shap
 
@@ -53,22 +63,20 @@ print(" "*25 + "SHAP Analysis | Understanding Risk Factors")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-RANDOM_STATE = 42
+# Parameters (from config.py): RANDOM_STATE, HORIZONS
+
 N_BACKGROUND_SAMPLES = 100  # For SHAP explainer (use subset for speed)
 N_HIGH_RISK_EXAMPLES = 20   # Number of individual explanations
 
-# Prediction horizons
-# NOTE: 3M removed (100% positive class - all equipment has >= 1 lifetime failure)
-HORIZONS = ['6M', '12M']
-
 # Create output directories
-Path('outputs/explainability').mkdir(parents=True, exist_ok=True)
-Path('outputs/explainability/waterfall').mkdir(parents=True, exist_ok=True)
-Path('outputs/explainability/dependence').mkdir(parents=True, exist_ok=True)
-Path('reports').mkdir(exist_ok=True)
+explainability_dir = OUTPUT_DIR / 'explainability'
+explainability_dir.mkdir(parents=True, exist_ok=True)
+(explainability_dir / 'waterfall').mkdir(parents=True, exist_ok=True)
+(explainability_dir / 'dependence').mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
 
 print("\n📋 Configuration:")
 print(f"   SHAP Background Samples: {N_BACKGROUND_SAMPLES}")
@@ -83,7 +91,7 @@ print("STEP 1: LOADING DATA & MODELS")
 print("="*100)
 
 # Load data
-data_path = Path('data/features_selected_clean.csv')
+data_path = FEATURES_REDUCED_FILE
 
 if not data_path.exists():
     print(f"\n❌ ERROR: File not found at {data_path}")
@@ -152,7 +160,7 @@ models = {}
 predictions = {}
 
 for horizon in HORIZONS:
-    model_path = f'models/monotonic_xgboost_{horizon.lower()}.pkl'
+    model_path = MODEL_DIR / f'monotonic_xgboost_{horizon.lower()}.pkl'
 
     if Path(model_path).exists():
         with open(model_path, 'rb') as f:
@@ -218,7 +226,7 @@ for horizon in HORIZONS:
     )
     plt.title(f'SHAP Feature Importance - {horizon} Horizon', fontsize=14, fontweight='bold', pad=20)
     plt.tight_layout()
-    plt.savefig(f'outputs/explainability/shap_summary_{horizon.lower()}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(explainability_dir / f'shap_summary_{horizon.lower()}.png', dpi=300, bbox_inches='tight')
     print(f"✓ Saved: outputs/explainability/shap_summary_{horizon.lower()}.png")
     plt.close()
 
@@ -242,7 +250,7 @@ for idx, horizon in enumerate(HORIZONS):
     axes[idx].grid(True, alpha=0.3, axis='x')
 
 plt.tight_layout()
-plt.savefig('outputs/explainability/shap_importance_comparison.png', dpi=300, bbox_inches='tight')
+plt.savefig(explainability_dir / 'shap_importance_comparison.png', dpi=300, bbox_inches='tight')
 print("✓ Saved: outputs/explainability/shap_importance_comparison.png")
 plt.close()
 
@@ -283,7 +291,7 @@ for horizon in HORIZONS:
 
     plt.suptitle(f'SHAP Dependence Plots - {horizon} Horizon', fontsize=14, fontweight='bold', y=1.00)
     plt.tight_layout()
-    plt.savefig(f'outputs/explainability/dependence/shap_dependence_{horizon.lower()}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(explainability_dir / f'dependence/shap_dependence_{horizon.lower()}.png', dpi=300, bbox_inches='tight')
     print(f"✓ Saved: outputs/explainability/dependence/shap_dependence_{horizon.lower()}.png")
     plt.close()
 
@@ -324,7 +332,7 @@ for rank, idx in enumerate(high_risk_idx[:5], 1):  # Show top 5 in plots
     plt.title(f'Risk Explanation: Equipment {equipment_id}\nRisk Score: {risk_score:.1f}/100 ({horizon} Horizon)',
               fontsize=12, fontweight='bold', pad=15)
     plt.tight_layout()
-    plt.savefig(f'outputs/explainability/waterfall/waterfall_{equipment_id}_{horizon.lower()}.png',
+    plt.savefig(explainability_dir / f'waterfall/waterfall_{equipment_id}_{horizon.lower()}.png',
                 dpi=300, bbox_inches='tight')
     print(f"✓ Saved waterfall plot for Equipment {equipment_id}")
     plt.close()
@@ -424,7 +432,7 @@ plt.ylabel('Feature', fontsize=11)
 plt.xticks(rotation=90, fontsize=7)
 plt.yticks(fontsize=9)
 plt.tight_layout()
-plt.savefig('outputs/explainability/feature_contribution_heatmap.png', dpi=300, bbox_inches='tight')
+plt.savefig(explainability_dir / 'feature_contribution_heatmap.png', dpi=300, bbox_inches='tight')
 print("✓ Saved: outputs/explainability/feature_contribution_heatmap.png")
 plt.close()
 
@@ -462,7 +470,7 @@ importance_df = pd.DataFrame({
     'Feature': [f[0] for f in sorted_features],
     'Mean_SHAP_Importance': [f[1] for f in sorted_features]
 })
-importance_df.to_csv('results/shap_global_importance.csv', index=False)
+importance_df.to_csv(RESULTS_DIR / 'shap_global_importance.csv', index=False)
 print("\n✓ Saved: results/shap_global_importance.csv")
 
 # ============================================================================

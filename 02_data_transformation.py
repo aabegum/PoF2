@@ -48,6 +48,20 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import warnings
 import sys
+
+# Import centralized configuration
+from config import (
+    CUTOFF_DATE,
+    REFERENCE_DATE,
+    MIN_VALID_YEAR,
+    MAX_VALID_YEAR,
+    USE_FIRST_WORKORDER_FALLBACK,
+    INPUT_FILE,
+    EQUIPMENT_LEVEL_FILE,
+    FEATURE_DOCS_FILE,
+    EQUIPMENT_CLASS_MAPPING
+)
+
 warnings.filterwarnings('ignore')
 
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
@@ -63,20 +77,10 @@ if sys.platform == 'win32':
 pd.set_option('display.max_columns', None)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (from config.py)
 # ============================================================================
-
-# Constants (FIXED - uses OPTION A cutoff date from Script 00)
-CURRENT_YEAR = datetime.now().year
-MIN_VALID_YEAR = 1950
-MAX_VALID_YEAR = datetime.now().year + 1  # Allow dates up to next year for data entry flexibility
-# CRITICAL: Use cutoff date from Script 00 OPTION A (2024-06-25)
-# This ensures features are calculated BEFORE the prediction window (no leakage)
-CUTOFF_DATE = pd.Timestamp('2024-06-25')  # OPTION A cutoff date
-REFERENCE_DATE = CUTOFF_DATE  # Use cutoff date as reference
-
-# Feature flags
-USE_FIRST_WORKORDER_FALLBACK = True  # Set to True to enable Option 3 (first work order as age proxy)
+# All configuration now imported from config.py
+# CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
 print("SCRIPT 02: DATA TRANSFORMATION v4.0 (OPTION A - DUAL PREDICTIONS)")
@@ -88,9 +92,9 @@ print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MI
 # ============================================================================
 print("\n[Step 1/12] Loading Fault-Level Data...")
 
-df = pd.read_excel('data/combined_data.xlsx')
+df = pd.read_excel(INPUT_FILE)
 original_fault_count = len(df)
-print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns")
+print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns from {INPUT_FILE}")
 
 # ============================================================================
 # STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
@@ -500,34 +504,11 @@ def get_equipment_class(row):
     return None
 
 df['Equipment_Class_Primary'] = df.apply(get_equipment_class, axis=1)
-equipment_class_mapping = {
-    'aghat': 'AG Hat',
-    'AG Hat': 'AG Hat',
-    'REKORTMAN': 'Rekortman',
-    'Rekortman': 'Rekortman',
-    'agdirek': 'AG Direk',
-    'AG Direk': 'AG Direk',
-    'OGAGTRF': 'OG/AG Trafo',
-    'OG/AG Trafo': 'OG/AG Trafo',
-    'Trafo Bina Tip': 'Trafo Bina Tip',
-    'SDK': 'AG Pano Box',
-    'AG Pano': 'AG Pano',
-    'AG Pano Box': 'AG Pano Box',
-    'Ayırıcı': 'Ayırıcı',
-    'anahtar': 'AG Anahtar',
-    'AG Anahtar': 'AG Anahtar',
-    'KESİCİ': 'Kesici',
-    'Kesici': 'Kesici',
-    'OGHAT': 'OG Hat',
-    'PANO': 'Pano',
-    'Bina': 'Bina',
-    'Armatür': 'Armatür',
-    'ENHDirek': 'ENH Direk',
-}
 
-df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(lambda x: equipment_class_mapping.get(x, x) if pd.notna(x) else x)
+# Use equipment class mapping from config.py (centralized)
+df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(lambda x: EQUIPMENT_CLASS_MAPPING.get(x, x) if pd.notna(x) else x)
 harmonized_classes = df['Equipment_Class_Primary'].nunique()
-print(f"Harmonized {len(equipment_class_mapping)} variants → {harmonized_classes} standardized equipment classes")
+print(f"Harmonized {len(EQUIPMENT_CLASS_MAPPING)} variants → {harmonized_classes} standardized equipment classes")
 
 df['Age_Source'] = df['Yaş_Kaynak']
 
@@ -826,14 +807,14 @@ print(f"Recurring faults (pre-cutoff only): 30-day={equipment_df['Tekrarlayan_Ar
 # ============================================================================
 print("\n[Step 12/12] Saving Equipment-Level Dataset...")
 
-equipment_df.to_csv('data/equipment_level_data.csv', index=False, encoding='utf-8-sig')
+equipment_df.to_csv(EQUIPMENT_LEVEL_FILE, index=False, encoding='utf-8-sig')
 
 feature_docs = pd.DataFrame({
     'Feature_Name': equipment_df.columns,
     'Data_Type': equipment_df.dtypes.astype(str),
     'Completeness_%': (equipment_df.notna().sum() / len(equipment_df) * 100).round(1)
 })
-feature_docs.to_csv('data/feature_documentation.csv', index=False)
+feature_docs.to_csv(FEATURE_DOCS_FILE, index=False)
 
 print(f"Saved: equipment_level_data.csv ({len(equipment_df):,} records x {len(equipment_df.columns)} features) + feature_documentation.csv")
 
