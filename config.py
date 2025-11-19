@@ -98,16 +98,60 @@ CORRELATION_THRESHOLD = 0.85  # Remove features with correlation > 0.85
 # Feature importance threshold
 IMPORTANCE_THRESHOLD = 0.001  # Keep features contributing > 0.1%
 
-# Protected features (never remove)
+# Protected features (OPTIMAL 30-FEATURE SET - never remove)
+# These features form the core of the optimized PoF prediction model
 PROTECTED_FEATURES = [
+    # Essential ID
     'Ekipman_ID',
-    'MTBF_Gün',
-    'Son_Arıza_Gun_Sayisi',
-    'Ilk_Arizaya_Kadar_Yil',
-    'Ekipman_Yaşı_Yıl_EDBS_first',
-    'Equipment_Class_Primary',
-    'Geographic_Cluster',
-    'Tekrarlayan_Arıza_90gün_Flag',  # TARGET for chronic repeater
+
+    # TIER 1: Equipment Characteristics (3 features)
+    'Equipment_Class_Primary',     # Equipment type (most important predictor)
+    'component_voltage',            # Operating voltage level
+    'Voltage_Class',                # Voltage class (AG/OG/YG)
+
+    # TIER 2: Age & Lifecycle (3 features)
+    'Ekipman_Yaşı_Yıl',            # Equipment age in years
+    'Yas_Beklenen_Omur_Orani',     # Age as % of expected life
+    'Beklenen_Ömür_Yıl',           # Expected equipment lifetime
+
+    # TIER 3: Failure History - Temporal (5 features)
+    'Son_Arıza_Gun_Sayisi',        # Days since last failure (recency)
+    'Ilk_Arizaya_Kadar_Yil',       # Years until first failure
+    'Toplam_Arıza_Sayisi_Lifetime', # Total lifetime faults
+    'Time_To_Repair_Hours_mean',   # Average repair time
+    'Time_To_Repair_Hours_max',    # Maximum repair time
+
+    # TIER 4: MTBF & Reliability (5 features)
+    'MTBF_InterFault_Gün',         # Mean time between consecutive faults
+    'MTBF_Lifetime_Gün',           # Overall reliability quality
+    'MTBF_ActiveLife_Gün',         # Post-activation reliability
+    'MTBF_InterFault_Trend',       # Degradation detector (NEW - TIER 3 enhancement)
+    'MTBF_InterFault_StdDev',      # Predictability measure (NEW - TIER 3 enhancement)
+
+    # TIER 5: Failure Cause Patterns (4 features)
+    'Arıza_Nedeni_Çeşitlilik',     # Number of different fault causes
+    'Arıza_Nedeni_Tutarlılık',     # Consistency of fault causes
+    'Neden_Değişim_Flag',          # Whether fault causes changed
+    'Tek_Neden_Flag',              # Single dominant cause flag
+
+    # TIER 6: Customer Impact & Loading (5 features)
+    'Urban_Customer_Ratio_mean',   # Urban customer density
+    'urban_lv_Avg',                # Low voltage urban customers
+    'urban_mv_Avg',                # Medium voltage urban customers
+    'MV_Customer_Ratio_mean',      # Industrial customer ratio
+    'total_customer_count_Avg',    # Total affected customers
+
+    # TIER 7: Geographic & Environmental (3 features)
+    'İlçe',                        # District location
+    'Bölge_Tipi',                  # Urban vs Rural
+    'Summer_Peak_Flag_sum',        # Seasonal stress pattern
+
+    # TIER 8: Derived Interactions (2 features)
+    'Overdue_Factor',              # Imminent failure risk (NEW - TIER 3 enhancement)
+    'AgeRatio_Recurrence_Interaction', # Compound aging + use risk
+
+    # TARGET (for chronic repeater model)
+    'Tekrarlayan_Arıza_90gün_Flag',
 ]
 
 # ============================================================================

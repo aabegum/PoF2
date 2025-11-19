@@ -162,30 +162,102 @@ print("STEP 2: REMOVING REDUNDANT FEATURES")
 print("="*100)
 
 # Define redundant features (highly correlated or derived)
+# Updated for OPTIMAL 30-FEATURE SET (Phase 1 removals included)
 REDUNDANT_FEATURES = {
+    # ========================================================================
+    # PHASE 1 REMOVALS: Geographic Clustering (STEP 3)
+    # ========================================================================
+    'Geographic_Cluster': {
+        'reason': '🚫 REMOVED: K-means clustering on X,Y coordinates (noisy patterns)',
+        'keep_instead': 'İlçe (district - clear, interpretable)',
+        'correlation': 'N/A'
+    },
+    'Arıza_Sayısı_12ay_Cluster_Avg': {
+        'reason': '🚨 LEAKY: Cluster aggregation uses 12-month window (includes post-cutoff)',
+        'keep_instead': 'İlçe (district)',
+        'correlation': 0.45
+    },
+    'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
+        'reason': '🚨 LEAKY: Cluster aggregation of recurrence flag',
+        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag (individual flag)',
+        'correlation': 0.58
+    },
+    'MTBF_Gün_Cluster_Avg': {
+        'reason': '🚫 CIRCULAR: Cluster aggregation creates circular logic',
+        'keep_instead': 'MTBF_InterFault_Gün (individual)',
+        'correlation': 0.65
+    },
+
+    # ========================================================================
+    # PHASE 1 REMOVALS: Redundant Failure Rates (STEP 4)
+    # ========================================================================
+    'Failure_Rate_Per_Year': {
+        'reason': '🚫 REDUNDANT: Tree models learn from Toplam_Arıza / Ekipman_Yaşı',
+        'keep_instead': 'Toplam_Arıza_Sayisi_Lifetime + Ekipman_Yaşı_Yıl',
+        'correlation': 0.72
+    },
+    'Recent_Failure_Intensity': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_3ay (includes post-cutoff data)',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi',
+        'correlation': 0.68
+    },
+    'Failure_Acceleration': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_6ay (includes post-cutoff data)',
+        'keep_instead': 'MTBF_InterFault_Trend (degradation detector)',
+        'correlation': 0.52
+    },
+
+    # ========================================================================
+    # PHASE 1 REMOVALS: Equipment Class Aggregations (STEP 7)
+    # ========================================================================
+    'Arıza_Sayısı_12ay_Class_Avg': {
+        'reason': '🚨 LEAKY: Class aggregation uses 12-month window (target leakage)',
+        'keep_instead': 'Equipment_Class_Primary (let model learn patterns)',
+        'correlation': 0.55
+    },
+    'MTBF_Gün_Class_Avg': {
+        'reason': '🚫 CIRCULAR: Class average creates circular prediction logic',
+        'keep_instead': 'Equipment_Class_Primary',
+        'correlation': 0.48
+    },
+    'Ekipman_Yaşı_Yıl_Class_Avg': {
+        'reason': '🚫 NOT PREDICTIVE: Class age average not useful',
+        'keep_instead': 'Equipment_Class_Primary + Ekipman_Yaşı_Yıl',
+        'correlation': 0.32
+    },
+    'Yas_Beklenen_Omur_Orani_Class_Avg': {
+        'reason': '🚫 NOT PREDICTIVE: Class age ratio average not useful',
+        'keep_instead': 'Equipment_Class_Primary + Yas_Beklenen_Omur_Orani',
+        'correlation': 0.28
+    },
+    'Failure_vs_Class_Avg': {
+        'reason': '🚨 LEAKY: Derived from Arıza_Sayısı_12ay_Class_Avg',
+        'keep_instead': 'Equipment_Class_Primary',
+        'correlation': 0.61
+    },
+
+    # ========================================================================
+    # PHASE 1 REMOVALS: Weak Interaction Features (STEP 8)
+    # ========================================================================
+    'Age_Failure_Interaction': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_12ay (includes post-cutoff data)',
+        'keep_instead': 'AgeRatio_Recurrence_Interaction (uses lifetime count)',
+        'correlation': 0.45
+    },
+    'Customer_Failure_Interaction': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_12ay (includes post-cutoff data)',
+        'keep_instead': 'total_customer_count_Avg + Toplam_Arıza_Sayisi_Lifetime',
+        'correlation': 0.38
+    },
+
+    # ========================================================================
+    # ORIGINAL REDUNDANT FEATURES (from previous analysis)
+    # ========================================================================
     'Reliability_Score': {
         'reason': 'Derived from MTBF_Gün (r² > 0.95)',
         'keep_instead': 'MTBF_Gün',
         'correlation': 0.97
     },
-    'Failure_Rate_Per_Year': {
-        'reason': 'Correlated with Son_Arıza_Gun_Sayisi and failure counts',
-        'keep_instead': 'Son_Arıza_Gun_Sayisi',
-        'correlation': 0.72
-    },
-    'MTBF_Gün_Cluster_Avg': {
-        'reason': 'Aggregation of MTBF_Gün (individual feature more important)',
-        'keep_instead': 'MTBF_Gün',
-        'correlation': 0.65
-    },
-    'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
-        'reason': 'Aggregation of chronic repeater flag',
-        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag (individual flag)',
-        'correlation': 0.58
-    },
-    # NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
-    # Calculated safely using only pre-cutoff data (see 02_data_transformation.py calculate_recurrence_safe)
-    # Used in 06_chronic_repeater.py as the target label
     'Failure_Free_3M': {
         'reason': '🚨 CRITICAL: Binary flag for no failures in last 3M (uses ALL faults)',
         'keep_instead': 'Son_Arıza_Gun_Sayisi',
@@ -207,6 +279,10 @@ REDUNDANT_FEATURES = {
         'correlation': 'N/A'
     },
 }
+
+# NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
+# Calculated safely using only pre-cutoff data (see 02_data_transformation.py calculate_recurrence_safe)
+# Used in 06_chronic_repeater.py as the target label
 
 # Protected features are imported from config.py
 # (NEVER remove these features)
@@ -276,8 +352,47 @@ for cat_col in categorical_features:
         le = LabelEncoder()
         df_vif[cat_col] = le.fit_transform(df_vif[cat_col].astype(str))
 
-# Handle missing values
-df_vif = df_vif.fillna(df_vif.median())
+# Handle infinite values and missing data (CRITICAL for VIF calculation)
+print(f"\n--- Data Cleaning for VIF Analysis ---")
+
+# Step 1: Replace infinite values with NaN
+df_vif = df_vif.replace([np.inf, -np.inf], np.nan)
+
+# Step 2: Check for problematic columns
+nan_counts = df_vif.isnull().sum()
+problematic_cols = nan_counts[nan_counts > 0]
+
+if len(problematic_cols) > 0:
+    print(f"⚠️  Found {len(problematic_cols)} columns with missing values:")
+    for col, count in problematic_cols.head(10).items():
+        pct = count / len(df_vif) * 100
+        print(f"   {col}: {count} ({pct:.1f}%)")
+
+    if len(problematic_cols) > 10:
+        print(f"   ... and {len(problematic_cols) - 10} more")
+
+# Step 3: Fill missing values column by column
+for col in df_vif.columns:
+    if df_vif[col].isnull().any():
+        median_val = df_vif[col].median()
+        if pd.isna(median_val):
+            # Column is all NaN - fill with 0
+            df_vif[col] = df_vif[col].fillna(0)
+            print(f"   ⚠️  {col}: All NaN, filled with 0")
+        else:
+            df_vif[col] = df_vif[col].fillna(median_val)
+
+# Step 4: Verify no NaN or inf remain
+remaining_nan = df_vif.isnull().sum().sum()
+remaining_inf = np.isinf(df_vif.select_dtypes(include=[np.number])).sum().sum()
+
+if remaining_nan > 0 or remaining_inf > 0:
+    print(f"\n❌ ERROR: Still have {remaining_nan} NaN and {remaining_inf} inf values!")
+    print("Cannot proceed with VIF analysis")
+    exit(1)
+
+print(f"✓ Data cleaned: {len(df_vif.columns)} features ready for VIF analysis")
+print(f"  No NaN or inf values remaining")
 
 # Calculate VIF iteratively
 print(f"\n--- Iterative VIF Calculation (Target: VIF < {VIF_TARGET}) ---")
