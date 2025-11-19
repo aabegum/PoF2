@@ -162,30 +162,102 @@ print("STEP 2: REMOVING REDUNDANT FEATURES")
 print("="*100)
 
 # Define redundant features (highly correlated or derived)
+# Updated for OPTIMAL 30-FEATURE SET (Phase 1 removals included)
 REDUNDANT_FEATURES = {
+    # ========================================================================
+    # PHASE 1 REMOVALS: Geographic Clustering (STEP 3)
+    # ========================================================================
+    'Geographic_Cluster': {
+        'reason': '🚫 REMOVED: K-means clustering on X,Y coordinates (noisy patterns)',
+        'keep_instead': 'İlçe (district - clear, interpretable)',
+        'correlation': 'N/A'
+    },
+    'Arıza_Sayısı_12ay_Cluster_Avg': {
+        'reason': '🚨 LEAKY: Cluster aggregation uses 12-month window (includes post-cutoff)',
+        'keep_instead': 'İlçe (district)',
+        'correlation': 0.45
+    },
+    'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
+        'reason': '🚨 LEAKY: Cluster aggregation of recurrence flag',
+        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag (individual flag)',
+        'correlation': 0.58
+    },
+    'MTBF_Gün_Cluster_Avg': {
+        'reason': '🚫 CIRCULAR: Cluster aggregation creates circular logic',
+        'keep_instead': 'MTBF_InterFault_Gün (individual)',
+        'correlation': 0.65
+    },
+
+    # ========================================================================
+    # PHASE 1 REMOVALS: Redundant Failure Rates (STEP 4)
+    # ========================================================================
+    'Failure_Rate_Per_Year': {
+        'reason': '🚫 REDUNDANT: Tree models learn from Toplam_Arıza / Ekipman_Yaşı',
+        'keep_instead': 'Toplam_Arıza_Sayisi_Lifetime + Ekipman_Yaşı_Yıl',
+        'correlation': 0.72
+    },
+    'Recent_Failure_Intensity': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_3ay (includes post-cutoff data)',
+        'keep_instead': 'Son_Arıza_Gun_Sayisi',
+        'correlation': 0.68
+    },
+    'Failure_Acceleration': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_6ay (includes post-cutoff data)',
+        'keep_instead': 'MTBF_InterFault_Trend (degradation detector)',
+        'correlation': 0.52
+    },
+
+    # ========================================================================
+    # PHASE 1 REMOVALS: Equipment Class Aggregations (STEP 7)
+    # ========================================================================
+    'Arıza_Sayısı_12ay_Class_Avg': {
+        'reason': '🚨 LEAKY: Class aggregation uses 12-month window (target leakage)',
+        'keep_instead': 'Equipment_Class_Primary (let model learn patterns)',
+        'correlation': 0.55
+    },
+    'MTBF_Gün_Class_Avg': {
+        'reason': '🚫 CIRCULAR: Class average creates circular prediction logic',
+        'keep_instead': 'Equipment_Class_Primary',
+        'correlation': 0.48
+    },
+    'Ekipman_Yaşı_Yıl_Class_Avg': {
+        'reason': '🚫 NOT PREDICTIVE: Class age average not useful',
+        'keep_instead': 'Equipment_Class_Primary + Ekipman_Yaşı_Yıl',
+        'correlation': 0.32
+    },
+    'Yas_Beklenen_Omur_Orani_Class_Avg': {
+        'reason': '🚫 NOT PREDICTIVE: Class age ratio average not useful',
+        'keep_instead': 'Equipment_Class_Primary + Yas_Beklenen_Omur_Orani',
+        'correlation': 0.28
+    },
+    'Failure_vs_Class_Avg': {
+        'reason': '🚨 LEAKY: Derived from Arıza_Sayısı_12ay_Class_Avg',
+        'keep_instead': 'Equipment_Class_Primary',
+        'correlation': 0.61
+    },
+
+    # ========================================================================
+    # PHASE 1 REMOVALS: Weak Interaction Features (STEP 8)
+    # ========================================================================
+    'Age_Failure_Interaction': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_12ay (includes post-cutoff data)',
+        'keep_instead': 'AgeRatio_Recurrence_Interaction (uses lifetime count)',
+        'correlation': 0.45
+    },
+    'Customer_Failure_Interaction': {
+        'reason': '🚨 LEAKY: Uses Arıza_Sayısı_12ay (includes post-cutoff data)',
+        'keep_instead': 'total_customer_count_Avg + Toplam_Arıza_Sayisi_Lifetime',
+        'correlation': 0.38
+    },
+
+    # ========================================================================
+    # ORIGINAL REDUNDANT FEATURES (from previous analysis)
+    # ========================================================================
     'Reliability_Score': {
         'reason': 'Derived from MTBF_Gün (r² > 0.95)',
         'keep_instead': 'MTBF_Gün',
         'correlation': 0.97
     },
-    'Failure_Rate_Per_Year': {
-        'reason': 'Correlated with Son_Arıza_Gun_Sayisi and failure counts',
-        'keep_instead': 'Son_Arıza_Gun_Sayisi',
-        'correlation': 0.72
-    },
-    'MTBF_Gün_Cluster_Avg': {
-        'reason': 'Aggregation of MTBF_Gün (individual feature more important)',
-        'keep_instead': 'MTBF_Gün',
-        'correlation': 0.65
-    },
-    'Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg': {
-        'reason': 'Aggregation of chronic repeater flag',
-        'keep_instead': 'Tekrarlayan_Arıza_90gün_Flag (individual flag)',
-        'correlation': 0.58
-    },
-    # NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
-    # Calculated safely using only pre-cutoff data (see 02_data_transformation.py calculate_recurrence_safe)
-    # Used in 06_chronic_repeater.py as the target label
     'Failure_Free_3M': {
         'reason': '🚨 CRITICAL: Binary flag for no failures in last 3M (uses ALL faults)',
         'keep_instead': 'Son_Arıza_Gun_Sayisi',
@@ -207,6 +279,10 @@ REDUNDANT_FEATURES = {
         'correlation': 'N/A'
     },
 }
+
+# NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
+# Calculated safely using only pre-cutoff data (see 02_data_transformation.py calculate_recurrence_safe)
+# Used in 06_chronic_repeater.py as the target label
 
 # Protected features are imported from config.py
 # (NEVER remove these features)
