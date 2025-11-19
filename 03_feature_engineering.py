@@ -406,126 +406,12 @@ if 'Equipment_Class_Primary' in df.columns:
         print(f"  Equipment performing worse than class average: {worse:,}")
 
 # ============================================================================
-# STEP 8: COMPOSITE RISK SCORES
+# STEP 8: INTERACTION FEATURES
 # ============================================================================
+# NOTE: Risk scoring features removed - they were over-engineered and removed
+# by feature selection anyway. Models learn risk patterns from raw features.
 print("\n" + "="*100)
-print("STEP 8: CALCULATING COMPOSITE RISK SCORES")
-print("="*100)
-
-print("\n--- Building PoF Risk Score (0-100) ---")
-
-# Components of risk score
-risk_components = []
-
-# 1. Age risk (40% weight) - NON-LINEAR for wear-out failures
-# UPDATED: Reduced from 50% to 40% to give more weight to recurring failures
-if 'Yas_Beklenen_Omur_Orani' in df.columns:
-    def calculate_age_risk(age_ratio):
-        """
-        Non-linear age risk calculation (captures bathtub curve wear-out region)
-
-        Rationale:
-        - 0-70% life: Linear increase (0-50 risk)
-        - 70-100% life: Accelerating risk (50-85 risk)
-        - >100% life: Critical wear-out zone (85-100 risk)
-
-        This prevents old equipment with no recent failures from getting low risk scores.
-        """
-        if pd.isna(age_ratio):
-            return 50  # Default medium risk for missing age
-
-        if age_ratio < 0.7:
-            # Early life: Linear (0-50 risk)
-            return age_ratio / 0.7 * 50
-        elif age_ratio < 1.0:
-            # Approaching end-of-life: Accelerating (50-85 risk)
-            # Quadratic scaling: risk increases faster as equipment ages
-            normalized = (age_ratio - 0.7) / 0.3  # 0-1 scale from 70-100%
-            return 50 + (normalized ** 1.5) * 35  # Exponential acceleration
-        else:
-            # Past design life: Critical wear-out zone (85-100 risk)
-            # Cap at 2x life (200%) = 100 risk
-            excess = min(age_ratio - 1.0, 1.0)  # 0-100% over life
-            return 85 + excess * 15  # 85-100 risk
-
-    df['Age_Risk_Score'] = df['Yas_Beklenen_Omur_Orani'].apply(calculate_age_risk)
-    risk_components.append(('Age_Risk_Score', 0.40))  # UPDATED: 50% → 40%
-    print("  ✓ Age risk (40% weight, non-linear wear-out curve)")
-
-# 2. Recent failure history (25% weight)
-# UPDATED: Reduced from 30% to 25%
-if 'Arıza_Sayısı_6ay' in df.columns:
-    # Normalize to 0-100 (assume 5+ failures = max risk)
-    df['Recent_Failure_Risk_Score'] = df['Arıza_Sayısı_6ay'].clip(0, 5) * 20
-    risk_components.append(('Recent_Failure_Risk_Score', 0.25))  # UPDATED: 30% → 25%
-    print("  ✓ Recent failure risk (25% weight)")
-
-# 3. Reliability degradation (15% weight)
-# UNCHANGED: Remains at 15%
-if 'MTBF_Gün' in df.columns:
-    # Inverse MTBF score (lower MTBF = higher risk)
-    df['MTBF_Risk_Score'] = df['MTBF_Gün'].apply(
-        lambda x: max(0, 100 - (x / 365 * 100)) if pd.notna(x) else 50
-    )
-    risk_components.append(('MTBF_Risk_Score', 0.15))
-    print("  ✓ MTBF risk (15% weight)")
-
-# 4. Recurrence pattern (20% weight)
-# UPDATED: INCREASED from 5% to 20% - recurring failures are strong indicator
-if 'Tekrarlayan_Arıza_90gün_Flag' in df.columns:
-    df['Recurrence_Risk_Score'] = df['Tekrarlayan_Arıza_90gün_Flag'] * 100
-    risk_components.append(('Recurrence_Risk_Score', 0.20))  # UPDATED: 5% → 20%
-    print("  ✓ Recurrence risk (20% weight) [INCREASED from 5% - chronic repeaters priority]")
-
-# Calculate composite score
-if risk_components:
-    df['Composite_PoF_Risk_Score'] = 0
-    for component, weight in risk_components:
-        df['Composite_PoF_Risk_Score'] += df[component].fillna(50) * weight
-    
-    # Ensure 0-100 range
-    df['Composite_PoF_Risk_Score'] = df['Composite_PoF_Risk_Score'].clip(0, 100)
-    
-    print(f"\n✓ Composite PoF Risk Score calculated")
-    
-    # Risk distribution
-    risk_stats = df['Composite_PoF_Risk_Score'].describe()
-    print(f"  Mean: {risk_stats['mean']:.1f}")
-    print(f"  Median: {risk_stats['50%']:.1f}")
-    
-    # Risk categories
-    df['Risk_Category'] = pd.cut(
-        df['Composite_PoF_Risk_Score'],
-        bins=[0, 25, 50, 75, 100],
-        labels=['Low (0-25)', 'Medium (25-50)', 'High (50-75)', 'Critical (75-100)']
-    )
-    
-    print("\n  Risk Distribution:")
-    for category in ['Low (0-25)', 'Medium (25-50)', 'High (50-75)', 'Critical (75-100)']:
-        count = (df['Risk_Category'] == category).sum()
-        pct = count / len(df) * 100
-        icon = "✅" if "Low" in category else ("⚠" if "Medium" in category else "❌")
-        print(f"    {icon} {category}: {count:,} ({pct:.1f}%)")
-
-    # Validation: Equipment past design life should have elevated risk
-    if 'Yas_Beklenen_Omur_Orani' in df.columns:
-        past_life = df[df['Yas_Beklenen_Omur_Orani'] > 1.0]
-        if len(past_life) > 0:
-            print(f"\n  Wear-out Zone Validation (Age Ratio > 100%):")
-            print(f"    Equipment past design life: {len(past_life):,} ({len(past_life)/len(df)*100:.1f}%)")
-            print(f"    Their risk score: Mean={past_life['Composite_PoF_Risk_Score'].mean():.1f}, Median={past_life['Composite_PoF_Risk_Score'].median():.1f}")
-
-            # Risk distribution for old equipment
-            for category in ['Low (0-25)', 'Medium (25-50)', 'High (50-75)', 'Critical (75-100)']:
-                count = (past_life['Risk_Category'] == category).sum()
-                pct = count / len(past_life) * 100 if len(past_life) > 0 else 0
-                print(f"      {category}: {count:,} ({pct:.1f}%)")
-
-# ============================================================================
-# STEP 9: INTERACTION FEATURES
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 9: CREATING INTERACTION FEATURES")
+print("STEP 8: CREATING INTERACTION FEATURES")
 print("="*100)
 
 # Age × Failure interaction
@@ -794,13 +680,8 @@ else:
     print("⚠ Son_Arıza_Gun_Sayisi not available for loading score")
     df['Ekipman_Yoğunluk_Skoru'] = 0
 
-# Customer-weighted risk (consequence metric, not PoF)
-if 'Composite_PoF_Risk_Score' in df.columns and has_customer_cols:
-    df['Müşteri_Başına_Risk'] = df['Composite_PoF_Risk_Score'] / (df['total_customer_count_Avg'] + 1)
-    print(f"✓ Customer-weighted risk:")
-    print(f"  Mean={df['Müşteri_Başına_Risk'].mean():.3f}, Max={df['Müşteri_Başına_Risk'].max():.3f}")
-else:
-    df['Müşteri_Başına_Risk'] = 0
+# NOTE: Customer-weighted risk removed - was based on Composite_PoF_Risk_Score
+# which has been eliminated. Models can learn customer impact directly.
 
 # ============================================================================
 # 6. URBAN/RURAL VS CUSTOMER IMPACT CROSS-ANALYSIS (Informational)
@@ -996,44 +877,11 @@ for category, count in category_counts.items():
     print(f"  {category:<25} {count:>3} features")
 
 # ============================================================================
-# STEP 12: HIGH-RISK EQUIPMENT IDENTIFICATION
-# ============================================================================
-print("\n" + "="*100)
-print("STEP 12: HIGH-RISK EQUIPMENT IDENTIFICATION")
-print("="*100)
-
-if 'Risk_Category' in df.columns:
-    high_risk = df[df['Risk_Category'].isin(['High (50-75)', 'Critical (75-100)'])]
-    print(f"\n⚠️  Total high-risk equipment: {len(high_risk):,} ({len(high_risk)/len(df)*100:.1f}%)")
-    
-    if len(high_risk) > 0:
-        print("\n--- High-Risk Equipment by Class ---")
-        risk_by_class = high_risk['Equipment_Class_Primary'].value_counts().head(10)
-        for eq_class, count in risk_by_class.items():
-            pct = count / len(high_risk) * 100
-            print(f"  {eq_class:<30} {count:>4,} ({pct:>5.1f}%)")
-        
-        # Save high-risk equipment list
-        output_cols = ['Ekipman_ID', 'Equipment_Class_Primary', 'Ekipman_Yaşı_Yıl',
-                      'Yas_Beklenen_Omur_Orani', 'Arıza_Sayısı_12ay',
-                      'Composite_PoF_Risk_Score', 'Risk_Category']
-
-        # Add optional columns if they exist
-        if 'KOORDINAT_X' in high_risk.columns:
-            output_cols.append('KOORDINAT_X')
-        if 'KOORDINAT_Y' in high_risk.columns:
-            output_cols.append('KOORDINAT_Y')
-        if 'İlçe' in high_risk.columns:
-            output_cols.append('İlçe')
-
-        high_risk_output = high_risk[output_cols].sort_values('Composite_PoF_Risk_Score', ascending=False)
-        
-        high_risk_output.to_csv('data/high_risk_equipment.csv', index=False)
-        print(f"\n✅ High-risk equipment list saved to: data/high_risk_equipment.csv")
-
-# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
+# NOTE: High-risk equipment identification removed - was based on
+# Composite_PoF_Risk_Score which has been eliminated. Use model predictions
+# instead for identifying high-risk equipment.
 print("\n" + "="*100)
 print("FEATURE ENGINEERING COMPLETE")
 print("="*100)
@@ -1042,24 +890,16 @@ print("\n🎯 KEY ACCOMPLISHMENTS:")
 print(f"   ✅ Expected Life Ratios calculated ({df['Yas_Beklenen_Omur_Orani'].notna().sum():,} equipment)")
 if 'Geographic_Cluster' in df.columns:
     print(f"   ✅ Geographic Clusters created ({(df['Geographic_Cluster'] >= 0).sum():,} equipment)")
-print(f"   ✅ Composite Risk Scores computed (all equipment)")
 print(f"   ✅ {new_feature_count} new features engineered")
 
-print("\n📊 RISK DISTRIBUTION:")
-if 'Risk_Category' in df.columns:
-    for category in ['Low (0-25)', 'Medium (25-50)', 'High (50-75)', 'Critical (75-100)']:
-        count = (df['Risk_Category'] == category).sum()
-        pct = count / len(df) * 100
-        icon = "✅" if "Low" in category else ("⚠" if "Medium" in category else "❌")
-        print(f"   {icon} {category:<20} {count:>4,} equipment ({pct:>5.1f}%)")
+print("\n📊 FEATURE SUMMARY:")
+numeric_features = df.select_dtypes(include=[np.number]).columns
+print(f"   Total features: {len(df.columns)}")
+print(f"   Numeric features: {len(numeric_features)}")
 
 print("\n📂 OUTPUT FILES:")
 print(f"   • data/features_engineered.csv ({df.shape[1]} features)")
 print(f"   • data/feature_catalog.csv (feature documentation)")
-if 'Risk_Category' in df.columns:
-    high_risk_count = df[df['Risk_Category'].isin(['High (50-75)', 'Critical (75-100)'])].shape[0]
-    if high_risk_count > 0:
-        print(f"   • data/high_risk_equipment.csv ({high_risk_count:,} high-risk equipment)")
 
 print("\n🚀 READY FOR NEXT PHASE:")
 print("   1. Feature selection (VIF analysis + importance filtering)")
