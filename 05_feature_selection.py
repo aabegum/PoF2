@@ -352,8 +352,47 @@ for cat_col in categorical_features:
         le = LabelEncoder()
         df_vif[cat_col] = le.fit_transform(df_vif[cat_col].astype(str))
 
-# Handle missing values
-df_vif = df_vif.fillna(df_vif.median())
+# Handle infinite values and missing data (CRITICAL for VIF calculation)
+print(f"\n--- Data Cleaning for VIF Analysis ---")
+
+# Step 1: Replace infinite values with NaN
+df_vif = df_vif.replace([np.inf, -np.inf], np.nan)
+
+# Step 2: Check for problematic columns
+nan_counts = df_vif.isnull().sum()
+problematic_cols = nan_counts[nan_counts > 0]
+
+if len(problematic_cols) > 0:
+    print(f"⚠️  Found {len(problematic_cols)} columns with missing values:")
+    for col, count in problematic_cols.head(10).items():
+        pct = count / len(df_vif) * 100
+        print(f"   {col}: {count} ({pct:.1f}%)")
+
+    if len(problematic_cols) > 10:
+        print(f"   ... and {len(problematic_cols) - 10} more")
+
+# Step 3: Fill missing values column by column
+for col in df_vif.columns:
+    if df_vif[col].isnull().any():
+        median_val = df_vif[col].median()
+        if pd.isna(median_val):
+            # Column is all NaN - fill with 0
+            df_vif[col] = df_vif[col].fillna(0)
+            print(f"   ⚠️  {col}: All NaN, filled with 0")
+        else:
+            df_vif[col] = df_vif[col].fillna(median_val)
+
+# Step 4: Verify no NaN or inf remain
+remaining_nan = df_vif.isnull().sum().sum()
+remaining_inf = np.isinf(df_vif.select_dtypes(include=[np.number])).sum().sum()
+
+if remaining_nan > 0 or remaining_inf > 0:
+    print(f"\n❌ ERROR: Still have {remaining_nan} NaN and {remaining_inf} inf values!")
+    print("Cannot proceed with VIF analysis")
+    exit(1)
+
+print(f"✓ Data cleaned: {len(df_vif.columns)} features ready for VIF analysis")
+print(f"  No NaN or inf values remaining")
 
 # Calculate VIF iteratively
 print(f"\n--- Iterative VIF Calculation (Target: VIF < {VIF_TARGET}) ---")
