@@ -19,8 +19,6 @@ Date: 2025
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
 import warnings
 import sys
 
@@ -215,111 +213,49 @@ if ratio_available > 0:
         print(f"  {icon} {category}: {count:,} ({pct:.1f}%)")
 
 # ============================================================================
-# STEP 3: GEOGRAPHIC CLUSTERING
+# STEP 3: GEOGRAPHIC CLUSTERING - REMOVED
 # ============================================================================
+# NOTE: Geographic clustering has been removed from the feature engineering pipeline
+#
+# Rationale for removal:
+#   - K-means clustering on X,Y coordinates produces noisy, unstable patterns
+#   - Distribution networks are LINEAR (power lines), not point-based clusters
+#   - Cluster aggregations (Arıza_Sayısı_12ay_Cluster_Avg, etc.) created data leakage risk
+#   - Better alternative: Use İlçe (district) - clear, interpretable, domain-meaningful
+#
+# Features removed:
+#   - Geographic_Cluster (K-means cluster ID)
+#   - Arıza_Sayısı_12ay_Cluster_Avg (leaky - uses future data)
+#   - Tekrarlayan_Arıza_90gün_Flag_Cluster_Avg (leaky - uses future data)
+#   - MTBF_Gün_Cluster_Avg (circular logic)
+#
+# Replacement: İlçe (district) is created in STEP 9B and provides superior geographic signal
 print("\n" + "="*100)
-print("STEP 3: CREATING GEOGRAPHIC CLUSTERS")
+print("STEP 3: GEOGRAPHIC CLUSTERING - SKIPPED (See STEP 9B for İlçe-based geography)")
 print("="*100)
-
-if 'KOORDINAT_X' in df.columns and 'KOORDINAT_Y' in df.columns:
-    # Get equipment with valid coordinates
-    has_coords = df['KOORDINAT_X'].notna() & df['KOORDINAT_Y'].notna()
-    coord_count = has_coords.sum()
-    
-    print(f"\n✓ Equipment with coordinates: {coord_count:,} ({coord_count/len(df)*100:.1f}%)")
-    
-    if coord_count > 10:  # Need minimum equipment for clustering
-        # Prepare coordinate data
-        coords = df.loc[has_coords, ['KOORDINAT_X', 'KOORDINAT_Y']].values
-        
-        # Standardize coordinates
-        scaler = StandardScaler()
-        coords_scaled = scaler.fit_transform(coords)
-        
-        # Determine optimal number of clusters (use elbow method heuristic)
-        # For ~1,300 equipment, 15-20 clusters is reasonable
-        n_clusters = min(20, coord_count // 50)  # ~50 equipment per cluster
-        
-        print(f"  Creating {n_clusters} geographic clusters...")
-        
-        # K-means clustering
-        kmeans = KMeans(n_clusters=n_clusters, random_state=RANDOM_STATE, n_init=10)
-        df.loc[has_coords, 'Geographic_Cluster'] = kmeans.fit_predict(coords_scaled)
-        
-        # For equipment without coordinates, assign -1
-        df['Geographic_Cluster'] = df['Geographic_Cluster'].fillna(-1).astype(int)
-        
-        print(f"✓ Geographic clusters created")
-        
-        # Cluster statistics
-        cluster_sizes = df[df['Geographic_Cluster'] >= 0]['Geographic_Cluster'].value_counts()
-        print(f"  Average equipment per cluster: {cluster_sizes.mean():.1f}")
-        print(f"  Min cluster size: {cluster_sizes.min()}")
-        print(f"  Max cluster size: {cluster_sizes.max()}")
-        
-        # Calculate cluster-level failure rates
-        print("\n  Calculating cluster-level failure rates...")
-        cluster_stats = df.groupby('Geographic_Cluster').agg({
-            'Arıza_Sayısı_12ay': 'mean',
-            'Tekrarlayan_Arıza_90gün_Flag': 'mean',
-            'MTBF_Gün': 'mean'
-        }).add_suffix('_Cluster_Avg')
-        
-        # Merge back to main dataframe
-        df = df.merge(cluster_stats, left_on='Geographic_Cluster', right_index=True, how='left')
-        
-        print("✓ Cluster-level features added")
-    else:
-        print("⚠ Too few equipment with coordinates for clustering")
-        df['Geographic_Cluster'] = -1
-else:
-    print("\n⚠ WARNING: Coordinate columns not found, skipping geographic clustering")
-    df['Geographic_Cluster'] = -1
+print("✓ Geographic clustering removed - using İlçe (district) instead")
 
 # ============================================================================
-# STEP 4: FAILURE RATE FEATURES
+# STEP 4: FAILURE RATE FEATURES - REMOVED
 # ============================================================================
+# NOTE: Redundant failure rate features have been removed from the pipeline
+#
+# Rationale for removal:
+#   - Failure_Rate_Per_Year: Redundant (tree models learn this from Toplam_Arıza / Ekipman_Yaşı)
+#   - Recent_Failure_Intensity: Uses Arıza_Sayısı_3ay (may include post-cutoff data - leakage risk)
+#   - Failure_Acceleration: Uses Arıza_Sayısı_6ay (may include post-cutoff data - leakage risk)
+#
+# Features removed:
+#   - Failure_Rate_Per_Year (redundant ratio feature)
+#   - Recent_Failure_Intensity (leaky - uses 3-month window)
+#   - Failure_Acceleration (leaky - uses 6-month window)
+#
+# Replacement: Models learn these patterns from raw features (Toplam_Arıza_Sayisi_Lifetime,
+#              Ekipman_Yaşı_Yıl, Son_Arıza_Gun_Sayisi, MTBF metrics)
 print("\n" + "="*100)
-print("STEP 4: ENGINEERING FAILURE RATE FEATURES")
+print("STEP 4: FAILURE RATE FEATURES - SKIPPED (Models learn from raw features)")
 print("="*100)
-
-print("\n--- Calculating Failure Rates ---")
-
-# Annualized failure rate
-if 'Toplam_Arıza_Sayisi_Lifetime' in df.columns and 'Ekipman_Yaşı_Yıl' in df.columns:
-    df['Failure_Rate_Per_Year'] = df.apply(
-        lambda row: row['Toplam_Arıza_Sayisi_Lifetime'] / row['Ekipman_Yaşı_Yıl'] 
-        if pd.notna(row['Ekipman_Yaşı_Yıl']) and row['Ekipman_Yaşı_Yıl'] > 0 
-        else None, 
-        axis=1
-    )
-    
-    rate_available = df['Failure_Rate_Per_Year'].notna().sum()
-    print(f"✓ Annual failure rate: {rate_available:,} equipment")
-    
-    if rate_available > 0:
-        print(f"  Mean: {df['Failure_Rate_Per_Year'].mean():.2f} faults/year")
-        print(f"  Median: {df['Failure_Rate_Per_Year'].median():.2f} faults/year")
-
-# Recent failure intensity (3-month to 12-month ratio)
-if 'Arıza_Sayısı_3ay' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
-    df['Recent_Failure_Intensity'] = df.apply(
-        lambda row: row['Arıza_Sayısı_3ay'] / row['Arıza_Sayısı_12ay']
-        if pd.notna(row['Arıza_Sayısı_12ay']) and row['Arıza_Sayısı_12ay'] > 0
-        else 0,
-        axis=1
-    )
-    print(f"✓ Recent failure intensity calculated")
-
-# Failure acceleration (comparing 6-month periods)
-if 'Arıza_Sayısı_6ay' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
-    df['Failure_Acceleration'] = df.apply(
-        lambda row: (row['Arıza_Sayısı_6ay'] * 2) / row['Arıza_Sayısı_12ay']
-        if pd.notna(row['Arıza_Sayısı_12ay']) and row['Arıza_Sayısı_12ay'] > 0
-        else 1.0,
-        axis=1
-    )
-    print(f"✓ Failure acceleration calculated")
+print("✓ Redundant failure rate features removed")
 
 # ============================================================================
 # STEP 5: RELIABILITY METRICS
@@ -352,6 +288,131 @@ if 'Arıza_Sayısı_3ay' in df.columns:
     print(f"✓ Failure-free equipment (3 months): {failure_free:,} ({failure_free/len(df)*100:.1f}%)")
 
 # ============================================================================
+# STEP 5B: ADVANCED MTBF FEATURES (TIER 3 ENHANCEMENTS)
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 5B: ENGINEERING ADVANCED MTBF FEATURES")
+print("="*100)
+
+# These features detect equipment degradation trends and failure predictability
+# Part of the optimal 30-feature set for improved PoF prediction
+
+# FEATURE 1: MTBF_InterFault_Trend (Degradation Detector)
+# Purpose: Detect if equipment is degrading (failures accelerating) over time
+# Method: Compare recent MTBF to historical MTBF
+#   - Recent MTBF = Average of last 50% of inter-fault times
+#   - Historical MTBF = Average of first 50% of inter-fault times
+#   - Trend = Recent / Historical
+# Interpretation:
+#   - < 1.0 = Degrading (failures accelerating - HIGH RISK)
+#   - = 1.0 = Stable
+#   - > 1.0 = Improving (failures slowing down - GOOD SIGN)
+
+print("\n--- Calculating MTBF Trend (Degradation Detector) ---")
+
+def calculate_mtbf_trend(row):
+    """
+    Calculate MTBF trend by comparing recent vs historical inter-fault times
+    Requires at least 4 faults to split into two periods
+    """
+    # This would require fault-level data to calculate inter-fault times
+    # Since we only have equipment-level aggregates, we approximate using:
+    # - MTBF_InterFault_Gün (average inter-fault time)
+    # - Son_Arıza_Gun_Sayisi (days since last fault)
+    # - Toplam_Arıza_Sayisi_Lifetime (total fault count)
+
+    if pd.isna(row['MTBF_InterFault_Gün']) or row['Toplam_Arıza_Sayisi_Lifetime'] < 4:
+        return None  # Need at least 4 faults for trend analysis
+
+    # Approximation: If recent fault happened sooner than expected MTBF, equipment is degrading
+    # Trend = (Days since last fault) / MTBF_InterFault_Gün
+    # This is a proxy - ideally would use actual inter-fault time series
+    if pd.notna(row['Son_Arıza_Gun_Sayisi']) and row['MTBF_InterFault_Gün'] > 0:
+        # Invert to get degradation indicator
+        # If days_since < MTBF → recent fault was early → degrading → trend < 1
+        recent_ratio = row['Son_Arıza_Gun_Sayisi'] / row['MTBF_InterFault_Gün']
+        return recent_ratio
+
+    return 1.0  # Default to stable
+
+if 'MTBF_InterFault_Gün' in df.columns:
+    df['MTBF_InterFault_Trend'] = df.apply(calculate_mtbf_trend, axis=1)
+
+    trend_available = df['MTBF_InterFault_Trend'].notna().sum()
+    print(f"✓ MTBF_InterFault_Trend calculated: {trend_available:,} equipment ({trend_available/len(df)*100:.1f}%)")
+
+    if trend_available > 0:
+        trend_stats = df['MTBF_InterFault_Trend'].describe()
+        print(f"  Mean trend: {trend_stats['mean']:.2f}")
+        print(f"  Median trend: {trend_stats['50%']:.2f}")
+
+        # Degradation categories
+        degrading = (df['MTBF_InterFault_Trend'] < 0.8).sum()
+        stable = ((df['MTBF_InterFault_Trend'] >= 0.8) & (df['MTBF_InterFault_Trend'] <= 1.2)).sum()
+        improving = (df['MTBF_InterFault_Trend'] > 1.2).sum()
+
+        print(f"  Degrading (trend < 0.8): {degrading:,} equipment")
+        print(f"  Stable (0.8 ≤ trend ≤ 1.2): {stable:,} equipment")
+        print(f"  Improving (trend > 1.2): {improving:,} equipment")
+else:
+    print("⚠ MTBF_InterFault_Gün not available - skipping MTBF_InterFault_Trend")
+    df['MTBF_InterFault_Trend'] = None
+
+# FEATURE 2: MTBF_InterFault_StdDev (Predictability Measure)
+# Purpose: Measure failure timing predictability
+# Method: Standard deviation of inter-fault times (normalized by mean)
+# Interpretation:
+#   - Low StdDev = Consistent, predictable failure pattern (good for maintenance planning)
+#   - High StdDev = Erratic, unpredictable failures (complex degradation)
+
+print("\n--- Calculating MTBF StdDev (Predictability Measure) ---")
+
+def calculate_mtbf_stddev_proxy(row):
+    """
+    Calculate MTBF variability proxy
+    True calculation would require fault-level inter-fault time series
+    We approximate using coefficient of variation concept
+    """
+    # Requires at least 2 faults for variability measure
+    if row['Toplam_Arıza_Sayisi_Lifetime'] < 2:
+        return None
+
+    # Proxy: Equipment with recurring faults in short windows have high variability
+    # Use ratio of lifetime MTBF vs active life MTBF as variability indicator
+    if pd.notna(row['MTBF_Lifetime_Gün']) and pd.notna(row['MTBF_ActiveLife_Gün']):
+        if row['MTBF_ActiveLife_Gün'] > 0:
+            # Higher ratio = more variable (active life MTBF differs from lifetime MTBF)
+            variability_ratio = abs(row['MTBF_Lifetime_Gün'] - row['MTBF_ActiveLife_Gün']) / row['MTBF_ActiveLife_Gün']
+            return variability_ratio
+
+    return 0.0  # Default to low variability
+
+if 'MTBF_Lifetime_Gün' in df.columns and 'MTBF_ActiveLife_Gün' in df.columns:
+    df['MTBF_InterFault_StdDev'] = df.apply(calculate_mtbf_stddev_proxy, axis=1)
+
+    stddev_available = df['MTBF_InterFault_StdDev'].notna().sum()
+    print(f"✓ MTBF_InterFault_StdDev calculated: {stddev_available:,} equipment ({stddev_available/len(df)*100:.1f}%)")
+
+    if stddev_available > 0:
+        stddev_stats = df['MTBF_InterFault_StdDev'].describe()
+        print(f"  Mean variability: {stddev_stats['mean']:.2f}")
+        print(f"  Median variability: {stddev_stats['50%']:.2f}")
+
+        # Predictability categories
+        predictable = (df['MTBF_InterFault_StdDev'] < 0.3).sum()
+        moderate = ((df['MTBF_InterFault_StdDev'] >= 0.3) & (df['MTBF_InterFault_StdDev'] <= 0.7)).sum()
+        erratic = (df['MTBF_InterFault_StdDev'] > 0.7).sum()
+
+        print(f"  Predictable (low variability < 0.3): {predictable:,} equipment")
+        print(f"  Moderate variability (0.3-0.7): {moderate:,} equipment")
+        print(f"  Erratic (high variability > 0.7): {erratic:,} equipment")
+else:
+    print("⚠ MTBF columns not available - skipping MTBF_InterFault_StdDev")
+    df['MTBF_InterFault_StdDev'] = None
+
+print("\n✓ Advanced MTBF features complete!")
+
+# ============================================================================
 # STEP 6: CUSTOMER IMPACT FEATURES
 # ============================================================================
 print("\n" + "="*100)
@@ -379,66 +440,97 @@ if 'Avg_Customer_Count' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
             print(f"  {category} impact: {count:,} ({pct:.1f}%)")
 
 # ============================================================================
-# STEP 7: EQUIPMENT CLASS AGGREGATIONS
+# STEP 7: EQUIPMENT CLASS AGGREGATIONS - REMOVED
 # ============================================================================
+# NOTE: Equipment class aggregation features have been removed from the pipeline
+#
+# Rationale for removal:
+#   - Class averages create target leakage (using class performance to predict class members)
+#   - Circular reasoning: If equipment X is in class Y, using Y's average to predict X
+#   - Models learn equipment class patterns automatically from Equipment_Class_Primary
+#   - Aggregating Arıza_Sayısı_12ay creates leakage (uses 12-month window)
+#
+# Features removed:
+#   - Arıza_Sayısı_12ay_Class_Avg (leaky - uses 12-month aggregation)
+#   - MTBF_Gün_Class_Avg (circular logic)
+#   - Ekipman_Yaşı_Yıl_Class_Avg (not predictive)
+#   - Yas_Beklenen_Omur_Orani_Class_Avg (not predictive)
+#   - Failure_vs_Class_Avg (derived from leaky feature)
+#
+# Replacement: Equipment_Class_Primary (already exists) provides class information without leakage
 print("\n" + "="*100)
-print("STEP 7: CREATING EQUIPMENT CLASS AGGREGATIONS")
+print("STEP 7: EQUIPMENT CLASS AGGREGATIONS - SKIPPED (Using Equipment_Class_Primary instead)")
 print("="*100)
-
-if 'Equipment_Class_Primary' in df.columns:
-    print("\n--- Calculating class-level benchmarks ---")
-
-    # Group by equipment class (using unified Equipment_Class_Primary)
-    class_stats = df.groupby('Equipment_Class_Primary').agg({
-        'Arıza_Sayısı_12ay': 'mean',
-        'MTBF_Gün': 'mean',
-        'Ekipman_Yaşı_Yıl': 'mean',
-        'Yas_Beklenen_Omur_Orani': 'mean'
-    }).add_suffix('_Class_Avg')
-    
-    # Merge back
-    df = df.merge(class_stats, left_on='Equipment_Class_Primary', right_index=True, how='left')
-    
-    print(f"✓ Class-level benchmarks added for {len(class_stats)} equipment types")
-    
-    # Relative performance vs. class average
-    if 'Arıza_Sayısı_12ay_Class_Avg' in df.columns:
-        df['Failure_vs_Class_Avg'] = df.apply(
-            lambda row: row['Arıza_Sayısı_12ay'] / row['Arıza_Sayısı_12ay_Class_Avg']
-            if pd.notna(row['Arıza_Sayısı_12ay_Class_Avg']) and row['Arıza_Sayısı_12ay_Class_Avg'] > 0
-            else 1.0,
-            axis=1
-        )
-        
-        # Performance categories
-        better = (df['Failure_vs_Class_Avg'] < 0.8).sum()
-        worse = (df['Failure_vs_Class_Avg'] > 1.2).sum()
-        print(f"  Equipment performing better than class average: {better:,}")
-        print(f"  Equipment performing worse than class average: {worse:,}")
+print("✓ Class aggregation features removed")
 
 # ============================================================================
-# STEP 8: INTERACTION FEATURES
+# STEP 8: INTERACTION FEATURES (CLEANED - LEAKAGE REMOVED)
 # ============================================================================
-# NOTE: Risk scoring features removed - they were over-engineered and removed
-# by feature selection anyway. Models learn risk patterns from raw features.
 print("\n" + "="*100)
 print("STEP 8: CREATING INTERACTION FEATURES")
 print("="*100)
 
-# Age × Failure interaction
-if 'Ekipman_Yaşı_Yıl' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
-    df['Age_Failure_Interaction'] = df['Ekipman_Yaşı_Yıl'] * df['Arıza_Sayısı_12ay']
-    print("✓ Age × Failure interaction")
-
-# Age ratio × Recurrence interaction
+# Age ratio × Recurrence interaction (KEEP - uses lifetime count, no leakage)
 if 'Yas_Beklenen_Omur_Orani' in df.columns and 'Tekrarlayan_Arıza_90gün_Flag' in df.columns:
     df['AgeRatio_Recurrence_Interaction'] = df['Yas_Beklenen_Omur_Orani'] * df['Tekrarlayan_Arıza_90gün_Flag']
-    print("✓ Age Ratio × Recurrence interaction")
+    print("✓ Age Ratio × Recurrence interaction (compound aging + recurrence risk)")
 
-# Customer impact × Failure rate interaction
-if 'Avg_Customer_Count' in df.columns and 'Arıza_Sayısı_12ay' in df.columns:
-    df['Customer_Failure_Interaction'] = df['Avg_Customer_Count'] * df['Arıza_Sayısı_12ay']
-    print("✓ Customer × Failure interaction")
+# Overdue Factor (TIER 3 Enhancement - Imminent Failure Risk)
+# Purpose: Detect equipment "overdue" for next failure based on historical pattern
+# Calculation: Days since last failure / MTBF_InterFault_Gün
+# Interpretation:
+#   - < 1.0 = Not yet due for next failure based on pattern
+#   - = 1.0 = Due for failure based on historical pattern
+#   - > 1.0 = Overdue (higher risk of imminent failure)
+
+print("\n--- Calculating Overdue Factor (Imminent Risk Detector) ---")
+
+if 'Son_Arıza_Gun_Sayisi' in df.columns and 'MTBF_InterFault_Gün' in df.columns:
+    def calculate_overdue_factor(row):
+        """
+        Calculate how overdue equipment is for next failure
+        Requires valid MTBF and days since last failure
+        """
+        if pd.isna(row['Son_Arıza_Gun_Sayisi']) or pd.isna(row['MTBF_InterFault_Gün']):
+            return None
+
+        # Equipment that never failed gets None (no pattern to base on)
+        if row['Toplam_Arıza_Sayisi_Lifetime'] == 0:
+            return None
+
+        # Avoid division by zero
+        if row['MTBF_InterFault_Gün'] <= 0:
+            return None
+
+        # Calculate overdue factor
+        overdue_factor = row['Son_Arıza_Gun_Sayisi'] / row['MTBF_InterFault_Gün']
+        return overdue_factor
+
+    df['Overdue_Factor'] = df.apply(calculate_overdue_factor, axis=1)
+
+    overdue_available = df['Overdue_Factor'].notna().sum()
+    print(f"✓ Overdue_Factor calculated: {overdue_available:,} equipment ({overdue_available/len(df)*100:.1f}%)")
+
+    if overdue_available > 0:
+        overdue_stats = df['Overdue_Factor'].describe()
+        print(f"  Mean overdue factor: {overdue_stats['mean']:.2f}")
+        print(f"  Median overdue factor: {overdue_stats['50%']:.2f}")
+
+        # Risk categories
+        not_due = (df['Overdue_Factor'] < 0.8).sum()
+        approaching = ((df['Overdue_Factor'] >= 0.8) & (df['Overdue_Factor'] < 1.2)).sum()
+        overdue = (df['Overdue_Factor'] >= 1.2).sum()
+
+        print(f"  Not yet due (< 0.8): {not_due:,} equipment")
+        print(f"  Approaching due (0.8-1.2): {approaching:,} equipment")
+        print(f"  Overdue (≥ 1.2): {overdue:,} equipment (⚠ IMMINENT RISK)")
+else:
+    print("⚠ Required columns not available - skipping Overdue_Factor")
+    df['Overdue_Factor'] = None
+
+# REMOVED FEATURES (leakage risk):
+# - Age_Failure_Interaction: Used Arıza_Sayısı_12ay (may include post-cutoff data)
+# - Customer_Failure_Interaction: Used Arıza_Sayısı_12ay (may include post-cutoff data)
 
 # ============================================================================
 # STEP 9B: ADDITIONAL DOMAIN-SPECIFIC FEATURES
@@ -793,32 +885,72 @@ print(f"   Original features: {original_feature_count}")
 print(f"   New features added: {new_feature_count}")
 print(f"   Total features: {df.shape[1]}")
 
-# List new features
-print("\n✅ New Features Created:")
-new_features = [
+# List new features (optimized 30-feature set approach)
+print("\n✅ Key Engineered Features (Optimal 30-Feature Set):")
+print("\n--- TIER 1: Essential Features ---")
+tier1_features = [
     'Beklenen_Ömür_Yıl',
     'Yas_Beklenen_Omur_Orani',
-    'Age_Risk_Category',
-    'Geographic_Cluster',
-    'Failure_Rate_Per_Year',
-    'Recent_Failure_Intensity',
-    'Failure_Acceleration',
-    'Reliability_Score',
-    'Time_Since_Last_Normalized',
-    'Failure_Free_3M',
-    'Customer_Minutes_Risk_Annual',
-    'Customer_Impact_Category',
-    'Arıza_Sayısı_12ay_Class_Avg',
-    'Failure_vs_Class_Avg',
-    'Composite_PoF_Risk_Score',
-    'Risk_Category',
-    'Age_Failure_Interaction',
 ]
 
-for i, feature in enumerate(new_features, 1):
+for feature in tier1_features:
     if feature in df.columns:
         coverage = df[feature].notna().sum() / len(df) * 100
-        print(f"  {i:2d}. {feature:<40} {coverage:>6.1f}% coverage")
+        print(f"  ✓ {feature:<45} {coverage:>6.1f}% coverage")
+
+print("\n--- TIER 3: MTBF Enhancement Features (NEW) ---")
+tier3_mtbf = [
+    'MTBF_InterFault_Trend',
+    'MTBF_InterFault_StdDev',
+]
+
+for feature in tier3_mtbf:
+    if feature in df.columns:
+        coverage = df[feature].notna().sum() / len(df) * 100
+        print(f"  ✓ {feature:<45} {coverage:>6.1f}% coverage")
+
+print("\n--- TIER 3: Interaction Features ---")
+tier3_interactions = [
+    'AgeRatio_Recurrence_Interaction',
+    'Overdue_Factor',
+]
+
+for feature in tier3_interactions:
+    if feature in df.columns:
+        coverage = df[feature].notna().sum() / len(df) * 100
+        print(f"  ✓ {feature:<45} {coverage:>6.1f}% coverage")
+
+print("\n--- Additional Domain Features ---")
+additional_features = [
+    'Age_Risk_Category',
+    'Voltage_Class',
+    'Bölge_Tipi',
+    'Son_Arıza_Mevsim',
+    'Customer_Minutes_Risk_Annual',
+    'Customer_Impact_Category',
+]
+
+for feature in additional_features:
+    if feature in df.columns:
+        coverage = df[feature].notna().sum() / len(df) * 100
+        print(f"  ✓ {feature:<45} {coverage:>6.1f}% coverage")
+
+print("\n--- REMOVED Features (Leakage/Redundancy) ---")
+removed_features = [
+    'Geographic_Cluster (K-means clustering - noisy)',
+    'Arıza_Sayısı_12ay_Cluster_Avg (cluster aggregation - leaky)',
+    'Failure_Rate_Per_Year (redundant ratio)',
+    'Recent_Failure_Intensity (leaky - 3M window)',
+    'Failure_Acceleration (leaky - 6M window)',
+    'Arıza_Sayısı_12ay_Class_Avg (class aggregation - leaky)',
+    'MTBF_Gün_Class_Avg (circular logic)',
+    'Failure_vs_Class_Avg (derived from leaky feature)',
+    'Age_Failure_Interaction (leaky - uses 12M data)',
+    'Customer_Failure_Interaction (leaky - uses 12M data)',
+]
+
+for feature in removed_features:
+    print(f"  ❌ {feature}")
 
 # Data quality check
 print("\n--- Data Quality Validation ---")
@@ -897,9 +1029,10 @@ print("="*100)
 
 print("\n🎯 KEY ACCOMPLISHMENTS:")
 print(f"   ✅ Expected Life Ratios calculated ({df['Yas_Beklenen_Omur_Orani'].notna().sum():,} equipment)")
-if 'Geographic_Cluster' in df.columns:
-    print(f"   ✅ Geographic Clusters created ({(df['Geographic_Cluster'] >= 0).sum():,} equipment)")
-print(f"   ✅ {new_feature_count} new features engineered")
+print(f"   ✅ MTBF Enhancement Features added (Trend + StdDev)")
+print(f"   ✅ Overdue Factor created (imminent failure risk detector)")
+print(f"   ✅ Removed 10 problematic features (leakage/redundancy)")
+print(f"   ✅ {new_feature_count} new features engineered (net change)")
 
 print("\n📊 FEATURE SUMMARY:")
 numeric_features = df.select_dtypes(include=[np.number]).columns
