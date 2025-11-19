@@ -26,6 +26,18 @@ from sklearn.preprocessing import LabelEncoder
 import warnings
 import sys
 
+# Import centralized configuration
+from config import (
+    FEATURES_ENGINEERED_FILE,
+    FEATURES_REDUCED_FILE,
+    OUTPUT_DIR,
+    VIF_THRESHOLD,
+    VIF_TARGET,
+    CORRELATION_THRESHOLD,
+    IMPORTANCE_THRESHOLD,
+    PROTECTED_FEATURES
+)
+
 # Fix Unicode encoding for Windows console
 if sys.platform == 'win32':
     try:
@@ -47,21 +59,11 @@ print(" "*15 + "Leakage Removal → Redundancy Reduction → VIF Analysis")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-# VIF thresholds
-VIF_THRESHOLD = 10  # Features with VIF > 10 are highly collinear
-VIF_TARGET = 10     # Target VIF after iterative removal
-
-# Correlation threshold
-CORRELATION_THRESHOLD = 0.85
-
-# Feature importance threshold
-IMPORTANCE_THRESHOLD = 0.001  # Keep features contributing > 0.1%
-
 # Create output directory
-output_dir = Path('outputs/feature_selection')
+output_dir = OUTPUT_DIR / 'feature_selection'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 print("\n📋 Configuration:")
@@ -76,15 +78,13 @@ print("\n" + "="*100)
 print("STEP 0: LOADING ENGINEERED FEATURES")
 print("="*100)
 
-data_path = Path('data/features_engineered.csv')
-
-if not data_path.exists():
-    print(f"\n❌ ERROR: File not found at {data_path}")
+if not FEATURES_ENGINEERED_FILE.exists():
+    print(f"\n❌ ERROR: File not found at {FEATURES_ENGINEERED_FILE}")
     print("Please run 03_feature_engineering.py first!")
     exit(1)
 
-print(f"\n✓ Loading from: {data_path}")
-df = pd.read_csv(data_path)
+print(f"\n✓ Loading from: {FEATURES_ENGINEERED_FILE}")
+df = pd.read_csv(FEATURES_ENGINEERED_FILE)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
 # Verify Equipment_Class_Primary exists
@@ -208,17 +208,8 @@ REDUNDANT_FEATURES = {
     },
 }
 
-# Protected features (NEVER remove)
-PROTECTED_FEATURES = [
-    'Ekipman_ID',
-    'MTBF_Gün',
-    'Son_Arıza_Gun_Sayisi',
-    'Ilk_Arizaya_Kadar_Yil',
-    'Ekipman_Yaşı_Yıl_EDBS_first',
-    'Equipment_Class_Primary',
-    'Geographic_Cluster',
-    'Tekrarlayan_Arıza_90gün_Flag',  # TARGET for chronic repeater classification
-]
+# Protected features are imported from config.py
+# (NEVER remove these features)
 
 redundant_to_remove = []
 removal_reasons = {}
@@ -361,14 +352,13 @@ print("\n" + "="*100)
 print("STEP 4: SAVING RESULTS")
 print("="*100)
 
-output_path = Path('data/features_reduced.csv')
-print(f"\n💾 Saving to: {output_path}")
-df_final.to_csv(output_path, index=False, encoding='utf-8-sig')
+print(f"\n💾 Saving to: {FEATURES_REDUCED_FILE}")
+df_final.to_csv(FEATURES_REDUCED_FILE, index=False, encoding='utf-8-sig')
 
 print(f"✅ Successfully saved!")
 print(f"   Records: {len(df_final):,}")
 print(f"   Features: {len(df_final.columns)}")
-print(f"   File size: {output_path.stat().st_size / 1024**2:.2f} MB")
+print(f"   File size: {FEATURES_REDUCED_FILE.stat().st_size / 1024**2:.2f} MB")
 
 # Save comprehensive report
 print("\n📋 Creating comprehensive feature selection report...")
@@ -416,7 +406,7 @@ print(f"   Final features: {len(df_final.columns)}")
 print(f"   Reduction: {(1 - len(df_final.columns)/original_feature_count)*100:.1f}%")
 
 print(f"\n📂 OUTPUT FILES:")
-print(f"   • {output_path}")
+print(f"   • {FEATURES_REDUCED_FILE}")
 print(f"   • {report_path}")
 
 print(f"\n✅ PIPELINE BENEFITS:")

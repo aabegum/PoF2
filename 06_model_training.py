@@ -41,6 +41,26 @@ from datetime import datetime
 import pickle
 import warnings
 import sys
+
+# Import centralized configuration
+from config import (
+    INPUT_FILE,
+    FEATURES_REDUCED_FILE,
+    MODEL_DIR,
+    PREDICTION_DIR,
+    OUTPUT_DIR,
+    RESULTS_DIR,
+    RANDOM_STATE,
+    TEST_SIZE,
+    N_FOLDS,
+    CUTOFF_DATE,
+    HORIZONS,
+    XGBOOST_PARAMS,
+    XGBOOST_GRID,
+    CATBOOST_PARAMS,
+    CATBOOST_GRID
+)
+
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
     try:
@@ -75,79 +95,38 @@ print(" "*30 + "XGBoost + CatBoost | 6/12 Months")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ============================================================================
 
-# Model parameters
-RANDOM_STATE = 42
-TEST_SIZE = 0.30
-N_FOLDS = 3  # For GridSearchCV (reduced from 5 for speed)
+# Model parameters (from config.py):
+# RANDOM_STATE, TEST_SIZE, N_FOLDS, CUTOFF_DATE, HORIZONS
 
 # GridSearchCV settings
 USE_GRIDSEARCH = True  # Set to False to skip hyperparameter tuning
 GRIDSEARCH_VERBOSE = 1  # 0=silent, 1=progress bar, 2=detailed (REDUCED for cleaner output)
 GRIDSEARCH_N_JOBS = -1
 
-# Prediction horizons - TEMPORAL (future failure windows)
-# Cutoff date: 2024-06-25 (all features calculated using data BEFORE this date)
-CUTOFF_DATE = pd.Timestamp('2024-06-25')
-
-HORIZONS = {
-    '6M': 180,   # Predict failures between 2024-06-25 and 2024-12-25 (164 equipment)
-    '12M': 365   # Predict failures between 2024-06-25 and 2025-06-25 (266 equipment)
-}
-
 # Expected positive class rates (from check_future_data.py)
 # 6M: ~20.8% (164 out of 789 equipment)
 # 12M: ~33.7% (266 out of 789 equipment)
 
-# XGBoost base parameters (fixed across all searches)
-XGBOOST_BASE_PARAMS = {
-    'objective': 'binary:logistic',
-    'eval_metric': 'auc',
-    'random_state': RANDOM_STATE,
-    'n_jobs': -1,
-    'scale_pos_weight': 1.0  # Will be calculated per target
-}
+# Model parameters imported from config.py
+# XGBOOST_PARAMS - base parameters
+# XGBOOST_GRID - GridSearchCV parameter grid
+# CATBOOST_PARAMS - base parameters
+# CATBOOST_GRID - GridSearchCV parameter grid
 
-# XGBoost GridSearchCV parameter grid (REDUCED for stability)
-XGBOOST_PARAM_GRID = {
-    'max_depth': [4, 6],
-    'learning_rate': [0.05, 0.1],
-    'n_estimators': [100, 200],
-    'min_child_weight': [1, 3],
-    'subsample': [0.8],
-    'colsample_bytree': [0.8],
-    'gamma': [0, 0.1],
-    'reg_alpha': [0, 0.1],
-    'reg_lambda': [1.0]
-}  # 64 combinations (much more manageable)
+# Create local aliases for backward compatibility
+XGBOOST_BASE_PARAMS = XGBOOST_PARAMS.copy()
+XGBOOST_PARAM_GRID = XGBOOST_GRID.copy()
+CATBOOST_BASE_PARAMS = CATBOOST_PARAMS.copy()
+CATBOOST_PARAM_GRID = CATBOOST_GRID.copy()
 
-# CatBoost base parameters (fixed across all searches)
-CATBOOST_BASE_PARAMS = {
-    'loss_function': 'Logloss',
-    'eval_metric': 'AUC',
-    'random_seed': RANDOM_STATE,
-    'verbose': False,
-    'auto_class_weights': 'Balanced',
-    'task_type': 'CPU',
-    'thread_count': -1
-}
-
-# CatBoost GridSearchCV parameter grid (REDUCED for stability)
-CATBOOST_PARAM_GRID = {
-    'iterations': [100, 200],
-    'learning_rate': [0.05, 0.1],
-    'depth': [4, 6],
-    'l2_leaf_reg': [1, 3],
-    'border_count': [64]
-}  # 16 combinations (much more manageable)
-
-# Create output directories
-Path('models').mkdir(exist_ok=True)
-Path('predictions').mkdir(exist_ok=True)
-Path('outputs/model_evaluation').mkdir(parents=True, exist_ok=True)
-Path('results').mkdir(exist_ok=True)
+# Create output directories (using config paths)
+MODEL_DIR.mkdir(exist_ok=True)
+PREDICTION_DIR.mkdir(exist_ok=True)
+(OUTPUT_DIR / 'model_evaluation').mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
 
 print("\n📋 Configuration:")
 print(f"   Random State: {RANDOM_STATE}")
@@ -178,24 +157,14 @@ print("\n" + "="*100)
 print("STEP 1: LOADING SELECTED FEATURES")
 print("="*100)
 
-# Try reduced features first (fixes data leakage), fall back to clean features
-data_path_reduced = Path('data/features_reduced.csv')
-data_path_clean = Path('data/features_selected_clean.csv')
-
-if data_path_reduced.exists():
-    data_path = data_path_reduced
-    print(f"\n✓ Using REDUCED features (data leakage fixed)")
-elif data_path_clean.exists():
-    data_path = data_path_clean
-    print(f"\n⚠️  Using CLEAN features (may have data leakage - run 05c_reduce_feature_redundancy.py)")
-else:
-    print(f"\n❌ ERROR: No feature files found!")
-    print("Please run: python 05c_reduce_feature_redundancy.py")
-    print("Or: python 05b_remove_leaky_features.py")
+# Load reduced features (comprehensive feature selection with leakage removal)
+if not FEATURES_REDUCED_FILE.exists():
+    print(f"\n❌ ERROR: File not found at {FEATURES_REDUCED_FILE}")
+    print("Please run: python 05_feature_selection.py")
     exit(1)
 
-print(f"\n✓ Loading from: {data_path}")
-df = pd.read_csv(data_path)
+print(f"\n✓ Loading from: {FEATURES_REDUCED_FILE}")
+df = pd.read_csv(FEATURES_REDUCED_FILE)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
 # 🔧 FIX: Filter out equipment with no pre-cutoff failure history
@@ -233,7 +202,7 @@ print("   Based on actual fault occurrences AFTER cutoff date (2024-06-25)")
 
 # Load ALL faults (including future) from original data
 print("\n✓ Loading original fault data for temporal target creation...")
-all_faults = pd.read_excel('data/combined_data.xlsx')
+all_faults = pd.read_excel(INPUT_FILE)
 all_faults['started at'] = pd.to_datetime(all_faults['started at'],
                                            dayfirst=True,  # Turkish DD-MM-YYYY format
                                            errors='coerce')
@@ -518,7 +487,7 @@ for horizon in HORIZONS.keys():
         print(f"   Check if features contain information from the target.")
 
     # Save model
-    model_path = Path(f'models/xgboost_{horizon.lower()}.pkl')
+    model_path = MODEL_DIR / f'xgboost_{horizon.lower()}.pkl'
     with open(model_path, 'wb') as f:
         pickle.dump(model, f)
     print(f"\n💾 Model saved: {model_path}")
@@ -539,8 +508,8 @@ for horizon in HORIZONS.keys():
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(xgb_best_params).T
-    best_params_df.to_csv('results/xgboost_best_params.csv')
-    print(f"\n💾 Best parameters saved: results/xgboost_best_params.csv")
+    best_params_df.to_csv(RESULTS_DIR / 'xgboost_best_params.csv')
+    print(f"\n💾 Best parameters saved: {RESULTS_DIR / 'xgboost_best_params.csv'}")
 
 # ============================================================================
 # STEP 6: TRAIN MODELS - CATBOOST WITH GRIDSEARCHCV
@@ -665,7 +634,7 @@ for horizon in HORIZONS.keys():
     print(f"   F1-Score: {f1:.4f}")
 
     # Save model
-    model_path = Path(f'models/catboost_{horizon.lower()}.pkl')
+    model_path = MODEL_DIR / f'catboost_{horizon.lower()}.pkl'
     model.save_model(str(model_path))
     print(f"\n💾 Model saved: {model_path}")
 
@@ -685,8 +654,8 @@ for horizon in HORIZONS.keys():
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(catboost_best_params).T
-    best_params_df.to_csv('results/catboost_best_params.csv')
-    print(f"\n💾 Best parameters saved: results/catboost_best_params.csv")
+    best_params_df.to_csv(RESULTS_DIR / 'catboost_best_params.csv')
+    print(f"\n💾 Best parameters saved: {RESULTS_DIR / 'catboost_best_params.csv'}")
 # ============================================================================
 # STEP 7: MODEL COMPARISON
 # ============================================================================
@@ -724,8 +693,8 @@ print("\n📊 Model Performance Comparison:")
 print(comparison_df.to_string(index=False))
 
 # Save comparison
-comparison_df.to_csv('results/model_performance_comparison.csv', index=False)
-print(f"\n✓ Comparison saved: results/model_performance_comparison.csv")
+comparison_df.to_csv(RESULTS_DIR / 'model_performance_comparison.csv', index=False)
+print(f"\n✓ Comparison saved: {RESULTS_DIR / 'model_performance_comparison.csv'}")
 
 # Determine best model per horizon
 print("\n🏆 Best Model by Horizon (based on AUC):")
@@ -776,8 +745,8 @@ for horizon in HORIZONS.keys():
         print(f"  {i:2d}. {row.Feature:<35} {row.Importance:.4f}")
 
 # Save feature importance
-importance_df.to_csv('results/feature_importance_by_horizon.csv', index=False)
-print(f"\n✓ Feature importance saved: results/feature_importance_by_horizon.csv")
+importance_df.to_csv(RESULTS_DIR / 'feature_importance_by_horizon.csv', index=False)
+print(f"\n✓ Feature importance saved: {RESULTS_DIR / 'feature_importance_by_horizon.csv'}")
 
 # ============================================================================
 # STEP 9: VISUALIZATIONS
@@ -959,7 +928,7 @@ for horizon in HORIZONS.keys():
     pred_df = pred_df.sort_values('Risk_Score', ascending=False)
     
     # Save predictions
-    pred_path = f'predictions/predictions_{horizon.lower()}.csv'
+    pred_path = PREDICTION_DIR / f'predictions_{horizon.lower()}.csv'
     pred_df.to_csv(pred_path, index=False)
     
     print(f"\n✓ {horizon} Predictions:")
@@ -987,7 +956,7 @@ print("\n--- Identifying High-Risk Equipment ---")
 high_risk_data = df[['Ekipman_ID', 'Equipment_Class_Primary']].copy()
 
 for horizon in HORIZONS.keys():
-    pred_df = pd.read_csv(f'predictions/predictions_{horizon.lower()}.csv')
+    pred_df = pd.read_csv(PREDICTION_DIR / f'predictions_{horizon.lower()}.csv')
     high_risk_data[f'Risk_Score_{horizon}'] = pred_df['Risk_Score'].values
     high_risk_data[f'Risk_Level_{horizon}'] = pred_df['Risk_Level'].values
 
@@ -1009,7 +978,7 @@ if len(high_risk) > 0:
         print(f"  {i:2d}. ID: {row.Ekipman_ID} | Class: {row.Equipment_Class_Primary} | Risk: {row.Avg_Risk_Score:.1f}")
     
     # Save high-risk report
-    high_risk_path = 'results/high_risk_equipment_report.csv'
+    high_risk_path = RESULTS_DIR / 'high_risk_equipment_report.csv'
     high_risk.to_csv(high_risk_path, index=False)
     print(f"\n✓ High-risk report saved: {high_risk_path}")
 else:
@@ -1034,15 +1003,15 @@ for horizon in HORIZONS.keys():
     print(f"   {horizon}: XGBoost={xgb_auc:.4f} | CatBoost={cat_auc:.4f}")
 
 print(f"\n📂 OUTPUT FILES:")
-print(f"   Models: models/ (6 .pkl files)")  # CHANGED: 6 instead of 8
-print(f"   Predictions: predictions/ (3 CSV files)")  # CHANGED: 3 instead of 4
-print(f"   Visualizations: outputs/model_evaluation/ (4 PNG files)")
-print(f"   Results: results/ (3 CSV files)")
+print(f"   Models: {MODEL_DIR}/ (6 .pkl files)")  # CHANGED: 6 instead of 8
+print(f"   Predictions: {PREDICTION_DIR}/ (3 CSV files)")  # CHANGED: 3 instead of 4
+print(f"   Visualizations: {OUTPUT_DIR / 'model_evaluation'}/ (4 PNG files)")
+print(f"   Results: {RESULTS_DIR}/ (3 CSV files)")
 
 print(f"\n🚨 HIGH-RISK EQUIPMENT:")
 if len(high_risk) > 0:
     print(f"   Identified: {len(high_risk):,} equipment")
-    print(f"   Report: results/high_risk_equipment_report.csv")
+    print(f"   Report: {RESULTS_DIR / 'high_risk_equipment_report.csv'}")
 else:
     print(f"   None identified (all equipment < 50 risk score)")
 

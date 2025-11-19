@@ -23,6 +23,18 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import warnings
 import sys
+
+# Import centralized configuration
+from config import (
+    EQUIPMENT_LEVEL_FILE,
+    FEATURES_ENGINEERED_FILE,
+    FEATURE_CATALOG_FILE,
+    RANDOM_STATE,
+    ENABLE_GEOGRAPHIC_CLUSTERING,
+    MIN_EQUIPMENT_FOR_CLUSTERING,
+    EQUIPMENT_PER_CLUSTER
+)
+
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
     try:
@@ -32,6 +44,7 @@ if sys.platform == 'win32':
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
+
 warnings.filterwarnings('ignore')
 
 # Display settings
@@ -85,15 +98,13 @@ print("\n" + "="*100)
 print("STEP 1: LOADING EQUIPMENT-LEVEL DATA")
 print("="*100)
 
-data_path = Path('data/equipment_level_data.csv')
-
-if not data_path.exists():
-    print(f"\n❌ ERROR: File not found at {data_path}")
+if not EQUIPMENT_LEVEL_FILE.exists():
+    print(f"\n❌ ERROR: File not found at {EQUIPMENT_LEVEL_FILE}")
     print("Please run 02_data_transformation.py first!")
     exit(1)
 
-print(f"\n✓ Loading from: {data_path}")
-df = pd.read_csv(data_path)
+print(f"\n✓ Loading from: {EQUIPMENT_LEVEL_FILE}")
+df = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
 
 # Verify Equipment_Class_Primary exists (created by 02_data_transformation.py)
@@ -232,7 +243,7 @@ if 'KOORDINAT_X' in df.columns and 'KOORDINAT_Y' in df.columns:
         print(f"  Creating {n_clusters} geographic clusters...")
         
         # K-means clustering
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=RANDOM_STATE, n_init=10)
         df.loc[has_coords, 'Geographic_Cluster'] = kmeans.fit_predict(coords_scaled)
         
         # For equipment without coordinates, assign -1
@@ -822,15 +833,13 @@ print("\n" + "="*100)
 print("STEP 11: SAVING ENGINEERED DATASET")
 print("="*100)
 
-output_path = Path('data/features_engineered.csv')
-
-print(f"\n💾 Saving to: {output_path}")
-df.to_csv(output_path, index=False, encoding='utf-8-sig')
+print(f"\n💾 Saving to: {FEATURES_ENGINEERED_FILE}")
+df.to_csv(FEATURES_ENGINEERED_FILE, index=False, encoding='utf-8-sig')
 
 print(f"✅ Successfully saved!")
 print(f"   Records: {len(df):,}")
 print(f"   Features: {df.shape[1]}")
-print(f"   File size: {output_path.stat().st_size / 1024**2:.2f} MB")
+print(f"   File size: {FEATURES_ENGINEERED_FILE.stat().st_size / 1024**2:.2f} MB")
 
 # Save feature catalog
 print("\n📋 Creating feature catalog...")
@@ -867,8 +876,8 @@ def categorize_feature(name):
 
 feature_catalog['Category'] = feature_catalog['Feature_Name'].apply(categorize_feature)
 
-feature_catalog.to_csv('data/feature_catalog.csv', index=False)
-print(f"✅ Feature catalog saved to: data/feature_catalog.csv")
+feature_catalog.to_csv(FEATURE_CATALOG_FILE, index=False)
+print(f"✅ Feature catalog saved to: {FEATURE_CATALOG_FILE}")
 
 # Print summary by category
 print("\n--- Features by Category ---")
