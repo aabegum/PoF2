@@ -16,16 +16,16 @@ PIPELINE FLOW (10 STEPS):
     2. Data Transformation    → Fault → Equipment level (1,210 → 789)
     3. Feature Engineering    → Create 30 optimal features
     4. Feature Selection      → Leakage removal + VIF (merged: includes 05b)
-    5. Temporal PoF Model     → XGBoost/CatBoost multi-horizon (3M/6M/12M/24M)
-    6. Chronic Repeater Model → Identify failure-prone equipment
+    5. Temporal PoF Model     → XGBoost/CatBoost (06_temporal_pof_model.py)
+    6. Chronic Classifier     → Identify failure-prone equipment (06_chronic_classifier.py)
     7. Model Explainability   → SHAP feature importance
     8. Probability Calibration → Calibrate risk estimates
     9. Survival Analysis      → Cox PH multi-horizon (3M/6M/12M/24M)
    10. Risk Assessment        → PoF × CoF → CAPEX priority list (all horizons)
 
-OPTIONAL SCRIPTS (run separately):
-    • 04_eda.py - 16 exploratory analyses (for research, not production)
-    • 06b_logistic_baseline.py - Baseline model comparison
+OPTIONAL SCRIPTS (in analysis/ folder):
+    • analysis/exploratory/04_eda.py - 16 exploratory analyses
+    • analysis/diagnostics/06b_logistic_baseline.py - Baseline comparison
 
 Usage:
     python run_pipeline.py
@@ -43,6 +43,9 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import time
+
+# Import validation module for data integrity checks
+from pipeline_validation import validate_step_output, ValidationError
 
 # Pipeline configuration (PRODUCTION-READY - Phase 1 Optimized)
 # NOTE: 04_eda.py is OPTIONAL - run separately for research/analysis
@@ -75,13 +78,13 @@ PIPELINE_STEPS = [
     {
         'step': 5,
         'name': 'Temporal PoF Model',
-        'script': '06_model_training.py',
+        'script': '06_temporal_pof_model.py',
         'description': 'Train temporal PoF predictor (3M/6M/12M/24M windows)'
     },
     {
         'step': 6,
-        'name': 'Chronic Repeater Model',
-        'script': '06_chronic_repeater.py',
+        'name': 'Chronic Classifier',
+        'script': '06_chronic_classifier.py',
         'description': 'Train chronic repeater classifier (90-day recurrence)'
     },
     {
@@ -207,6 +210,22 @@ def run_pipeline():
                 return False
 
             print(f"  ✓ Completed ({step_duration:.1f}s)")
+
+            # Validate output files (for steps that produce data files)
+            if step_num in [2, 3, 4, 5, 6, 9, 10]:  # Steps with data outputs
+                try:
+                    print(f"  → Validating outputs...")
+                    validate_step_output(step_num, check_files=True, verbose=False)
+                    print(f"  ✓ Validation passed")
+                except ValidationError as e:
+                    print(f"  ✗ VALIDATION FAILED: {e}")
+                    print(f"\n❌ Pipeline stopped - data validation failed at step {step_num}")
+                    print(f"   Fix data quality issues before continuing")
+                    return False
+                except Exception as e:
+                    print(f"  ⚠️  Validation warning: {e}")
+                    # Continue anyway - validation issues are warnings, not blockers
+
             print()
 
         except Exception as e:
