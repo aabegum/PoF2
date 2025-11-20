@@ -1,6 +1,6 @@
 """
 ================================================================================
-SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v4.0
+SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v4.1
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
@@ -9,17 +9,27 @@ PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED
 - Historical Window: All data up to 2024-06-25 (for feature calculation)
 - Prediction Window: 2024-06-25 to 2025-06-25 (6M and 12M targets)
 - Dual Prediction Targets: 6-month + 12-month failure risk (EXCELLENT class balance)
-- Features Created: Temporal fault counts (3M/6M/12M), age, MTBF, reliability metrics
+- Features Created: Temporal fault counts (3M/6M/12M), age, MTBF (3 methods), reliability metrics
 - DATA LEAKAGE PREVENTION: All features calculated using data BEFORE cutoff date only
 
 WHAT THIS SCRIPT DOES:
 Transforms fault-level records (1,210 faults) → equipment-level records (789 equipment)
-Creates ~70 features for temporal PoF modeling including:
+Creates ~75 features for temporal PoF modeling including:
 - [6M/12M] Fault history features (3M/6M/12M counts) - PRIMARY prediction drivers
 - [6M/12M] Equipment age and time-to-first-failure - Wear-out pattern detection
-- [6M/12M] MTBF and recurring fault flags - Reliability indicators
+- [6M/12M] MTBF features (3 methods) - Inter-fault, Lifetime, Observable
+- [6M/12M] Degradation indicators - Failure acceleration detection
 - [12M] Geographic clustering - Spatial risk patterns
 - [12M] Customer impact ratios - Criticality scoring
+
+ENHANCEMENTS in v4.1:
++ NEW: 3 MTBF Calculation Methods
+  - Method 1 (MTBF_Gün): Inter-fault average → Best for PoF prediction
+  - Method 2 (MTBF_Lifetime_Gün): Total exposure / failures → Survival analysis baseline hazard
+  - Method 3 (MTBF_Observable_Gün): First fault to cutoff / failures → Degradation detection
++ NEW: Baseline_Hazard_Rate = 1/MTBF_Lifetime → For Cox proportional hazards model
++ NEW: MTBF_Degradation_Ratio = Method3/Method1 → Detects if failures accelerating
++ NEW: Is_Degrading flag → Equipment with ratio >1.5 (failures accelerating)
 
 ENHANCEMENTS in v4.0:
 + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Time Until First Failure)
@@ -37,9 +47,10 @@ CROSS-REFERENCES:
 - Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
 - Script 01: Confirms 100% timestamp coverage + 10/10 data quality
 - Script 03: Uses these features for advanced engineering (PoF risk scores)
+- Script 09 (06_survival_model.py): Uses MTBF_Lifetime_Gün for Cox model
 
 Input:  data/combined_data.xlsx (fault records)
-Output: data/equipment_level_data.csv (equipment records with ~70 features)
+Output: data/equipment_level_data.csv (equipment records with ~75 features)
 """
 
 import pandas as pd
@@ -84,7 +95,7 @@ pd.set_option('display.max_columns', None)
 # CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
-print("SCRIPT 02: DATA TRANSFORMATION v4.0 (OPTION A - DUAL PREDICTIONS)")
+print("SCRIPT 02: DATA TRANSFORMATION v4.1 (OPTION A - DUAL PREDICTIONS)")
 print("="*80)
 print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR} | Work Order Fallback: {'ON' if USE_FIRST_WORKORDER_FALLBACK else 'OFF'}")
 
@@ -768,6 +779,91 @@ def calculate_mtbf_safe(equipment_id):
 print("  Calculating MTBF (using failures BEFORE cutoff only - leakage-safe)...")
 equipment_df['MTBF_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_safe)
 
+# METHOD 2: MTBF Lifetime (Total Exposure / Failures) - For Survival Analysis
+def calculate_mtbf_lifetime(equipment_id):
+    """
+    Method 2: Calculate MTBF using total exposure time
+    MTBF_Lifetime = (Cutoff - Installation) / N_Faults
+
+    Use case: Survival analysis baseline hazard rate
+    - Exposure-weighted risk calculation
+    - Proportional hazards framework
+    - Censoring-aware models
+    """
+    # Get installation date
+    install_row = equipment_df[equipment_df['Ekipman_ID'] == equipment_id]
+    if len(install_row) == 0:
+        return None
+
+    install_date = install_row['Ekipman_Kurulum_Tarihi'].iloc[0]
+
+    if pd.isna(install_date):
+        return None
+
+    # Count faults before cutoff
+    num_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ].shape[0]
+
+    if num_faults == 0:
+        return None  # No failures, MTBF undefined
+
+    total_days = (REFERENCE_DATE - install_date).days
+
+    if total_days > 0:
+        return total_days / num_faults
+
+    return None
+
+print("  Calculating MTBF Lifetime (Method 2: for survival analysis)...")
+equipment_df['MTBF_Lifetime_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_lifetime)
+
+# Baseline hazard rate (inverse of MTBF)
+equipment_df['Baseline_Hazard_Rate'] = 1 / equipment_df['MTBF_Lifetime_Gün']
+
+# METHOD 3: MTBF Observable (First Fault to Cutoff / Failures) - Degradation Detection
+def calculate_mtbf_observable(equipment_id):
+    """
+    Method 3: Calculate MTBF from first fault to cutoff
+    MTBF_Observable = (Cutoff - First_Fault) / N_Faults
+
+    Use case: Degradation trend detection
+    - Compare with Method 1 to detect if failures accelerating
+    - Ratio > 1.5 = Degrading (recent MTBF shorter)
+    - Ratio < 0.8 = Improving (recent MTBF longer)
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna().sort_values()
+
+    if len(equip_faults) < 2:
+        return None
+
+    first_fault = equip_faults.iloc[0]
+    observable_days = (REFERENCE_DATE - first_fault).days
+    num_faults = len(equip_faults)
+
+    if observable_days > 0:
+        return observable_days / num_faults
+
+    return None
+
+print("  Calculating MTBF Observable (Method 3: for degradation detection)...")
+equipment_df['MTBF_Observable_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_observable)
+
+# Degradation ratio (Method 3 / Method 1)
+# Ratio > 1.0 means failures are accelerating (recent MTBF shorter than historical)
+equipment_df['MTBF_Degradation_Ratio'] = (
+    equipment_df['MTBF_Observable_Gün'] / equipment_df['MTBF_Gün']
+)
+
+# Flag degrading equipment (failures accelerating)
+equipment_df['Is_Degrading'] = (
+    equipment_df['MTBF_Degradation_Ratio'] > 1.5
+).fillna(False).astype(int)
+
 # 🔧 FIX: Calculate last failure date using ONLY failures BEFORE cutoff (no leakage)
 def calculate_last_failure_date_safe(equipment_id):
     """
@@ -819,11 +915,19 @@ equipment_df['Ilk_Arizaya_Kadar_Yil'] = equipment_df['Ilk_Arizaya_Kadar_Gun'] / 
 
 # Summary statistics
 mtbf_valid = equipment_df['MTBF_Gün'].notna().sum()
+mtbf_lifetime_valid = equipment_df['MTBF_Lifetime_Gün'].notna().sum()
+mtbf_observable_valid = equipment_df['MTBF_Observable_Gün'].notna().sum()
+degrading_count = equipment_df['Is_Degrading'].sum()
 ttff_valid = equipment_df['Ilk_Arizaya_Kadar_Gun'].notna().sum()
 ttff_mean = equipment_df['Ilk_Arizaya_Kadar_Yil'].mean()
 infant_mortality = (equipment_df['Ilk_Arizaya_Kadar_Gun'] < 365).sum()  # Failed within 1 year
 
-print(f"MTBF: {mtbf_valid:,}/{len(equipment_df):,} valid | Time-to-First-Failure: {ttff_valid:,}/{len(equipment_df):,} valid (avg {ttff_mean:.1f}y, infant mortality: {infant_mortality})")
+print(f"\nMTBF Statistics:")
+print(f"  Method 1 (Inter-Fault): {mtbf_valid:,}/{len(equipment_df):,} valid ({mtbf_valid/len(equipment_df)*100:.1f}%)")
+print(f"  Method 2 (Lifetime): {mtbf_lifetime_valid:,}/{len(equipment_df):,} valid ({mtbf_lifetime_valid/len(equipment_df)*100:.1f}%)")
+print(f"  Method 3 (Observable): {mtbf_observable_valid:,}/{len(equipment_df):,} valid ({mtbf_observable_valid/len(equipment_df)*100:.1f}%)")
+print(f"  Degrading equipment: {degrading_count:,} ({degrading_count/len(equipment_df)*100:.1f}%) - failures accelerating")
+print(f"  Time-to-First-Failure: {ttff_valid:,}/{len(equipment_df):,} valid (avg {ttff_mean:.1f}y, infant mortality: {infant_mortality})")
 
 # ============================================================================
 # STEP 11: DETECT RECURRING FAULTS
@@ -1004,12 +1108,20 @@ print(f"\nKEY FEATURES FOR DUAL PREDICTIONS (6M + 12M):")
 print(f"  [6M/12M] Fault History: 3M/6M/12M counts (PRIMARY prediction drivers)")
 print(f"  [6M/12M] Equipment Age: Day-precision ({equipment_df['Yaş_Kaynak'].value_counts().to_dict()})")
 print(f"  [6M/12M] NEW: Time-to-First-Failure (avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality)")
-print(f"  [6M/12M] MTBF: {equipment_df['MTBF_Gün'].notna().sum():,} valid | Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} flagged")
+print(f"  [6M/12M] MTBF Features (3 methods):")
+print(f"    • Method 1 (Inter-Fault): {mtbf_valid:,} valid - PoF prediction")
+print(f"    • Method 2 (Lifetime): {mtbf_lifetime_valid:,} valid - Survival analysis baseline hazard")
+print(f"    • Method 3 (Observable): {mtbf_observable_valid:,} valid - Degradation detection")
+print(f"    • Degrading equipment: {degrading_count:,} flagged (failures accelerating)")
+print(f"  [6M/12M] Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} chronic repeaters flagged")
 print(f"  [12M] Customer Impact Ratios: {len([col for col in customer_impact_cols if any(col.replace(' ', '_') in c for c in equipment_df.columns)])} features")
 print(f"  [12M] Equipment Classification: {harmonized_classes} standardized classes")
 
-print(f"\nENHANCEMENTS IN v4.0:")
-print(f"  + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Installation → First Fault)")
+print(f"\nENHANCEMENTS IN v4.1:")
+print(f"  + NEW: 3 MTBF calculation methods (Inter-Fault, Lifetime, Observable)")
+print(f"  + NEW: Baseline_Hazard_Rate feature (for Cox survival analysis)")
+print(f"  + NEW: MTBF_Degradation_Ratio + Is_Degrading flag (failure acceleration detection)")
+print(f"  + NEW: Time-to-First-Failure (Ilk_Arizaya_Kadar_Gun/Yil)")
 print(f"  + OPTION A Context: Dual prediction strategy (6M: 26.9%, 12M: 44.2% positive class)")
 print(f"  + Feature Importance Tags: [6M/12M] markers for model relevance")
 print(f"  + Reduced Verbosity: ~60% fewer print statements")
