@@ -9,12 +9,12 @@ PIPELINE FLOW (10 STEPS):
     2. Data Transformation    → Fault → Equipment level (1,210 → 789)
     3. Feature Engineering    → Create 30 optimal features
     4. Feature Selection      → Leakage removal + VIF (merged: includes 05b)
-    5. Temporal PoF Model     → XGBoost/CatBoost 6M/12M predictions
+    5. Temporal PoF Model     → XGBoost/CatBoost multi-horizon (3M/6M/12M/24M)
     6. Chronic Repeater Model → Identify failure-prone equipment
     7. Model Explainability   → SHAP feature importance
     8. Probability Calibration → Calibrate risk estimates
-    9. Survival Analysis      → Cox PH multi-horizon (3M/12M/24M)
-   10. Risk Assessment        → PoF × CoF → CAPEX priority list
+    9. Survival Analysis      → Cox PH multi-horizon (3M/6M/12M/24M)
+   10. Risk Assessment        → PoF × CoF → CAPEX priority list (all horizons)
 
 OPTIONAL SCRIPTS (run separately):
     • 04_eda.py - 16 exploratory analyses (for research, not production)
@@ -69,7 +69,7 @@ PIPELINE_STEPS = [
         'step': 5,
         'name': 'Temporal PoF Model',
         'script': '06_model_training.py',
-        'description': 'Train temporal PoF predictor (6M/12M windows)'
+        'description': 'Train temporal PoF predictor (3M/6M/12M/24M windows)'
     },
     {
         'step': 6,
@@ -93,7 +93,7 @@ PIPELINE_STEPS = [
         'step': 9,
         'name': 'Survival Analysis',
         'script': '09_survival_analysis.py',
-        'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/12M/24M)'
+        'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/6M/12M/24M)'
     },
     {
         'step': 10,
@@ -244,12 +244,15 @@ def run_pipeline():
         f.write("    • data/features_engineered.csv - Engineered features (30 features)\n")
         f.write("    • data/features_reduced.csv - Final feature set (25-30 features)\n\n")
         f.write("  PREDICTIONS:\n")
+        f.write("    • predictions/predictions_3m.csv - 3-month temporal PoF\n")
         f.write("    • predictions/predictions_6m.csv - 6-month temporal PoF\n")
         f.write("    • predictions/predictions_12m.csv - 12-month temporal PoF\n")
+        f.write("    • predictions/predictions_24m.csv - 24-month temporal PoF\n")
         f.write("    • predictions/chronic_repeaters.csv - Chronic repeater classifications\n")
         f.write("    • predictions/pof_multi_horizon_predictions.csv - Multi-horizon survival\n\n")
         f.write("  RISK ASSESSMENT:\n")
         f.write("    • results/risk_assessment_3M.csv - 3-month risk scores\n")
+        f.write("    • results/risk_assessment_6M.csv - 6-month risk scores\n")
         f.write("    • results/risk_assessment_12M.csv - 12-month risk scores\n")
         f.write("    • results/risk_assessment_24M.csv - 24-month risk scores\n")
         f.write("    • results/capex_priority_list.csv - Top 100 CAPEX priorities\n\n")
@@ -296,12 +299,12 @@ def run_pipeline():
     print("     • data/features_reduced.csv (25-30 features)")
     print()
     print("   PREDICTIONS:")
-    print("     • predictions/predictions_6m.csv, predictions_12m.csv")
+    print("     • predictions/predictions_*.csv (3M, 6M, 12M, 24M)")
     print("     • predictions/chronic_repeaters.csv")
     print("     • predictions/pof_multi_horizon_predictions.csv")
     print()
     print("   RISK & CAPEX:")
-    print("     • results/risk_assessment_3M.csv, 12M.csv, 24M.csv")
+    print("     • results/risk_assessment_*.csv (3M, 6M, 12M, 24M)")
     print("     • results/capex_priority_list.csv (Top 100)")
     print()
     print("   MODELS & VISUALIZATIONS:")

@@ -30,6 +30,7 @@ Input:
 
 Output:
 - results/risk_assessment_3M.csv (Equipment ID, PoF, CoF, Risk, Priority)
+- results/risk_assessment_6M.csv
 - results/risk_assessment_12M.csv
 - results/risk_assessment_24M.csv
 - results/capex_priority_list.csv (Top 100 equipment for replacement)
@@ -71,9 +72,9 @@ if sys.platform == 'win32':
 warnings.filterwarnings('ignore')
 
 # Configuration (from config.py): RANDOM_STATE, CUTOFF_DATE, HORIZONS
-# Horizons imported from config.py (6M: 180 days, 12M: 365 days, 24M: 730 days)
-# For CoF analysis, we use string keys: '3M', '12M', '24M'
-COF_HORIZONS = ['3M', '12M', '24M']  # CoF-specific horizon labels
+# Horizons imported from config.py (3M: 90, 6M: 180, 12M: 365, 24M: 730 days)
+# For CoF analysis, we use the same horizon keys from config
+COF_HORIZONS = list(HORIZONS.keys())  # ['3M', '6M', '12M', '24M']
 REFERENCE_DATE = CUTOFF_DATE
 
 # Critical customer multipliers (can be customized)
