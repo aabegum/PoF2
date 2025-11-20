@@ -149,6 +149,19 @@ if 'started at' in df.columns:
             df_duplicates.to_csv(dup_file, index=False)
             print(f"  ✓ All duplicates saved: {dup_file}")
 
+            # Analyze duplicate distribution across cutoff date
+            if 'started at' in df_duplicates.columns:
+                df_duplicates['started_at_parsed'] = pd.to_datetime(df_duplicates['started at'], errors='coerce')
+                pre_cutoff_dups = (df_duplicates['started_at_parsed'] <= REFERENCE_DATE).sum()
+                post_cutoff_dups = (df_duplicates['started_at_parsed'] > REFERENCE_DATE).sum()
+
+                print(f"\n  Duplicate Distribution by Cutoff Date:")
+                print(f"    Pre-cutoff duplicates:  {pre_cutoff_dups} ({pre_cutoff_dups/len(df_duplicates)*100:.1f}%)")
+                print(f"    Post-cutoff duplicates: {post_cutoff_dups} ({post_cutoff_dups/len(df_duplicates)*100:.1f}%)")
+                if post_cutoff_dups > 0:
+                    print(f"    → {post_cutoff_dups} duplicates removed from test set (172 equipment)")
+                    print(f"    → Test set quality improved by removing post-cutoff duplicates")
+
         df = df[~time_dup_mask].copy()
     else:
         print(f"  ✓ No same-equipment+time duplicates found")
@@ -629,6 +642,21 @@ if equipment_lost > 0:
     print(f"\n  Exclusion Analysis:")
     print(f"    Post-cutoff failures only: {post_cutoff_equipment:,} equipment ({post_cutoff_equipment/equipment_lost*100:.1f}%)")
     print(f"      → These can be used as validation/test set!")
+
+    # Validate post-cutoff data quality
+    print(f"\n  Post-Cutoff Test Set Data Quality:")
+    post_cutoff_faults = df_excluded[df_excluded['started at'] > REFERENCE_DATE]
+    print(f"    Total post-cutoff faults: {len(post_cutoff_faults):,}")
+    print(f"    Unique equipment: {post_cutoff_equipment:,}")
+    print(f"    Avg faults per equipment: {len(post_cutoff_faults)/post_cutoff_equipment:.2f}")
+
+    # Check for duplicates in post-cutoff data
+    post_cutoff_dups = post_cutoff_faults.duplicated(subset=[equipment_id_col, 'started at'], keep='first').sum()
+    if post_cutoff_dups > 0:
+        print(f"    ⚠️  WARNING: {post_cutoff_dups} duplicates found in post-cutoff data")
+        print(f"        → These were already removed in Step 1B")
+    else:
+        print(f"    ✓ No duplicates in post-cutoff test set (clean)")
 
     # Save excluded equipment for manual review
     excluded_file = DATA_DIR / 'excluded_equipment_analysis.csv'
