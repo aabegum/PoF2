@@ -46,6 +46,7 @@ import sys
 from config import (
     INPUT_FILE,
     FEATURES_REDUCED_FILE,
+    EQUIPMENT_LEVEL_FILE,
     MODEL_DIR,
     PREDICTION_DIR,
     OUTPUT_DIR,
