@@ -131,19 +131,21 @@ PROTECTED_FEATURES = [
     'Yas_Beklenen_Omur_Orani',     # Age as % of expected life
     'Beklenen_Ömür_Yıl',           # Expected equipment lifetime
 
-    # TIER 3: Failure History - Temporal (5 features)
+    # TIER 3: Failure History - Temporal (4 features)
+    # NOTE: Toplam_Arıza_Sayisi_Lifetime REMOVED - data leakage (directly used to create target)
     'Son_Arıza_Gun_Sayisi',        # Days since last failure (recency)
     'Ilk_Arizaya_Kadar_Yil',       # Years until first failure
-    'Toplam_Arıza_Sayisi_Lifetime', # Total lifetime faults
     'Time_To_Repair_Hours_mean',   # Average repair time
     'Time_To_Repair_Hours_max',    # Maximum repair time
 
-    # TIER 4: MTBF & Reliability (5 features)
-    'MTBF_InterFault_Gün',         # Mean time between consecutive faults
-    'MTBF_Lifetime_Gün',           # Overall reliability quality
-    'MTBF_ActiveLife_Gün',         # Post-activation reliability
-    'MTBF_InterFault_Trend',       # Degradation detector (NEW - TIER 3 enhancement)
-    'MTBF_InterFault_StdDev',      # Predictability measure (NEW - TIER 3 enhancement)
+    # TIER 4: MTBF & Reliability (7 features - v4.1 enhancements)
+    'MTBF_Gün',                    # Method 1: Inter-fault MTBF (PRIMARY PoF predictor)
+    'MTBF_Lifetime_Gün',           # Method 2: Lifetime MTBF (survival analysis baseline)
+    'MTBF_Observable_Gün',         # Method 3: Observable MTBF (degradation detection)
+    'Baseline_Hazard_Rate',        # 1/MTBF_Lifetime - Cox model hazard covariate
+    'MTBF_Degradation_Ratio',      # Method3/Method1 - detects failure acceleration
+    'MTBF_InterFault_Trend',       # Degradation detector (proxy using recent faults)
+    'MTBF_InterFault_StdDev',      # Predictability measure (variance proxy)
 
     # TIER 5: Failure Cause Patterns (4 features)
     'Arıza_Nedeni_Çeşitlilik',     # Number of different fault causes
