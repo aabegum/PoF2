@@ -22,11 +22,11 @@ CUTOFF_DATE = pd.Timestamp('2024-06-25')
 REFERENCE_DATE = CUTOFF_DATE  # Alias for backward compatibility
 
 # Prediction Horizons (days)
+# NOTE: 24M removed - data only extends to 12M (only +3 equipment beyond 12M in training set)
 HORIZONS = {
     '3M': 90,    # 3 months
     '6M': 180,   # 6 months
-    '12M': 365,  # 12 months
-    '24M': 730   # 24 months
+    '12M': 365   # 12 months
 }
 
 # Date Validation

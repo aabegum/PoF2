@@ -207,6 +207,25 @@ all_faults['started at'] = pd.to_datetime(all_faults['started at'],
                                            dayfirst=True,  # Turkish DD-MM-YYYY format
                                            errors='coerce')
 
+# CRITICAL: Load equipment ID mapping to ensure consistency
+# Step 2 transforms cbs_id → Equipment_ID_Primary → Ekipman_ID
+# We need to use Ekipman_ID (from features) not cbs_id (from raw faults)
+print("✓ Loading equipment ID mapping from equipment_level_data.csv...")
+equipment_mapping = pd.read_csv(EQUIPMENT_LEVEL_FILE)
+
+# Create ID mapping: cbs_id → Ekipman_ID
+# In Step 2, Equipment_ID_Primary is created from cbs_id (or fallback)
+# Then renamed to Ekipman_ID in final output
+if 'Ekipman_ID' in equipment_mapping.columns:
+    # Map raw faults to processed Ekipman_IDs
+    # Since Ekipman_ID = cbs_id for most equipment, we can use direct mapping
+    # But we need to verify this mapping exists in our feature data
+    valid_equipment_ids = set(df['Ekipman_ID'].unique())
+    print(f"✓ Loaded {len(valid_equipment_ids):,} valid Ekipman_IDs from feature data")
+else:
+    print("⚠️  WARNING: Ekipman_ID not found in equipment mapping!")
+    valid_equipment_ids = set()
+
 # Define future prediction windows for ALL horizons
 FUTURE_3M_END = CUTOFF_DATE + pd.DateOffset(months=3)   # 2024-09-25
 FUTURE_6M_END = CUTOFF_DATE + pd.DateOffset(months=6)   # 2024-12-25
@@ -221,31 +240,46 @@ print(f"   12M window:    {CUTOFF_DATE.date()} → {FUTURE_12M_END.date()}")
 print(f"   24M window:    {CUTOFF_DATE.date()} → {FUTURE_24M_END.date()}")
 
 # Identify equipment that WILL FAIL in each future window
-future_faults_3M = all_faults[
+# IMPORTANT: Use cbs_id from raw faults, but filter to only valid Ekipman_IDs
+future_faults_3M_raw = all_faults[
     (all_faults['started at'] > CUTOFF_DATE) &
     (all_faults['started at'] <= FUTURE_3M_END)
 ]['cbs_id'].dropna().unique()
 
-future_faults_6M = all_faults[
+future_faults_6M_raw = all_faults[
     (all_faults['started at'] > CUTOFF_DATE) &
     (all_faults['started at'] <= FUTURE_6M_END)
 ]['cbs_id'].dropna().unique()
 
-future_faults_12M = all_faults[
+future_faults_12M_raw = all_faults[
     (all_faults['started at'] > CUTOFF_DATE) &
     (all_faults['started at'] <= FUTURE_12M_END)
 ]['cbs_id'].dropna().unique()
 
-future_faults_24M = all_faults[
+future_faults_24M_raw = all_faults[
     (all_faults['started at'] > CUTOFF_DATE) &
     (all_faults['started at'] <= FUTURE_24M_END)
 ]['cbs_id'].dropna().unique()
 
+# Filter to only equipment that exist in our feature data
+# This ensures target-feature alignment (critical!)
+future_faults_3M = np.array([id for id in future_faults_3M_raw if id in valid_equipment_ids])
+future_faults_6M = np.array([id for id in future_faults_6M_raw if id in valid_equipment_ids])
+future_faults_12M = np.array([id for id in future_faults_12M_raw if id in valid_equipment_ids])
+future_faults_24M = np.array([id for id in future_faults_24M_raw if id in valid_equipment_ids])
+
 print(f"\n   Equipment that WILL fail in future:")
-print(f"      3M window:  {len(future_faults_3M):,} equipment")
-print(f"      6M window:  {len(future_faults_6M):,} equipment")
-print(f"      12M window: {len(future_faults_12M):,} equipment")
-print(f"      24M window: {len(future_faults_24M):,} equipment")
+print(f"      3M window:  {len(future_faults_3M_raw):,} raw → {len(future_faults_3M):,} valid ({len(future_faults_3M)/max(len(future_faults_3M_raw),1)*100:.1f}% matched)")
+print(f"      6M window:  {len(future_faults_6M_raw):,} raw → {len(future_faults_6M):,} valid ({len(future_faults_6M)/max(len(future_faults_6M_raw),1)*100:.1f}% matched)")
+print(f"      12M window: {len(future_faults_12M_raw):,} raw → {len(future_faults_12M):,} valid ({len(future_faults_12M)/max(len(future_faults_12M_raw),1)*100:.1f}% matched)")
+print(f"      24M window: {len(future_faults_24M_raw):,} raw → {len(future_faults_24M):,} valid ({len(future_faults_24M)/max(len(future_faults_24M_raw),1)*100:.1f}% matched)")
+
+# Check for ID mismatch
+unmatched_3M = len(future_faults_3M_raw) - len(future_faults_3M)
+if unmatched_3M > 0:
+    print(f"\n   ⚠️  WARNING: {unmatched_3M} equipment IDs from faults NOT found in feature data!")
+    print(f"      These equipment will be excluded from target creation")
+    print(f"      Common causes: Missing cbs_id, excluded in Step 2 filtering")
 
 # Create binary targets
 print("\n--- Creating Binary Temporal Targets ---")
