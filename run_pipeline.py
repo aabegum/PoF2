@@ -1,8 +1,24 @@
 """
-POF2 PIPELINE RUNNER WITH LOGGING
+POF2 PIPELINE RUNNER WITH LOGGING v2.0
 Turkish EDAŞ Equipment Failure Prediction Pipeline
 
-This script runs the entire PoF2 pipeline and captures all outputs to log files.
+This script runs the entire production-ready PoF2 pipeline and captures all outputs.
+
+PIPELINE FLOW (10 STEPS):
+    1. Data Profiling         → Validate data quality
+    2. Data Transformation    → Fault → Equipment level (1,210 → 789)
+    3. Feature Engineering    → Create 30 optimal features
+    4. Feature Selection      → Leakage removal + VIF (merged: includes 05b)
+    5. Temporal PoF Model     → XGBoost/CatBoost 6M/12M predictions
+    6. Chronic Repeater Model → Identify failure-prone equipment
+    7. Model Explainability   → SHAP feature importance
+    8. Probability Calibration → Calibrate risk estimates
+    9. Survival Analysis      → Cox PH multi-horizon (3M/12M/24M)
+   10. Risk Assessment        → PoF × CoF → CAPEX priority list
+
+OPTIONAL SCRIPTS (run separately):
+    • 04_eda.py - 16 exploratory analyses (for research, not production)
+    • 06b_logistic_baseline.py - Baseline model comparison
 
 Usage:
     python run_pipeline.py
@@ -11,6 +27,8 @@ Output:
     - Individual log files for each step in logs/run_TIMESTAMP/
     - Master log file with all outputs combined
     - Summary report with execution times
+    - Risk assessment and CAPEX priority CSVs
+    - Model files and prediction CSVs
 """
 
 import subprocess
@@ -19,61 +37,69 @@ from pathlib import Path
 from datetime import datetime
 import time
 
-# Pipeline configuration
+# Pipeline configuration (PRODUCTION-READY - Phase 1 Optimized)
+# NOTE: 04_eda.py is OPTIONAL - run separately for research/analysis
+# NOTE: 06b_logistic_baseline.py is OPTIONAL - baseline comparison only
 PIPELINE_STEPS = [
     {
         'step': 1,
         'name': 'Data Profiling',
         'script': '01_data_profiling.py',
-        'description': 'Loading and profiling raw fault data'
+        'description': 'Validate data quality and temporal coverage'
     },
     {
         'step': 2,
         'name': 'Data Transformation',
         'script': '02_data_transformation.py',
-        'description': 'Transforming to equipment-level data'
+        'description': 'Transform fault-level → equipment-level (1,210 → 789)'
     },
     {
         'step': 3,
         'name': 'Feature Engineering',
         'script': '03_feature_engineering.py',
-        'description': 'Creating failure prediction features'
+        'description': 'Create optimal 30-feature set (TIER 1-8)'
     },
     {
         'step': 4,
-        'name': 'Exploratory Data Analysis',
-        'script': '04_eda.py',
-        'description': 'Analyzing all features (16 analyses)'
+        'name': 'Feature Selection',
+        'script': '05_feature_selection.py',
+        'description': 'Leakage removal + VIF analysis (30 → 25-30 features)'
     },
     {
         'step': 5,
-        'name': 'Feature Selection',
-        'script': '05_feature_selection.py',
-        'description': 'Selecting relevant features for modeling'
+        'name': 'Temporal PoF Model',
+        'script': '06_model_training.py',
+        'description': 'Train temporal PoF predictor (6M/12M windows)'
     },
     {
         'step': 6,
-        'name': 'Remove Leaky Features',
-        'script': '05b_remove_leaky_features.py',
-        'description': 'Removing features with data leakage'
+        'name': 'Chronic Repeater Model',
+        'script': '06_chronic_repeater.py',
+        'description': 'Train chronic repeater classifier (90-day recurrence)'
     },
     {
         'step': 7,
-        'name': 'Model Training (Model 2)',
-        'script': '06_model_training.py',
-        'description': 'Training chronic repeater classifier'
+        'name': 'Model Explainability',
+        'script': '07_explainability.py',
+        'description': 'SHAP analysis and feature importance'
     },
     {
         'step': 8,
-        'name': 'Survival Analysis (Model 1)',
-        'script': '09_survival_analysis.py',
-        'description': 'Training temporal PoF predictor'
+        'name': 'Probability Calibration',
+        'script': '08_calibration.py',
+        'description': 'Calibrate model probabilities for better risk estimates'
     },
     {
         'step': 9,
+        'name': 'Survival Analysis',
+        'script': '09_survival_analysis.py',
+        'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/12M/24M)'
+    },
+    {
+        'step': 10,
         'name': 'Risk Assessment',
         'script': '10_consequence_of_failure.py',
-        'description': 'Calculating CoF and Risk scores'
+        'description': 'Calculate PoF × CoF = Risk, generate CAPEX priority list'
     }
 ]
 
@@ -213,14 +239,27 @@ def run_pipeline():
         f.write("-"*100 + "\n\n")
 
         f.write("OUTPUT FILES GENERATED:\n")
-        f.write("  • results/risk_assessment_3M.csv\n")
-        f.write("  • results/risk_assessment_12M.csv\n")
-        f.write("  • results/risk_assessment_24M.csv\n")
-        f.write("  • results/capex_priority_list.csv\n")
-        f.write("  • outputs/eda/*.png (16 EDA visualizations)\n")
-        f.write("  • outputs/risk_analysis/*.png (6 risk visualizations)\n")
-        f.write("  • models/* (trained models)\n")
-        f.write("  • predictions/* (PoF predictions)\n\n")
+        f.write("  DATA OUTPUTS:\n")
+        f.write("    • data/equipment_level_data.csv - Equipment-level dataset (789 records)\n")
+        f.write("    • data/features_engineered.csv - Engineered features (30 features)\n")
+        f.write("    • data/features_reduced.csv - Final feature set (25-30 features)\n\n")
+        f.write("  PREDICTIONS:\n")
+        f.write("    • predictions/predictions_6m.csv - 6-month temporal PoF\n")
+        f.write("    • predictions/predictions_12m.csv - 12-month temporal PoF\n")
+        f.write("    • predictions/chronic_repeaters.csv - Chronic repeater classifications\n")
+        f.write("    • predictions/pof_multi_horizon_predictions.csv - Multi-horizon survival\n\n")
+        f.write("  RISK ASSESSMENT:\n")
+        f.write("    • results/risk_assessment_3M.csv - 3-month risk scores\n")
+        f.write("    • results/risk_assessment_12M.csv - 12-month risk scores\n")
+        f.write("    • results/risk_assessment_24M.csv - 24-month risk scores\n")
+        f.write("    • results/capex_priority_list.csv - Top 100 CAPEX priorities\n\n")
+        f.write("  MODELS:\n")
+        f.write("    • models/*.pkl - Trained XGBoost/CatBoost models\n\n")
+        f.write("  VISUALIZATIONS:\n")
+        f.write("    • outputs/feature_selection/*.png - Feature selection analysis\n")
+        f.write("    • outputs/explainability/*.png - SHAP visualizations\n")
+        f.write("    • outputs/calibration/*.png - Calibration curves\n")
+        f.write("    • outputs/survival/*.png - Kaplan-Meier curves\n\n")
 
         f.write("LOG FILES:\n")
         f.write(f"  • Individual logs: {log_dir}/*.log\n")
@@ -250,11 +289,24 @@ def run_pipeline():
     print(f"   • Master log: {master_log_path}")
     print(f"   • Summary: {summary_path}")
     print()
-    print("📊 OUTPUT FILES:")
-    print("   • results/risk_assessment_*.csv")
-    print("   • results/capex_priority_list.csv")
-    print("   • outputs/eda/*.png")
-    print("   • outputs/risk_analysis/*.png")
+    print("📊 KEY OUTPUT FILES:")
+    print("   DATA:")
+    print("     • data/equipment_level_data.csv (789 records)")
+    print("     • data/features_engineered.csv (30 features)")
+    print("     • data/features_reduced.csv (25-30 features)")
+    print()
+    print("   PREDICTIONS:")
+    print("     • predictions/predictions_6m.csv, predictions_12m.csv")
+    print("     • predictions/chronic_repeaters.csv")
+    print("     • predictions/pof_multi_horizon_predictions.csv")
+    print()
+    print("   RISK & CAPEX:")
+    print("     • results/risk_assessment_3M.csv, 12M.csv, 24M.csv")
+    print("     • results/capex_priority_list.csv (Top 100)")
+    print()
+    print("   MODELS & VISUALIZATIONS:")
+    print("     • models/*.pkl")
+    print("     • outputs/*/*.png")
     print()
 
     return True
