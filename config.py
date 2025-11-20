@@ -23,9 +23,10 @@ REFERENCE_DATE = CUTOFF_DATE  # Alias for backward compatibility
 
 # Prediction Horizons (days)
 HORIZONS = {
+    '3M': 90,    # 3 months
     '6M': 180,   # 6 months
     '12M': 365,  # 12 months
-    '24M': 730   # 24 months (optional)
+    '24M': 730   # 24 months
 }
 
 # Date Validation

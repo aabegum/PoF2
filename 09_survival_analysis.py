@@ -89,11 +89,12 @@ print("="*100)
 
 REFERENCE_DATE = CUTOFF_DATE  # Use cutoff date as analysis reference
 
-# Horizons imported from config.py (6M: 180, 12M: 365, etc.)
+# Horizons imported from config.py (3M: 90, 6M: 180, 12M: 365, 24M: 730 days)
 
 # Risk thresholds (probability of failure)
 RISK_THRESHOLDS = {
     '3M': 0.40,   # >= 40% probability in 3 months → High risk
+    '6M': 0.50,   # >= 50% probability in 6 months → High risk
     '12M': 0.60,  # >= 60% probability in 12 months → High risk
     '24M': 0.75   # >= 75% probability in 24 months → High risk
 }

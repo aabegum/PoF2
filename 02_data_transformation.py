@@ -316,110 +316,77 @@ else:
     df['Oluşturulma_Tarihi'] = pd.NaT
 
 # ============================================================================
-# STEP 3: ENHANCED EQUIPMENT AGE CALCULATION
+# STEP 3: SIMPLIFIED EQUIPMENT AGE CALCULATION
 # ============================================================================
-print("\n[Step 3/12] Calculating Equipment Age (Day Precision, TESIS→EDBS Priority)...")
+# OPTIMIZED: Single calculation instead of creating TESIS/EDBS variants
+# Reduces from 6 age columns → 2 age columns (Ekipman_Yaşı_Gün, Ekipman_Yaşı_Yıl)
+print("\n[Step 3/12] Calculating Equipment Age (TESIS→EDBS→WORKORDER Priority)...")
 
-def calculate_age_tesis_priority(row):
+def calculate_equipment_age(row):
     """
-    Calculate age with TESIS_TARIHI as PRIMARY (commissioning/database entry date)
-    Priority: TESIS_TARIHI → EDBS_IDATE → Work Order
+    Calculate equipment age with single priority chain.
+    Priority: TESIS_TARIHI → EDBS_IDATE → Work Order (if enabled)
+    Returns: (age_days, source, installation_date)
     """
     ref_date = REFERENCE_DATE
 
+    # Priority 1: TESIS_TARIHI (commissioning/database entry date)
     if pd.notna(row['TESIS_TARIHI_parsed']) and row['TESIS_TARIHI_parsed'] < ref_date:
         age_days = (ref_date - row['TESIS_TARIHI_parsed']).days
         return age_days, 'TESIS', row['TESIS_TARIHI_parsed']
 
+    # Priority 2: EDBS_IDATE (physical installation date)
     if pd.notna(row['EDBS_IDATE_parsed']) and row['EDBS_IDATE_parsed'] < ref_date:
         age_days = (ref_date - row['EDBS_IDATE_parsed']).days
         return age_days, 'EDBS', row['EDBS_IDATE_parsed']
 
+    # Priority 3: Missing (will be filled by work order if enabled)
     return None, 'MISSING', None
 
-def calculate_age_edbs_priority(row):
-    """
-    Calculate age with EDBS_IDATE as PRIMARY (physical installation date)
-    Priority: EDBS_IDATE → TESIS_TARIHI → Work Order
-    """
-    ref_date = REFERENCE_DATE
+# Calculate age using single priority function
+results = df.apply(calculate_equipment_age, axis=1, result_type='expand')
+results.columns = ['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']
+df[['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']] = results
 
-    if pd.notna(row['EDBS_IDATE_parsed']) and row['EDBS_IDATE_parsed'] < ref_date:
-        age_days = (ref_date - row['EDBS_IDATE_parsed']).days
-        return age_days, 'EDBS', row['EDBS_IDATE_parsed']
-
-    if pd.notna(row['TESIS_TARIHI_parsed']) and row['TESIS_TARIHI_parsed'] < ref_date:
-        age_days = (ref_date - row['TESIS_TARIHI_parsed']).days
-        return age_days, 'TESIS', row['TESIS_TARIHI_parsed']
-
-    return None, 'MISSING', None
-
-# Calculate TESIS-primary age (commissioning age)
-results_tesis = df.apply(calculate_age_tesis_priority, axis=1, result_type='expand')
-results_tesis.columns = ['Ekipman_Yaşı_Gün_TESIS', 'Yaş_Kaynak_TESIS', 'Kurulum_Tarihi_TESIS']
-df[['Ekipman_Yaşı_Gün_TESIS', 'Yaş_Kaynak_TESIS', 'Kurulum_Tarihi_TESIS']] = results_tesis
-df['Ekipman_Yaşı_Yıl_TESIS'] = df['Ekipman_Yaşı_Gün_TESIS'] / 365.25
-
-# Calculate EDBS-primary age (installation age)
-results_edbs = df.apply(calculate_age_edbs_priority, axis=1, result_type='expand')
-results_edbs.columns = ['Ekipman_Yaşı_Gün_EDBS', 'Yaş_Kaynak_EDBS', 'Kurulum_Tarihi_EDBS']
-df[['Ekipman_Yaşı_Gün_EDBS', 'Yaş_Kaynak_EDBS', 'Kurulum_Tarihi_EDBS']] = results_edbs
-df['Ekipman_Yaşı_Yıl_EDBS'] = df['Ekipman_Yaşı_Gün_EDBS'] / 365.25
-
-# Create primary age columns (default to TESIS)
-df['Ekipman_Yaşı_Gün'] = df['Ekipman_Yaşı_Gün_TESIS']
-df['Ekipman_Yaşı_Yıl'] = df['Ekipman_Yaşı_Yıl_TESIS']
-df['Yaş_Kaynak'] = df['Yaş_Kaynak_TESIS']
-df['Ekipman_Kurulum_Tarihi'] = df['Kurulum_Tarihi_TESIS']
+# Convert days to years
+df['Ekipman_Yaşı_Yıl'] = df['Ekipman_Yaşı_Gün'] / 365.25
 
 # Summary statistics
-source_counts = df['Yaş_Kaynak_TESIS'].value_counts()
-valid_ages = df[df['Yaş_Kaynak_TESIS'] != 'MISSING']['Ekipman_Yaşı_Yıl_TESIS']
+source_counts = df['Yaş_Kaynak'].value_counts()
+valid_ages = df[df['Yaş_Kaynak'] != 'MISSING']['Ekipman_Yaşı_Yıl']
 print(f"Age Sources: {' | '.join([f'{src}:{cnt:,}({cnt/len(df)*100:.0f}%)' for src, cnt in source_counts.items()])}")
 if len(valid_ages) > 0:
     print(f"Age Range: {valid_ages.min():.1f}-{valid_ages.max():.1f}y, Mean={valid_ages.mean():.1f}y, Median={valid_ages.median():.1f}y")
+print(f"✓ Simplified: 2 age columns created (was 6 in previous version)")
 
 # ============================================================================
 # STEP 3B: OPTIONAL FIRST WORK ORDER FALLBACK
 # ============================================================================
 if USE_FIRST_WORKORDER_FALLBACK:
     print("\n[Step 3B/12] Filling Missing Ages (First Work Order Proxy)...")
-    missing_mask_tesis = df['Yaş_Kaynak_TESIS'] == 'MISSING'
-    missing_mask_edbs = df['Yaş_Kaynak_EDBS'] == 'MISSING'
-    missing_count = missing_mask_edbs.sum()
+    missing_mask = df['Yaş_Kaynak'] == 'MISSING'
+    missing_count = missing_mask.sum()
 
     if missing_count > 0 and 'Oluşturulma_Tarihi' in df.columns:
         equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
         equip_id_col = next((col for col in equip_id_cols if col in df.columns), None)
 
         if equip_id_col:
+            # Use first work order date as age proxy
             first_wo_dates = df.groupby(equip_id_col)['Oluşturulma_Tarihi'].min()
             df['_first_wo'] = df[equip_id_col].map(first_wo_dates)
             age_from_wo = (REFERENCE_DATE - df['_first_wo']).dt.days
 
-            # Fill TESIS-primary missing ages
-            fill_mask_tesis = missing_mask_tesis & df['_first_wo'].notna() & (age_from_wo > 0)
-            df.loc[fill_mask_tesis, 'Ekipman_Yaşı_Gün_TESIS'] = age_from_wo[fill_mask_tesis]
-            df.loc[fill_mask_tesis, 'Ekipman_Yaşı_Yıl_TESIS'] = age_from_wo[fill_mask_tesis] / 365.25
-            df.loc[fill_mask_tesis, 'Yaş_Kaynak_TESIS'] = 'WORKORDER'
-            df.loc[fill_mask_tesis, 'Kurulum_Tarihi_TESIS'] = df.loc[fill_mask_tesis, '_first_wo']
-
-            # Fill EDBS-primary missing ages
-            fill_mask_edbs = missing_mask_edbs & df['_first_wo'].notna() & (age_from_wo > 0)
-            df.loc[fill_mask_edbs, 'Ekipman_Yaşı_Gün_EDBS'] = age_from_wo[fill_mask_edbs]
-            df.loc[fill_mask_edbs, 'Ekipman_Yaşı_Yıl_EDBS'] = age_from_wo[fill_mask_edbs] / 365.25
-            df.loc[fill_mask_edbs, 'Yaş_Kaynak_EDBS'] = 'WORKORDER'
-            df.loc[fill_mask_edbs, 'Kurulum_Tarihi_EDBS'] = df.loc[fill_mask_edbs, '_first_wo']
-
-            # Update default age columns
-            df.loc[fill_mask_edbs, 'Ekipman_Yaşı_Gün'] = age_from_wo[fill_mask_edbs]
-            df.loc[fill_mask_edbs, 'Ekipman_Yaşı_Yıl'] = age_from_wo[fill_mask_edbs] / 365.25
-            df.loc[fill_mask_edbs, 'Yaş_Kaynak'] = 'FIRST_WORKORDER_PROXY'
-            df.loc[fill_mask_edbs, 'Ekipman_Kurulum_Tarihi'] = df.loc[fill_mask_edbs, '_first_wo']
+            # Fill missing ages with work order fallback
+            fill_mask = missing_mask & df['_first_wo'].notna() & (age_from_wo > 0)
+            df.loc[fill_mask, 'Ekipman_Yaşı_Gün'] = age_from_wo[fill_mask]
+            df.loc[fill_mask, 'Ekipman_Yaşı_Yıl'] = age_from_wo[fill_mask] / 365.25
+            df.loc[fill_mask, 'Yaş_Kaynak'] = 'WORKORDER'
+            df.loc[fill_mask, 'Ekipman_Kurulum_Tarihi'] = df.loc[fill_mask, '_first_wo']
 
             df.drop(columns=['_first_wo'], inplace=True)
-            filled_count = fill_mask_edbs.sum()
-            remaining = (df['Yaş_Kaynak_EDBS'] == 'MISSING').sum()
+            filled_count = fill_mask.sum()
+            remaining = (df['Yaş_Kaynak'] == 'MISSING').sum()
             print(f"Filled {filled_count:,} ages using work order proxy | Remaining missing: {remaining:,} ({remaining/len(df)*100:.1f}%)")
 
 # STEP 4 & 5: Temporal Features + Failure Periods
@@ -510,16 +477,14 @@ df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(lambda x: EQUI
 harmonized_classes = df['Equipment_Class_Primary'].nunique()
 print(f"Harmonized {len(EQUIPMENT_CLASS_MAPPING)} variants → {harmonized_classes} standardized equipment classes")
 
-df['Age_Source'] = df['Yaş_Kaynak']
-
 # ============================================================================
 # STEP 7: AGGREGATE TO EQUIPMENT LEVEL
 # ============================================================================
 print("\n[Step 7/12] Aggregating to Equipment Level (Fault→Equipment)...")
 
-# Sort by TESIS Age_Source to prioritize during aggregation
-source_priority_tesis = {'TESIS': 0, 'EDBS': 1, 'WORKORDER': 2, 'MISSING': 3}
-df['_source_priority'] = df['Yaş_Kaynak_TESIS'].map(source_priority_tesis).fillna(99)
+# Sort by Age Source to prioritize during aggregation (TESIS > EDBS > WORKORDER > MISSING)
+source_priority = {'TESIS': 0, 'EDBS': 1, 'WORKORDER': 2, 'MISSING': 3}
+df['_source_priority'] = df['Yaş_Kaynak'].map(source_priority).fillna(99)
 df = df.sort_values('_source_priority')
 df = df.drop(columns=['_source_priority'])
 
@@ -546,23 +511,11 @@ agg_dict = {
     'İlçe': 'first',
     'Mahalle': 'first',
 
-    # DUAL Age data (default = TESIS-primary commissioning age)
+    # Equipment Age (simplified - single source with priority: TESIS→EDBS→WORKORDER)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
-    'Age_Source': 'first',
-
-    # TESIS-primary age (commissioning age - DEFAULT for modeling)
-    'Kurulum_Tarihi_TESIS': 'first',
-    'Ekipman_Yaşı_Gün_TESIS': 'first',
-    'Ekipman_Yaşı_Yıl_TESIS': 'first',
-    'Yaş_Kaynak_TESIS': 'first',
-
-    # EDBS-primary age (EdaBİS database entry age ~2017+, NOT physical installation)
-    'Kurulum_Tarihi_EDBS': 'first',
-    'Ekipman_Yaşı_Gün_EDBS': 'first',
-    'Ekipman_Yaşı_Yıl_EDBS': 'first',
-    'Yaş_Kaynak_EDBS': 'first',
+    'Yaş_Kaynak': 'first',
 
     # Fault history
     'started at': ['count', 'min', 'max'],
@@ -630,9 +583,9 @@ rename_dict = {
     'İlçe_first': 'İlçe',
     'Mahalle_first': 'Mahalle',
     'Ekipman_Kurulum_Tarihi_first': 'Ekipman_Kurulum_Tarihi',  # NEW
-    'Ekipman_Yaşı_Gün_first': 'Ekipman_Yaşı_Gün',  # NEW
+    'Ekipman_Yaşı_Gün_first': 'Ekipman_Yaşı_Gün',
     'Ekipman_Yaşı_Yıl_first': 'Ekipman_Yaşı_Yıl',
-    'Age_Source_first': 'Age_Source',
+    'Yaş_Kaynak_first': 'Yaş_Kaynak',
     'started at_count': 'Toplam_Arıza_Sayisi_Lifetime',
     'started at_min': 'İlk_Arıza_Tarihi',
     'started at_max': 'Son_Arıza_Tarihi',
@@ -829,7 +782,7 @@ print(f"\nPIPELINE STATUS: {original_fault_count:,} faults → {len(equipment_df
 
 print(f"\nKEY FEATURES FOR DUAL PREDICTIONS (6M + 12M):")
 print(f"  [6M/12M] Fault History: 3M/6M/12M counts (PRIMARY prediction drivers)")
-print(f"  [6M/12M] Equipment Age: Day-precision ({equipment_df['Age_Source'].value_counts().to_dict()})")
+print(f"  [6M/12M] Equipment Age: Day-precision ({equipment_df['Yaş_Kaynak'].value_counts().to_dict()})")
 print(f"  [6M/12M] NEW: Time-to-First-Failure (avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality)")
 print(f"  [6M/12M] MTBF: {equipment_df['MTBF_Gün'].notna().sum():,} valid | Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} flagged")
 print(f"  [12M] Customer Impact Ratios: {len([col for col in customer_impact_cols if any(col.replace(' ', '_') in c for c in equipment_df.columns)])} features")
