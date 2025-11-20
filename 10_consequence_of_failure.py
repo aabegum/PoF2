@@ -56,7 +56,8 @@ from config import (
     OUTPUT_DIR,
     RESULTS_DIR,
     RANDOM_STATE,
-    CUTOFF_DATE
+    CUTOFF_DATE,
+    HORIZONS
 )
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
 if sys.platform == 'win32':
@@ -69,8 +70,10 @@ if sys.platform == 'win32':
         pass
 warnings.filterwarnings('ignore')
 
-# Configuration (from config.py): RANDOM_STATE, CUTOFF_DATE
-HORIZONS = ['3M', '12M', '24M']  # CoF analysis horizons
+# Configuration (from config.py): RANDOM_STATE, CUTOFF_DATE, HORIZONS
+# Horizons imported from config.py (6M: 180 days, 12M: 365 days, 24M: 730 days)
+# For CoF analysis, we use string keys: '3M', '12M', '24M'
+COF_HORIZONS = ['3M', '12M', '24M']  # CoF-specific horizon labels
 REFERENCE_DATE = CUTOFF_DATE
 
 # Critical customer multipliers (can be customized)
@@ -101,7 +104,7 @@ print("="*100)
 
 print("\n📋 Configuration:")
 print(f"   Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')}")
-print(f"   Prediction Horizons: {HORIZONS}")
+print(f"   CoF Analysis Horizons: {COF_HORIZONS}")
 print(f"   Risk Categories: DÜŞÜK/ORTA/YÜKSEK/KRİTİK")
 
 # ============================================================================
@@ -424,7 +427,7 @@ print(f"\n✓ Merged PoF and CoF data: {len(df_risk_base):,} equipment")
 # Calculate risk for each horizon
 risk_results = {}
 
-for horizon in HORIZONS:
+for horizon in COF_HORIZONS:
     # Find PoF column for this horizon
     pof_col = None
     for col in df_risk_base.columns:
