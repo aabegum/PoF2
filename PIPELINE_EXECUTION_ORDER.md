@@ -162,7 +162,7 @@ python 02_data_transformation.py
 ### **Alternative Model Phase (Step 9)**
 
 #### **STEP 9: Cox Survival Model**
-**Script:** `09_cox_survival_model.py`
+**Script:** `06_survival_model.py`
 **Purpose:** Alternative time-to-event predictions using Cox PH
 **Input:**
 - `data/features_reduced.csv`
