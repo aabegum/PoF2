@@ -755,10 +755,10 @@ print("\n" + "="*100)
 print("STEP 9: CREATING EVALUATION VISUALIZATIONS")
 print("="*100)
 
-# CHANGED: Adjusted subplot layout for 3 horizons instead of 4
 # 1. ROC Curves
 print("\n--- Creating ROC Curves ---")
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))  # CHANGED: 1x3 instead of 2x2
+fig, axes = plt.subplots(2, 2, figsize=(14, 12))  # 2x2 grid for 4 horizons
+axes = axes.flatten()  # Flatten to 1D array for easy indexing
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
@@ -795,7 +795,8 @@ print("✓ ROC curves saved: outputs/model_evaluation/roc_curves.png")
 
 # 2. Precision-Recall Curves
 print("\n--- Creating Precision-Recall Curves ---")
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))  # CHANGED: 1x3 instead of 2x2
+fig, axes = plt.subplots(2, 2, figsize=(14, 12))  # 2x2 grid for 4 horizons
+axes = axes.flatten()  # Flatten to 1D array for easy indexing
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
@@ -831,7 +832,7 @@ print("✓ PR curves saved: outputs/model_evaluation/precision_recall_curves.png
 
 # 3. Confusion Matrices
 print("\n--- Creating Confusion Matrices ---")
-fig, axes = plt.subplots(2, 3, figsize=(16, 10))  # CHANGED: 2x3 instead of 2x4
+fig, axes = plt.subplots(2, 4, figsize=(20, 10))  # 2 models x 4 horizons
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     # XGBoost confusion matrix

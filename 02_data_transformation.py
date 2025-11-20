@@ -132,6 +132,22 @@ if 'started at' in df.columns:
     if time_dup_count > 0:
         print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
         print(f"    (These are likely the same fault appearing in TESIS, EDBS, and WORKORDER)")
+
+        # Show examples for manual validation
+        df_duplicates = df[time_dup_mask].copy()
+        if len(df_duplicates) > 0:
+            print(f"\n  Duplicate Examples (first 3 for manual review):")
+            display_cols = [equip_id_col, 'started at', 'ended at', 'Equipment_Type']
+            display_cols = [col for col in display_cols if col in df_duplicates.columns]
+            dup_sample = df_duplicates[display_cols].head(3)
+            for idx, row in dup_sample.iterrows():
+                print(f"    {idx}: {dict(row)}")
+
+            # Save all duplicates for audit
+            dup_file = DATA_DIR / 'removed_duplicates.csv'
+            df_duplicates.to_csv(dup_file, index=False)
+            print(f"  ✓ All duplicates saved: {dup_file}")
+
         df = df[~time_dup_mask].copy()
     else:
         print(f"  ✓ No same-equipment+time duplicates found")
@@ -145,6 +161,10 @@ if removed > 0:
     print(f"  Final fault count: {len(df):,} (from {original_fault_count:,})")
 else:
     print(f"  ✅ No duplicates detected - data quality looks good!")
+
+# Track unique equipment at this stage
+unique_equip_after_dedup = df[equip_id_col].nunique()
+print(f"\n[TRACKING] Unique equipment after deduplication: {unique_equip_after_dedup:,}")
 
 # ============================================================================
 # STEP 2: ENHANCED DATE PARSING & VALIDATION
@@ -473,9 +493,27 @@ def get_equipment_class(row):
 df['Equipment_Class_Primary'] = df.apply(get_equipment_class, axis=1)
 
 # Use equipment class mapping from config.py (centralized)
+original_classes_before = df['Equipment_Class_Primary'].nunique()
 df['Equipment_Class_Primary'] = df['Equipment_Class_Primary'].map(lambda x: EQUIPMENT_CLASS_MAPPING.get(x, x) if pd.notna(x) else x)
 harmonized_classes = df['Equipment_Class_Primary'].nunique()
-print(f"Harmonized {len(EQUIPMENT_CLASS_MAPPING)} variants → {harmonized_classes} standardized equipment classes")
+print(f"Harmonized {original_classes_before} variants → {harmonized_classes} standardized equipment classes")
+
+# Show final class distribution
+print(f"\n  Final Equipment Class Distribution:")
+class_dist = df['Equipment_Class_Primary'].value_counts()
+for cls, count in class_dist.items():
+    pct = count / len(df) * 100
+    print(f"    {str(cls):20s} {count:4d} ({pct:5.1f}%)")
+
+# Save mapping for audit trail
+mapping_records = []
+for original, harmonized in EQUIPMENT_CLASS_MAPPING.items():
+    count = (df['Equipment_Class_Primary'] == harmonized).sum()
+    mapping_records.append({'Original': original, 'Harmonized': harmonized, 'Count': count})
+mapping_df = pd.DataFrame(mapping_records)
+mapping_file = DATA_DIR / 'equipment_class_mapping.csv'
+mapping_df.to_csv(mapping_file, index=False)
+print(f"  ✓ Mapping saved: {mapping_file}")
 
 # ============================================================================
 # STEP 7: AGGREGATE TO EQUIPMENT LEVEL
@@ -492,8 +530,10 @@ df = df.drop(columns=['_source_priority'])
 # This prevents data leakage in cause codes (first/last) and all other aggregations
 print(f"  Filtering faults for aggregation (using ONLY faults BEFORE {REFERENCE_DATE.date()})...")
 print(f"    Total faults: {len(df):,}")
+print(f"    Total unique equipment: {df[equipment_id_col].nunique():,}")
 df_pre_cutoff = df[df['started at'] <= REFERENCE_DATE].copy()
 print(f"    Pre-cutoff faults: {len(df_pre_cutoff):,}")
+print(f"    Pre-cutoff unique equipment: {df_pre_cutoff[equipment_id_col].nunique():,}")
 print(f"    Excluded post-cutoff: {len(df) - len(df_pre_cutoff):,} faults")
 
 # Build aggregation dictionary dynamically based on available columns
@@ -564,6 +604,35 @@ equipment_df = df_pre_cutoff.groupby(equipment_id_col).agg(agg_dict).reset_index
 equipment_df.columns = ['_'.join(col).strip('_') if col[1] else col[0] for col in equipment_df.columns.values]
 
 print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_df):,} equipment records ({len(agg_dict)} aggregated features)")
+
+# Equipment tracking summary
+print(f"\n[TRACKING] Equipment Pipeline Summary:")
+print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment")
+print(f"  Pre-cutoff equipment:    {df_pre_cutoff[equipment_id_col].nunique():,}")
+print(f"  Final aggregated:        {len(equipment_df):,} equipment")
+equipment_lost = unique_equip_after_dedup - len(equipment_df)
+print(f"  Lost in pipeline:        {equipment_lost:,} ({equipment_lost/unique_equip_after_dedup*100:.1f}%)")
+
+# Identify and save excluded equipment for analysis
+if equipment_lost > 0:
+    all_equipment_ids = set(df[equipment_id_col].unique())
+    final_equipment_ids = set(equipment_df[equipment_id_col].unique())
+    excluded_ids = all_equipment_ids - final_equipment_ids
+
+    df_excluded = df[df[equipment_id_col].isin(excluded_ids)].copy()
+
+    # Analyze why equipment were excluded
+    post_cutoff_only = df_excluded[df_excluded['started at'] > REFERENCE_DATE]
+    post_cutoff_equipment = post_cutoff_only[equipment_id_col].nunique()
+
+    print(f"\n  Exclusion Analysis:")
+    print(f"    Post-cutoff failures only: {post_cutoff_equipment:,} equipment ({post_cutoff_equipment/equipment_lost*100:.1f}%)")
+    print(f"      → These can be used as validation/test set!")
+
+    # Save excluded equipment for manual review
+    excluded_file = DATA_DIR / 'excluded_equipment_analysis.csv'
+    df_excluded.to_csv(excluded_file, index=False)
+    print(f"  ✓ Excluded equipment saved: {excluded_file}")
 
 # ============================================================================
 # STEP 8: RENAME COLUMNS
@@ -755,10 +824,132 @@ equipment_df['Tekrarlayan_Arıza_90gün_Flag'] = [r[1] for r in recurrence_resul
 
 print(f"Recurring faults (pre-cutoff only): 30-day={equipment_df['Tekrarlayan_Arıza_30gün_Flag'].sum():,} | 90-day={equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} equipment flagged")
 
+# Chronic repeater validation analysis
+print(f"\n[VALIDATION] Chronic Repeater Analysis:")
+chronic = equipment_df[equipment_df['Tekrarlayan_Arıza_90gün_Flag'] == 1]
+normal = equipment_df[equipment_df['Tekrarlayan_Arıza_90gün_Flag'] == 0]
+
+if len(chronic) > 0 and len(normal) > 0:
+    chronic_avg = chronic['Toplam_Arıza_Sayisi_Lifetime'].mean()
+    normal_avg = normal['Toplam_Arıza_Sayisi_Lifetime'].mean()
+    ratio = chronic_avg / normal_avg if normal_avg > 0 else 0
+
+    print(f"  Chronic repeaters (90-day): {len(chronic):,} equipment ({len(chronic)/len(equipment_df)*100:.1f}%)")
+    print(f"    Avg lifetime faults: {chronic_avg:.2f}")
+    print(f"  Normal equipment: {len(normal):,} equipment ({len(normal)/len(equipment_df)*100:.1f}%)")
+    print(f"    Avg lifetime faults: {normal_avg:.2f}")
+    print(f"  Fault rate ratio: {ratio:.1f}x higher for chronic repeaters")
+
+    if ratio < 2.0:
+        print(f"  ⚠️  WARNING: Chronic repeaters only {ratio:.1f}x higher fault rate (expected 3-5x)")
+        print(f"      → May indicate recurrence window too aggressive or insufficient data")
+    elif ratio > 10.0:
+        print(f"  ⚠️  WARNING: Chronic repeaters have {ratio:.1f}x higher fault rate (very extreme)")
+        print(f"      → May indicate recurrence window too lenient")
+    else:
+        print(f"  ✓ Chronic repeater detection working as expected (2-10x range)")
+else:
+    print(f"  ⚠️  No chronic repeaters detected or all equipment chronic")
+
+# ============================================================================
+# DATA INTEGRITY VALIDATION CHECKS
+# ============================================================================
+print(f"\n[VALIDATION] Data Integrity Checks:")
+
+validation_passed = True
+
+# Check 1: Age sanity
+age_col = 'Ekipman_Yaşı_Yıl'
+if age_col in equipment_df.columns:
+    min_age = equipment_df[age_col].min()
+    max_age = equipment_df[age_col].max()
+    if min_age < 0:
+        print(f"  ❌ FAIL: Negative ages detected! (min: {min_age:.1f} years)")
+        validation_passed = False
+    elif max_age >= 50:
+        print(f"  ⚠️  WARNING: Very old equipment detected (max: {max_age:.1f} years)")
+        print(f"      → Review equipment with age > 50 years for data quality")
+    else:
+        print(f"  ✓ Age range valid: {min_age:.1f} - {max_age:.1f} years")
+else:
+    print(f"  ⚠️  WARNING: Age column '{age_col}' not found")
+
+# Check 2: Temporal window logic (3M ≤ 6M ≤ 12M)
+fault_cols = ['Arıza_Sayısı_3ay', 'Arıza_Sayısı_6ay', 'Arıza_Sayısı_12ay']
+if all(col in equipment_df.columns for col in fault_cols):
+    invalid_3m_6m = (equipment_df['Arıza_Sayısı_3ay'] > equipment_df['Arıza_Sayısı_6ay']).sum()
+    invalid_6m_12m = (equipment_df['Arıza_Sayısı_6ay'] > equipment_df['Arıza_Sayısı_12ay']).sum()
+
+    if invalid_3m_6m > 0 or invalid_6m_12m > 0:
+        print(f"  ❌ FAIL: Temporal window logic violated!")
+        print(f"      3M > 6M count: {invalid_3m_6m} equipment")
+        print(f"      6M > 12M count: {invalid_6m_12m} equipment")
+        validation_passed = False
+    else:
+        print(f"  ✓ Fault count windows valid (3M ≤ 6M ≤ 12M)")
+else:
+    print(f"  ⚠️  WARNING: Fault count columns not found")
+
+# Check 3: First failure timing logic
+first_failure_col = 'Ilk_Arizaya_Kadar_Yil'
+if first_failure_col in equipment_df.columns and age_col in equipment_df.columns:
+    invalid_first_failure = (equipment_df[first_failure_col] > equipment_df[age_col]).sum()
+    if invalid_first_failure > 0:
+        print(f"  ❌ FAIL: First fault after current age!")
+        print(f"      {invalid_first_failure} equipment with illogical first failure dates")
+        validation_passed = False
+    else:
+        print(f"  ✓ First failure timing valid (≤ equipment age)")
+else:
+    print(f"  ⚠️  WARNING: First failure column not found")
+
+# Check 4: MTBF validity (requires 2+ faults)
+mtbf_col = 'MTBF_Gün'
+lifetime_faults_col = 'Toplam_Arıza_Sayisi_Lifetime'
+if mtbf_col in equipment_df.columns and lifetime_faults_col in equipment_df.columns:
+    mtbf_equip = equipment_df[equipment_df[mtbf_col].notna()]
+    if len(mtbf_equip) > 0:
+        invalid_mtbf = (mtbf_equip[lifetime_faults_col] < 2).sum()
+        if invalid_mtbf > 0:
+            print(f"  ❌ FAIL: MTBF calculated with <2 faults!")
+            print(f"      {invalid_mtbf} equipment have MTBF but <2 lifetime faults")
+            validation_passed = False
+        else:
+            print(f"  ✓ MTBF validity: All {len(mtbf_equip)} equipment have 2+ faults")
+    else:
+        print(f"  ✓ MTBF validity: No MTBF values to validate")
+else:
+    print(f"  ⚠️  WARNING: MTBF columns not found")
+
+# Check 5: Recurring fault logic (requires 2+ faults)
+recurring_col = 'Tekrarlayan_Arıza_90gün_Flag'
+if recurring_col in equipment_df.columns and lifetime_faults_col in equipment_df.columns:
+    recurring = equipment_df[equipment_df[recurring_col] == 1]
+    if len(recurring) > 0:
+        invalid_recurring = (recurring[lifetime_faults_col] < 2).sum()
+        if invalid_recurring > 0:
+            print(f"  ❌ FAIL: Recurring flag on equipment with <2 faults!")
+            print(f"      {invalid_recurring} equipment flagged as recurring but have <2 faults")
+            validation_passed = False
+        else:
+            print(f"  ✓ Recurring fault logic valid: {len(recurring)} flagged equipment")
+    else:
+        print(f"  ✓ Recurring fault logic: No recurring equipment flagged")
+else:
+    print(f"  ⚠️  WARNING: Recurring fault column not found")
+
+# Final validation summary
+if validation_passed:
+    print(f"\n✅ All critical integrity checks PASSED!")
+else:
+    print(f"\n❌ VALIDATION FAILED: Critical data integrity issues detected!")
+    print(f"   → Review the failures above before proceeding to next step")
+    print(f"   → Consider fixing data quality issues or investigating root cause")
+
 # ============================================================================
 # STEP 12: SAVE RESULTS
 # ============================================================================
-print("\n[Step 12/12] Saving Equipment-Level Dataset...")
+print(f"\n[Step 12/12] Saving Equipment-Level Dataset...")
 
 equipment_df.to_csv(EQUIPMENT_LEVEL_FILE, index=False, encoding='utf-8-sig')
 
