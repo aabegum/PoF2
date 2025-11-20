@@ -34,6 +34,22 @@ MIN_VALID_YEAR = 1950
 MAX_VALID_YEAR = pd.Timestamp.now().year + 1
 
 # ============================================================================
+# PIPELINE VALIDATION
+# ============================================================================
+
+# Data size validation (lenient thresholds to catch catastrophic failures only)
+MIN_EQUIPMENT_RECORDS = 100  # Minimum equipment records for statistical validity
+MAX_EQUIPMENT_RECORDS = 5000  # Maximum expected (sanity check for data errors)
+
+# Prediction validation
+MIN_PREDICTIONS = 50  # Minimum high-risk predictions expected
+MAX_PREDICTIONS = 500  # Maximum high-risk predictions (sanity check)
+
+# Feature validation
+MIN_FEATURES = 25  # After feature selection/VIF removal
+MAX_FEATURES = 35  # Should have ~30 optimal features
+
+# ============================================================================
 # FILE PATHS
 # ============================================================================
 
