@@ -18,10 +18,10 @@ PIPELINE FLOW (10 STEPS):
     4. Feature Selection      → Leakage removal + VIF (merged: includes 05b)
     5. Temporal PoF Model     → XGBoost/CatBoost (06_temporal_pof_model.py)
     6. Chronic Classifier     → Identify failure-prone equipment (06_chronic_classifier.py)
-    7. Model Explainability   → SHAP feature importance
-    8. Probability Calibration → Calibrate risk estimates
-    9. Survival Analysis      → Cox PH multi-horizon (3M/6M/12M/24M)
-   10. Risk Assessment        → PoF × CoF → CAPEX priority list (all horizons)
+    7. Model Explainability   → SHAP feature importance (07_explainability.py)
+    8. Probability Calibration → Calibrate risk estimates (08_calibration.py)
+    9. Cox Survival Model     → Multi-horizon predictions (09_cox_survival_model.py)
+   10. Risk Assessment        → PoF × CoF → CAPEX priority list (10_consequence_of_failure.py)
 
 OPTIONAL SCRIPTS (in analysis/ folder):
     • analysis/exploratory/04_eda.py - 16 exploratory analyses
@@ -101,8 +101,8 @@ PIPELINE_STEPS = [
     },
     {
         'step': 9,
-        'name': 'Survival Analysis',
-        'script': '09_survival_analysis.py',
+        'name': 'Cox Survival Model',
+        'script': '09_cox_survival_model.py',
         'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/6M/12M/24M)'
     },
     {
