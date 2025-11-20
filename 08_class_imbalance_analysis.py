@@ -38,9 +38,27 @@ df_full = pd.read_csv('data/equipment_level_data.csv')
 
 print(f"\n✓ Loaded: {len(df)} equipment × {len(df.columns)} columns")
 
-# Merge to get full equipment class info
-df = df.merge(df_full[['Ekipman_ID', 'Ekipman_Sınıfı', 'Equipment_Type']],
-              on='Ekipman_ID', how='left')
+# Check if targets exist and load them
+horizons = ['3M', '6M', '12M']
+has_targets = all(f'Target_{h}' in df.columns for h in horizons)
+target_cols = []
+
+if not has_targets:
+    # Try to load targets from equipment_level_data
+    target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_full.columns]
+    if len(target_cols) > 0:
+        print(f"✓ Loading {len(target_cols)} targets from equipment_level_data.csv")
+        has_targets = True
+    else:
+        print("⚠️  WARNING: Targets not found - some analyses will be skipped")
+        target_cols = []
+
+# Merge to get full equipment class info and targets
+merge_cols = ['Ekipman_ID', 'Ekipman_Sınıfı', 'Equipment_Type']
+if len(target_cols) > 0:
+    merge_cols += target_cols
+
+df = df.merge(df_full[merge_cols], on='Ekipman_ID', how='left')
 
 # ============================================================================
 # STEP 2: TARGET CLASS IMBALANCE ANALYSIS

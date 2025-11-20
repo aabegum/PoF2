@@ -46,6 +46,36 @@ print("="*100)
 df = pd.read_csv('data/features_reduced.csv')
 print(f"\n✓ Loaded features: {len(df)} equipment × {len(df.columns)} columns")
 
+# Check if targets exist
+horizons = ['3M', '6M', '12M']
+has_targets = all(f'Target_{h}' in df.columns for h in horizons)
+
+if not has_targets:
+    print("\n⚠️  WARNING: Targets not found in features_reduced.csv")
+    print("   Attempting to load from equipment_level_data.csv...")
+
+    # Try loading from equipment-level data (which has targets after running Step 5)
+    try:
+        df_with_targets = pd.read_csv('data/equipment_level_data.csv')
+
+        # Merge targets with features
+        target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_with_targets.columns]
+
+        if len(target_cols) > 0:
+            df = df.merge(df_with_targets[['Ekipman_ID'] + target_cols], on='Ekipman_ID', how='left')
+            print(f"   ✓ Loaded {len(target_cols)} targets from equipment_level_data.csv")
+            has_targets = True
+        else:
+            print("   ⚠️  Targets not found in equipment_level_data.csv either")
+    except FileNotFoundError:
+        print("   ⚠️  equipment_level_data.csv not found")
+
+if not has_targets:
+    print("\n❌ ERROR: Cannot run walk-forward validation without targets")
+    print("   Please run 06_temporal_pof_model.py first to create targets")
+    print("   Or modify this script to create targets from raw fault data")
+    exit(1)
+
 # Load original data to get installation dates for temporal splitting
 df_full = pd.read_csv('data/equipment_level_data.csv')
 
