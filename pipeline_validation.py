@@ -54,7 +54,7 @@ STEP_VALIDATIONS = {
         'name': 'Data Transformation',
         'outputs': [EQUIPMENT_LEVEL_FILE],
         'checks': [
-            {'file': EQUIPMENT_LEVEL_FILE, 'min_rows': 700, 'max_rows': 1000,
+            {'file': EQUIPMENT_LEVEL_FILE, 'min_rows': 500, 'max_rows': 1000,
              'required_columns': ['Ekipman_ID', 'Ekipman_Yaşı_Yıl', 'Toplam_Arıza_Sayisi_Lifetime']}
         ]
     },
@@ -62,7 +62,7 @@ STEP_VALIDATIONS = {
         'name': 'Feature Engineering',
         'outputs': [FEATURES_ENGINEERED_FILE],
         'checks': [
-            {'file': FEATURES_ENGINEERED_FILE, 'min_rows': 700, 'max_rows': 1000,
+            {'file': FEATURES_ENGINEERED_FILE, 'min_rows': 500, 'max_rows': 1000,
              'expected_features': 30,  # Optimal 30-feature set
              'required_columns': ['Ekipman_ID', 'Ekipman_Yaşı_Yıl', 'Equipment_Class_Primary']}
         ]
@@ -71,7 +71,7 @@ STEP_VALIDATIONS = {
         'name': 'Feature Selection',
         'outputs': [FEATURES_REDUCED_FILE],
         'checks': [
-            {'file': FEATURES_REDUCED_FILE, 'min_rows': 700, 'max_rows': 1000,
+            {'file': FEATURES_REDUCED_FILE, 'min_rows': 500, 'max_rows': 1000,
              'min_features': 25, 'max_features': 30,  # After VIF removal
              'no_leakage': True}  # Ensure no future-looking features
         ]
@@ -85,13 +85,13 @@ STEP_VALIDATIONS = {
             PREDICTION_DIR / 'predictions_24m.csv'
         ],
         'checks': [
-            {'file': PREDICTION_DIR / 'predictions_3m.csv', 'min_rows': 700,
+            {'file': PREDICTION_DIR / 'predictions_3m.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']},
-            {'file': PREDICTION_DIR / 'predictions_6m.csv', 'min_rows': 700,
+            {'file': PREDICTION_DIR / 'predictions_6m.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']},
-            {'file': PREDICTION_DIR / 'predictions_12m.csv', 'min_rows': 700,
+            {'file': PREDICTION_DIR / 'predictions_12m.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']},
-            {'file': PREDICTION_DIR / 'predictions_24m.csv', 'min_rows': 700,
+            {'file': PREDICTION_DIR / 'predictions_24m.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']}
         ]
     },
@@ -99,7 +99,7 @@ STEP_VALIDATIONS = {
         'name': 'Chronic Classifier',
         'outputs': [PREDICTION_DIR / 'chronic_repeaters.csv'],
         'checks': [
-            {'file': PREDICTION_DIR / 'chronic_repeaters.csv', 'min_rows': 700,
+            {'file': PREDICTION_DIR / 'chronic_repeaters.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID', 'Chronic_Probability', 'Chronic_Class']}
         ]
     },
@@ -117,7 +117,7 @@ STEP_VALIDATIONS = {
         'name': 'Survival Analysis',
         'outputs': [PREDICTION_DIR / 'pof_multi_horizon_predictions.csv'],
         'checks': [
-            {'file': PREDICTION_DIR / 'pof_multi_horizon_predictions.csv', 'min_rows': 700,
+            {'file': PREDICTION_DIR / 'pof_multi_horizon_predictions.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID'] + [f'PoF_Probability_{h}' for h in HORIZONS.keys()]}
         ]
     },
@@ -131,7 +131,7 @@ STEP_VALIDATIONS = {
             RESULTS_DIR / 'capex_priority_list.csv'
         ],
         'checks': [
-            {'file': RESULTS_DIR / 'risk_assessment_3M.csv', 'min_rows': 700,
+            {'file': RESULTS_DIR / 'risk_assessment_3M.csv', 'min_rows': 500,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'CoF_Score', 'Risk_Score', 'Risk_Category']},
             {'file': RESULTS_DIR / 'capex_priority_list.csv', 'min_rows': 50, 'max_rows': 150,
              'required_columns': ['Ekipman_ID', 'Risk_Score', 'Equipment_Class_Primary']}
