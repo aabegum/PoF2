@@ -230,14 +230,13 @@ else:
 FUTURE_3M_END = CUTOFF_DATE + pd.DateOffset(months=3)   # 2024-09-25
 FUTURE_6M_END = CUTOFF_DATE + pd.DateOffset(months=6)   # 2024-12-25
 FUTURE_12M_END = CUTOFF_DATE + pd.DateOffset(months=12)  # 2025-06-25
-FUTURE_24M_END = CUTOFF_DATE + pd.DateOffset(months=24)  # 2026-06-25
+# NOTE: 24M removed - data only extends to 12M (only +3 equipment beyond 12M in training set)
 
 print(f"\n--- Temporal Prediction Windows ---")
 print(f"   Cutoff date:   {CUTOFF_DATE.date()}")
 print(f"   3M window:     {CUTOFF_DATE.date()} → {FUTURE_3M_END.date()}")
 print(f"   6M window:     {CUTOFF_DATE.date()} → {FUTURE_6M_END.date()}")
 print(f"   12M window:    {CUTOFF_DATE.date()} → {FUTURE_12M_END.date()}")
-print(f"   24M window:    {CUTOFF_DATE.date()} → {FUTURE_24M_END.date()}")
 
 # Identify equipment that WILL FAIL in each future window
 # IMPORTANT: Use cbs_id from raw faults, but filter to only valid Ekipman_IDs
@@ -256,23 +255,16 @@ future_faults_12M_raw = all_faults[
     (all_faults['started at'] <= FUTURE_12M_END)
 ]['cbs_id'].dropna().unique()
 
-future_faults_24M_raw = all_faults[
-    (all_faults['started at'] > CUTOFF_DATE) &
-    (all_faults['started at'] <= FUTURE_24M_END)
-]['cbs_id'].dropna().unique()
-
 # Filter to only equipment that exist in our feature data
 # This ensures target-feature alignment (critical!)
 future_faults_3M = np.array([id for id in future_faults_3M_raw if id in valid_equipment_ids])
 future_faults_6M = np.array([id for id in future_faults_6M_raw if id in valid_equipment_ids])
 future_faults_12M = np.array([id for id in future_faults_12M_raw if id in valid_equipment_ids])
-future_faults_24M = np.array([id for id in future_faults_24M_raw if id in valid_equipment_ids])
 
 print(f"\n   Equipment that WILL fail in future:")
 print(f"      3M window:  {len(future_faults_3M_raw):,} raw → {len(future_faults_3M):,} valid ({len(future_faults_3M)/max(len(future_faults_3M_raw),1)*100:.1f}% matched)")
 print(f"      6M window:  {len(future_faults_6M_raw):,} raw → {len(future_faults_6M):,} valid ({len(future_faults_6M)/max(len(future_faults_6M_raw),1)*100:.1f}% matched)")
 print(f"      12M window: {len(future_faults_12M_raw):,} raw → {len(future_faults_12M):,} valid ({len(future_faults_12M)/max(len(future_faults_12M_raw),1)*100:.1f}% matched)")
-print(f"      24M window: {len(future_faults_24M_raw):,} raw → {len(future_faults_24M):,} valid ({len(future_faults_24M)/max(len(future_faults_24M_raw),1)*100:.1f}% matched)")
 
 # Check for ID mismatch
 unmatched_3M = len(future_faults_3M_raw) - len(future_faults_3M)
@@ -290,8 +282,7 @@ targets = {}
 horizon_to_faults = {
     '3M': future_faults_3M,
     '6M': future_faults_6M,
-    '12M': future_faults_12M,
-    '24M': future_faults_24M
+    '12M': future_faults_12M
 }
 
 for horizon_name, horizon_days in HORIZONS.items():
@@ -319,8 +310,7 @@ for horizon_name, horizon_days in HORIZONS.items():
     expected_values = {
         '3M': 85,   # Estimated based on fault data
         '6M': 164,  # From previous analysis
-        '12M': 266, # From previous analysis
-        '24M': 350  # Estimated
+        '12M': 266  # From previous analysis
     }
 
     # Adjust expected for training set size (562/734 of total)
@@ -824,8 +814,11 @@ print("="*100)
 
 # 1. ROC Curves
 print("\n--- Creating ROC Curves ---")
-fig, axes = plt.subplots(2, 2, figsize=(14, 12))  # 2x2 grid for 4 horizons
-axes = axes.flatten()  # Flatten to 1D array for easy indexing
+n_horizons = len(HORIZONS)
+n_cols = 2  # Use 2 columns
+n_rows = (n_horizons + 1) // 2  # Calculate rows needed
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 6*n_rows))  # Dynamic grid
+axes = axes.flatten() if n_horizons > 1 else [axes]  # Flatten to 1D array for easy indexing
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
@@ -855,6 +848,10 @@ for idx, horizon in enumerate(HORIZONS.keys()):
     ax.legend(loc='lower right')
     ax.grid(alpha=0.3)
 
+# Hide unused subplots
+for idx in range(len(HORIZONS), len(axes)):
+    axes[idx].axis('off')
+
 plt.tight_layout()
 plt.savefig('outputs/model_evaluation/roc_curves.png', dpi=300, bbox_inches='tight')
 plt.close()
@@ -862,8 +859,8 @@ print("✓ ROC curves saved: outputs/model_evaluation/roc_curves.png")
 
 # 2. Precision-Recall Curves
 print("\n--- Creating Precision-Recall Curves ---")
-fig, axes = plt.subplots(2, 2, figsize=(14, 12))  # 2x2 grid for 4 horizons
-axes = axes.flatten()  # Flatten to 1D array for easy indexing
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 6*n_rows))  # Dynamic grid
+axes = axes.flatten() if n_horizons > 1 else [axes]  # Flatten to 1D array for easy indexing
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
@@ -892,6 +889,10 @@ for idx, horizon in enumerate(HORIZONS.keys()):
     ax.legend(loc='upper right')
     ax.grid(alpha=0.3)
 
+# Hide unused subplots
+for idx in range(len(HORIZONS), len(axes)):
+    axes[idx].axis('off')
+
 plt.tight_layout()
 plt.savefig('outputs/model_evaluation/precision_recall_curves.png', dpi=300, bbox_inches='tight')
 plt.close()
@@ -899,7 +900,7 @@ print("✓ PR curves saved: outputs/model_evaluation/precision_recall_curves.png
 
 # 3. Confusion Matrices
 print("\n--- Creating Confusion Matrices ---")
-fig, axes = plt.subplots(2, 4, figsize=(20, 10))  # 2 models x 4 horizons
+fig, axes = plt.subplots(2, n_horizons, figsize=(5*n_horizons, 10))  # 2 models x n horizons
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     # XGBoost confusion matrix
@@ -933,7 +934,8 @@ print("✓ Confusion matrices saved: outputs/model_evaluation/confusion_matrices
 
 # 4. Feature Importance Comparison
 print("\n--- Creating Feature Importance Comparison ---")
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))  # CHANGED: 1x3 instead of 2x2
+fig, axes = plt.subplots(1, n_horizons, figsize=(6*n_horizons, 6))  # Dynamic: 1 row x n_horizons columns
+axes = axes if n_horizons > 1 else [axes]  # Ensure axes is always iterable
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
