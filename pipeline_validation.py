@@ -69,7 +69,7 @@ STEP_VALIDATIONS = {
         'outputs': [FEATURES_ENGINEERED_FILE],
         'checks': [
             {'file': FEATURES_ENGINEERED_FILE, 'min_rows': MIN_EQUIPMENT_RECORDS, 'max_rows': MAX_EQUIPMENT_RECORDS,
-             'expected_features': 30,  # Optimal 30-feature set
+             'min_features': 70, 'max_features': 100,  # After engineering (Step 4 will reduce to 30)
              'required_columns': ['Ekipman_ID', 'Ekipman_Yaşı_Yıl', 'Equipment_Class_Primary']}
         ]
     },
