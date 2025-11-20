@@ -177,8 +177,46 @@ if best_class_col:
         others = value_counts.iloc[15:].sum()
         print(f"{'Others':<25} {others:>10,} {others/total*100:>11.1f}%")
 
+    # ML Readiness: Class Imbalance Assessment
+    print(f"\n{'='*100}")
+    print(f"ML READINESS: CLASS IMBALANCE ASSESSMENT")
+    print(f"{'='*100}")
+
+    top_2_pct = (value_counts.head(2).sum() / total * 100)
+    print(f"\n  Top 2 classes: {top_2_pct:.1f}% of data")
+
+    if top_2_pct > 80:
+        print(f"  🚨 SEVERE IMBALANCE: Model will be heavily biased toward dominant classes")
+        print(f"     → Recommendation: Use stratified sampling + oversampling (SMOTE/ADASYN)")
+        print(f"     → Expected Impact: Predictions for minority classes will be unreliable")
+    elif top_2_pct > 60:
+        print(f"  ⚠️  MODERATE IMBALANCE: Model may underperform on minority classes")
+        print(f"     → Recommendation: Use stratified sampling + class weights")
+    else:
+        print(f"  ✓ BALANCED: Good class distribution for modeling")
+
+    # Check for rare classes (<10 samples)
+    rare_classes = value_counts[value_counts < 10]
+    if len(rare_classes) > 0:
+        print(f"\n  Rare Equipment Classes (<10 samples): {len(rare_classes)}")
+        for cls, count in rare_classes.items():
+            print(f"    • {str(cls)[:40]}: {count} samples")
+        print(f"\n  🚨 CRITICAL: Predictions for rare classes = LOW CONFIDENCE")
+        print(f"     → Recommendation: Flag these in final predictions with confidence warnings")
+        print(f"     → Consider: Collapse into 'Other' category or exclude from training")
+
+    # Identify dominant classes (>20% each)
+    dominant = value_counts[value_counts / total > 0.20]
+    if len(dominant) > 0:
+        print(f"\n  Dominant Classes (>20% each): {len(dominant)}")
+        for cls, count in dominant.items():
+            pct = count / total * 100
+            print(f"    • {str(cls)[:40]}: {count:,} ({pct:.1f}%)")
+        print(f"  → Model will be optimized for these classes")
+
     report_lines.append(f"\nPrimary Equipment Class: {best_class_col}")
     report_lines.append(f"Unique Equipment Types: {len(value_counts)}")
+    report_lines.append(f"Class Imbalance: Top 2 = {top_2_pct:.1f}%, Rare classes (<10) = {len(rare_classes)}")
     report_lines.append(f"\nEQUIPMENT TYPE DISTRIBUTION (Consolidated):")
     report_lines.append(str(best_class_col))
     for val, count in value_counts.head(15).items():
