@@ -4,6 +4,13 @@ Turkish EDAŞ Equipment Failure Prediction Pipeline
 
 This script runs the entire production-ready PoF2 pipeline and captures all outputs.
 
+NOTE: For structured logging in individual scripts, use logger.py:
+    from logger import get_logger, log_script_start, log_script_end
+    logger = get_logger(__name__)
+    log_script_start(logger, "Script Name", "1.0")
+    logger.info("Processing...")
+    log_script_end(logger, "Script Name")
+
 PIPELINE FLOW (10 STEPS):
     1. Data Profiling         → Validate data quality
     2. Data Transformation    → Fault → Equipment level (1,210 → 789)
