@@ -196,6 +196,40 @@ unique_equip_after_dedup = df[equip_id_col].nunique()
 print(f"\n[TRACKING] Unique equipment after deduplication: {unique_equip_after_dedup:,}")
 
 # ============================================================================
+# STEP 1C: FILTER FAULTS WITHOUT CBS_ID
+# ============================================================================
+print("\n[Step 1C/12] Filtering Faults Without cbs_id...")
+
+if 'cbs_id' in df.columns:
+    before_filter = len(df)
+    has_cbs_id = df['cbs_id'].notna().sum()
+    missing_cbs_id = df['cbs_id'].isna().sum()
+
+    print(f"  Total faults: {before_filter:,}")
+    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_filter*100:.1f}%)")
+    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_filter*100:.1f}%)")
+
+    if missing_cbs_id > 0:
+        print(f"  Removing {missing_cbs_id:,} faults without cbs_id...")
+        print(f"    (These cannot be matched to equipment and would create UNKNOWN_XXX IDs)")
+
+        # Keep only faults with cbs_id
+        df = df[df['cbs_id'].notna()].copy()
+
+        removed = before_filter - len(df)
+        print(f"  ✓ Removed {removed:,} faults ({removed/before_filter*100:.1f}%)")
+        print(f"  Final fault count: {len(df):,}")
+
+        # Update equipment tracking
+        unique_equip_after_filter = df[equip_id_col].nunique()
+        print(f"  Unique equipment after filter: {unique_equip_after_filter:,}")
+    else:
+        print(f"  ✓ All faults have cbs_id - no filtering needed")
+else:
+    print(f"  [!] WARNING: No cbs_id column found - cannot filter")
+    print(f"      Equipment ID assignment may create many UNKNOWN_XXX IDs")
+
+# ============================================================================
 # STEP 2: ENHANCED DATE PARSING & VALIDATION
 # ============================================================================
 print("\n[Step 2/12] Parsing Dates (Flexible Multi-Format Parser)...")
@@ -475,20 +509,34 @@ if 'total customer count' in df.columns:
         print(f"Created {len(customer_ratio_cols)} customer ratio features (fault-level calculation to avoid Simpson's Paradox)")
 
 # STEP 6: Equipment Identification
-print("\n[Step 6/12] Creating Equipment IDs (cbs_id → Ekipman ID → Generated)...")
+print("\n[Step 6/12] Creating Equipment IDs (cbs_id primary)...")
 
 def get_equipment_id(row):
-    """Priority: cbs_id → Ekipman ID → Generate unique ID (prevents grouping)"""
+    """
+    Primary: cbs_id (should always exist after Step 1C filtering)
+    Fallback: Ekipman ID (rare case)
+    Note: UNKNOWN generation removed - faults without IDs filtered in Step 1C
+    """
     if pd.notna(row.get('cbs_id')):
         return row['cbs_id']
     elif pd.notna(row.get('Ekipman ID')):
         return row['Ekipman ID']
     else:
-        return f"UNKNOWN_{row.name}"
+        # Should not happen after Step 1C filtering
+        print(f"  [!] WARNING: Fault without cbs_id slipped through filtering (row {row.name})")
+        return None
 
 df['Equipment_ID_Primary'] = df.apply(get_equipment_id, axis=1)
+
+# Remove any None IDs (shouldn't happen but safety check)
+none_ids = df['Equipment_ID_Primary'].isna().sum()
+if none_ids > 0:
+    print(f"  [!] Removing {none_ids} faults with missing Equipment_ID_Primary")
+    df = df[df['Equipment_ID_Primary'].notna()].copy()
+
 unique_equipment = df['Equipment_ID_Primary'].nunique()
 print(f"Created {unique_equipment:,} unique equipment IDs from {len(df):,} faults (avg {len(df)/unique_equipment:.1f} faults/equipment)")
+print(f"  No UNKNOWN_XXX IDs generated (all equipment have real cbs_id)")
 
 equipment_id_col = 'Equipment_ID_Primary'
 
