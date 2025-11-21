@@ -527,40 +527,42 @@ print(f"    Pre-cutoff unique equipment: {df_pre_cutoff[equipment_id_col].nuniqu
 print(f"    Excluded post-cutoff: {len(df) - len(df_pre_cutoff):,} faults")
 
 # Build aggregation dictionary dynamically based on available columns
+# Start with REQUIRED columns (created by this script)
 agg_dict = {
-    # Equipment identification & classification
-    'Equipment_Class_Primary': 'first',
-    'Ekipman Sınıfı': 'first',
-    'Equipment_Type': 'first',
-    'Kesinti Ekipman Sınıfı': 'first',
-
-    # Geographic data
-    'KOORDINAT_X': 'first',
-    'KOORDINAT_Y': 'first',
-    'İl': 'first',
-    'İlçe': 'first',
-    'Mahalle': 'first',
-
     # Equipment Age (from Sebekeye_Baglanma_Tarihi - Grid Connection Date)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
     'Yaş_Kaynak': 'first',
 
-    # Fault history
+    # Fault history (required - created by this script)
     'started at': ['count', 'min', 'max'],
     'Fault_Last_3M': 'sum',
     'Fault_Last_6M': 'sum',
     'Fault_Last_12M': 'sum',
 
-    # Temporal features
+    # Temporal features (required - created by this script)
     'Summer_Peak_Flag': 'sum',
     'Winter_Peak_Flag': 'sum',
     'Time_To_Repair_Hours': ['mean', 'max'],
-
-    # Customer impact ratios (fault-level calculated, then averaged)
-    # Note: These are calculated at fault level to avoid Simpson's Paradox
 }
+
+# Add equipment classification columns if available
+equipment_classification_cols = {
+    'Equipment_Class_Primary': 'first',
+    'Ekipman Sınıfı': 'first',
+    'Equipment_Type': 'first',
+    'Kesinti Ekipman Sınıfı': 'first'
+}
+for col, agg_func in equipment_classification_cols.items():
+    if col in df_pre_cutoff.columns:
+        agg_dict[col] = agg_func
+
+# Add geographic columns if available
+geographic_cols = ['KOORDINAT_X', 'KOORDINAT_Y', 'İl', 'İlçe', 'Mahalle']
+for col in geographic_cols:
+    if col in df_pre_cutoff.columns:
+        agg_dict[col] = 'first'
 
 # Add customer ratio columns if they were created
 for ratio_col in ['Urban_Customer_Ratio', 'Rural_Customer_Ratio', 'MV_Customer_Ratio']:
