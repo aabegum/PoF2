@@ -134,20 +134,20 @@ exact_dup_mask = df.duplicated(keep='first')
 exact_dup_count = exact_dup_mask.sum()
 
 if exact_dup_count > 0:
-    print(f"  Found {exact_dup_count:,} exact duplicates ({exact_dup_count/len(df)*100:.1f}%) - removing...")
+    print(f"  ✓ Found {exact_dup_count:,} exact row duplicates ({exact_dup_count/len(df)*100:.1f}%) - removing...")
     df = df[~exact_dup_mask].copy()
 else:
-    print(f"  ✓ No exact duplicates found")
+    print(f"  ✓ No exact row duplicates found")
 
 # CHECK 2: Same equipment + same start time (likely same fault from different sources)
-# This is the CRITICAL check for multi-source data
+# This is the CRITICAL check for multi-source data (more important than exact duplicates)
 if 'started at' in df.columns:
     time_dup_mask = df.duplicated(subset=[equip_id_col, 'started at'], keep='first')
     time_dup_count = time_dup_mask.sum()
 
     if time_dup_count > 0:
-        print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
-        print(f"    (Duplicate fault records with same equipment ID and timestamp)")
+        print(f"  ✓ Found {time_dup_count:,} equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
+        print(f"    (Same equipment ID + timestamp = likely duplicate from multi-source data)")
 
         # Show examples for manual validation
         df_duplicates = df[time_dup_mask].copy()
@@ -174,12 +174,13 @@ if 'started at' in df.columns:
                 print(f"    Pre-cutoff duplicates:  {pre_cutoff_dups} ({pre_cutoff_dups/len(df_duplicates)*100:.1f}%)")
                 print(f"    Post-cutoff duplicates: {post_cutoff_dups} ({post_cutoff_dups/len(df_duplicates)*100:.1f}%)")
                 if post_cutoff_dups > 0:
-                    print(f"    → {post_cutoff_dups} duplicates removed from test set (172 equipment)")
+                    post_cutoff_equip = df_duplicates[df_duplicates['started_at_parsed'] > REFERENCE_DATE][equip_id_col].nunique()
+                    print(f"    → {post_cutoff_dups} duplicates removed from test set ({post_cutoff_equip} equipment)")
                     print(f"    → Test set quality improved by removing post-cutoff duplicates")
 
         df = df[~time_dup_mask].copy()
     else:
-        print(f"  ✓ No same-equipment+time duplicates found")
+        print(f"  ✓ No equipment+time duplicates found (data already clean!)")
 else:
     print("  ⚠️  WARNING: 'started at' column not found - skipping time-based duplicate check")
 
@@ -199,6 +200,9 @@ print(f"\n[TRACKING] Unique equipment after deduplication: {unique_equip_after_d
 # STEP 1C: FILL MISSING CBS_ID FROM 'ID' COLUMN
 # ============================================================================
 print("\n[Step 1C/12] Filling Missing cbs_id Using 'id' Column...")
+
+# Initialize tracking variable
+unique_equip_after_id_consolidation = unique_equip_after_dedup
 
 if 'cbs_id' in df.columns:
     before_fill = len(df)
@@ -230,9 +234,9 @@ if 'cbs_id' in df.columns:
         else:
             print(f"  ✓ All faults now have equipment IDs (cbs_id or id)")
 
-        # Update equipment tracking
-        unique_equip_after_fill = df[equip_id_col].nunique()
-        print(f"  Unique equipment after ID consolidation: {unique_equip_after_fill:,}")
+        # Update equipment tracking after ID consolidation
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+        print(f"  Unique equipment after ID consolidation: {unique_equip_after_id_consolidation:,}")
 
     elif missing_cbs_id > 0 and 'id' not in df.columns:
         print(f"  [!] WARNING: 'id' column not found - cannot use as fallback")
@@ -478,6 +482,44 @@ if len(valid_ages) > 0:
 missing_count = (df['Yaş_Kaynak'] == 'MISSING').sum()
 print(f"✓ Equipment ages calculated | Missing: {missing_count:,} ({missing_count/len(df)*100:.1f}%)")
 
+# Check for suspicious old dates (before 1964 = oldest acceptable data)
+if len(valid_ages) > 0:
+    very_old_mask = valid_ages > 60  # Equipment older than 1964 (2025 - 60 = 1965)
+    very_old_count = very_old_mask.sum()
+
+    if very_old_count > 0:
+        very_old_equip = df[df['Ekipman_Yaşı_Yıl'] > 60][['cbs_id', 'Sebekeye_Baglanma_Tarihi_parsed', 'Ekipman_Yaşı_Yıl']].drop_duplicates('cbs_id')
+        print(f"\n⚠️  WARNING: {very_old_count:,} records have equipment older than 60 years (before 1964)")
+        print(f"   Unique old equipment: {len(very_old_equip):,}")
+
+        # Check for common default dates
+        default_dates = [
+            pd.Timestamp('1978-01-01'),  # 1.01.1978
+            pd.Timestamp('1900-01-01'),  # Excel NULL
+            pd.Timestamp('1970-01-01'),  # Unix epoch
+        ]
+
+        default_date_mask = df['Sebekeye_Baglanma_Tarihi_parsed'].isin(default_dates)
+        default_date_count = default_date_mask.sum()
+
+        if default_date_count > 0:
+            print(f"   [!] {default_date_count:,} records use common default dates (1.01.1978, 1.01.1970, etc.)")
+            print(f"       These may be placeholder values rather than real installation dates")
+
+        # Show examples for review
+        if len(very_old_equip) > 0:
+            print(f"\n   Examples of very old equipment (showing first 5):")
+            for idx, row in very_old_equip.head(5).iterrows():
+                install_date = row['Sebekeye_Baglanma_Tarihi_parsed']
+                age = row['Ekipman_Yaşı_Yıl']
+                cbs = row['cbs_id']
+                if pd.notna(install_date):
+                    print(f"     • Equipment {int(cbs):,}: Installed {install_date.strftime('%Y-%m-%d')} (Age: {age:.1f} years)")
+
+        print(f"\n   → RECOMMENDATION: Review these dates for data quality issues")
+        print(f"   → Acceptable range: 1964-present (equipment from 0-60 years old)")
+        print(f"   → Action: Verify if dates before 1964 are real or default placeholders")
+
 # STEP 4 & 5: Temporal Features + Failure Periods
 print("\n[Step 4-5/12] Creating Temporal Features (3M/6M/12M Windows) [6M/12M]...")
 
@@ -692,11 +734,12 @@ print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_d
 
 # Equipment tracking summary
 print(f"\n[TRACKING] Equipment Pipeline Summary:")
-print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment")
+print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment (cbs_id only)")
+print(f"  After ID consolidation:  {unique_equip_after_id_consolidation:,} unique equipment (cbs_id + id fallback)")
 print(f"  Pre-cutoff equipment:    {df_pre_cutoff[equipment_id_col].nunique():,}")
 print(f"  Final aggregated:        {len(equipment_df):,} equipment")
-equipment_lost = unique_equip_after_dedup - len(equipment_df)
-print(f"  Lost in pipeline:        {equipment_lost:,} ({equipment_lost/unique_equip_after_dedup*100:.1f}%)")
+equipment_lost = unique_equip_after_id_consolidation - len(equipment_df)
+print(f"  Lost in pipeline:        {equipment_lost:,} ({equipment_lost/unique_equip_after_id_consolidation*100:.1f}%)")
 
 # Identify and save excluded equipment for analysis
 if equipment_lost > 0:
