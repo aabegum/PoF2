@@ -76,10 +76,17 @@ PIPELINE_STEPS = [
         'description': 'Leakage removal + VIF analysis (30 → 25-30 features)'
     },
     {
+        'step': '4b',
+        'name': 'Equipment ID Audit',
+        'script': '10_equipment_id_audit.py',
+        'description': 'Verify cbs_id ↔ Ekipman_ID consistency (CRITICAL)',
+        'optional': True  # Optional diagnostic - will warn but not fail pipeline
+    },
+    {
         'step': 5,
         'name': 'Temporal PoF Model',
         'script': '06_temporal_pof_model.py',
-        'description': 'Train temporal PoF predictor (3M/6M/12M/24M windows)'
+        'description': 'Train temporal PoF predictor (3M/6M/12M windows)'
     },
     {
         'step': 6,
@@ -203,11 +210,19 @@ def run_pipeline():
 
             # Check for errors
             if result.returncode != 0:
-                print(f"  ✗ FAILED (exit code: {result.returncode})")
-                print(f"  → Check log file: {log_file}")
-                print(f"\n❌ Pipeline failed at step {step_num}")
-                print(f"   Check {log_file} for details")
-                return False
+                # Check if this is an optional step
+                is_optional = step_info.get('optional', False)
+
+                if is_optional:
+                    print(f"  ⚠️  OPTIONAL STEP FAILED (exit code: {result.returncode})")
+                    print(f"  → Check log file: {log_file}")
+                    print(f"  → Pipeline will continue (optional diagnostic)")
+                else:
+                    print(f"  ✗ FAILED (exit code: {result.returncode})")
+                    print(f"  → Check log file: {log_file}")
+                    print(f"\n❌ Pipeline failed at step {step_num}")
+                    print(f"   Check {log_file} for details")
+                    return False
 
             print(f"  ✓ Completed ({step_duration:.1f}s)")
 

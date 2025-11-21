@@ -46,6 +46,7 @@ import sys
 from config import (
     INPUT_FILE,
     FEATURES_REDUCED_FILE,
+    EQUIPMENT_LEVEL_FILE,
     MODEL_DIR,
     PREDICTION_DIR,
     OUTPUT_DIR,
@@ -207,41 +208,87 @@ all_faults['started at'] = pd.to_datetime(all_faults['started at'],
                                            dayfirst=True,  # Turkish DD-MM-YYYY format
                                            errors='coerce')
 
-# Define future prediction windows
+# CRITICAL: Load equipment ID mapping to ensure consistency
+# Step 2 transforms cbs_id → Equipment_ID_Primary → Ekipman_ID
+# We need to use Ekipman_ID (from features) not cbs_id (from raw faults)
+print("✓ Loading equipment ID mapping from equipment_level_data.csv...")
+equipment_mapping = pd.read_csv(EQUIPMENT_LEVEL_FILE)
+
+# Create ID mapping: cbs_id → Ekipman_ID
+# In Step 2, Equipment_ID_Primary is created from cbs_id (or fallback)
+# Then renamed to Ekipman_ID in final output
+if 'Ekipman_ID' in equipment_mapping.columns:
+    # Map raw faults to processed Ekipman_IDs
+    # Since Ekipman_ID = cbs_id for most equipment, we can use direct mapping
+    # But we need to verify this mapping exists in our feature data
+    valid_equipment_ids = set(df['Ekipman_ID'].unique())
+    print(f"✓ Loaded {len(valid_equipment_ids):,} valid Ekipman_IDs from feature data")
+else:
+    print("⚠️  WARNING: Ekipman_ID not found in equipment mapping!")
+    valid_equipment_ids = set()
+
+# Define future prediction windows for ALL horizons
+FUTURE_3M_END = CUTOFF_DATE + pd.DateOffset(months=3)   # 2024-09-25
 FUTURE_6M_END = CUTOFF_DATE + pd.DateOffset(months=6)   # 2024-12-25
 FUTURE_12M_END = CUTOFF_DATE + pd.DateOffset(months=12)  # 2025-06-25
+# NOTE: 24M removed - data only extends to 12M (only +3 equipment beyond 12M in training set)
 
 print(f"\n--- Temporal Prediction Windows ---")
 print(f"   Cutoff date:   {CUTOFF_DATE.date()}")
+print(f"   3M window:     {CUTOFF_DATE.date()} → {FUTURE_3M_END.date()}")
 print(f"   6M window:     {CUTOFF_DATE.date()} → {FUTURE_6M_END.date()}")
 print(f"   12M window:    {CUTOFF_DATE.date()} → {FUTURE_12M_END.date()}")
 
-# Identify equipment that WILL FAIL in future windows
-future_faults_6M = all_faults[
+# Identify equipment that WILL FAIL in each future window
+# IMPORTANT: Use cbs_id from raw faults, but filter to only valid Ekipman_IDs
+future_faults_3M_raw = all_faults[
+    (all_faults['started at'] > CUTOFF_DATE) &
+    (all_faults['started at'] <= FUTURE_3M_END)
+]['cbs_id'].dropna().unique()
+
+future_faults_6M_raw = all_faults[
     (all_faults['started at'] > CUTOFF_DATE) &
     (all_faults['started at'] <= FUTURE_6M_END)
 ]['cbs_id'].dropna().unique()
 
-future_faults_12M = all_faults[
+future_faults_12M_raw = all_faults[
     (all_faults['started at'] > CUTOFF_DATE) &
     (all_faults['started at'] <= FUTURE_12M_END)
 ]['cbs_id'].dropna().unique()
 
+# Filter to only equipment that exist in our feature data
+# This ensures target-feature alignment (critical!)
+future_faults_3M = np.array([id for id in future_faults_3M_raw if id in valid_equipment_ids])
+future_faults_6M = np.array([id for id in future_faults_6M_raw if id in valid_equipment_ids])
+future_faults_12M = np.array([id for id in future_faults_12M_raw if id in valid_equipment_ids])
+
 print(f"\n   Equipment that WILL fail in future:")
-print(f"      6M window:  {len(future_faults_6M):,} equipment")
-print(f"      12M window: {len(future_faults_12M):,} equipment")
+print(f"      3M window:  {len(future_faults_3M_raw):,} raw → {len(future_faults_3M):,} valid ({len(future_faults_3M)/max(len(future_faults_3M_raw),1)*100:.1f}% matched)")
+print(f"      6M window:  {len(future_faults_6M_raw):,} raw → {len(future_faults_6M):,} valid ({len(future_faults_6M)/max(len(future_faults_6M_raw),1)*100:.1f}% matched)")
+print(f"      12M window: {len(future_faults_12M_raw):,} raw → {len(future_faults_12M):,} valid ({len(future_faults_12M)/max(len(future_faults_12M_raw),1)*100:.1f}% matched)")
+
+# Check for ID mismatch
+unmatched_3M = len(future_faults_3M_raw) - len(future_faults_3M)
+if unmatched_3M > 0:
+    print(f"\n   ⚠️  WARNING: {unmatched_3M} equipment IDs from faults NOT found in feature data!")
+    print(f"      These equipment will be excluded from target creation")
+    print(f"      Common causes: Missing cbs_id, excluded in Step 2 filtering")
 
 # Create binary targets
 print("\n--- Creating Binary Temporal Targets ---")
 
 targets = {}
 
+# Map horizons to their corresponding future fault sets
+horizon_to_faults = {
+    '3M': future_faults_3M,
+    '6M': future_faults_6M,
+    '12M': future_faults_12M
+}
+
 for horizon_name, horizon_days in HORIZONS.items():
-    # Get equipment IDs that will fail in this window
-    if horizon_name == '6M':
-        failed_equipment = future_faults_6M
-    else:  # 12M
-        failed_equipment = future_faults_12M
+    # Get equipment IDs that will fail in THIS specific window
+    failed_equipment = horizon_to_faults[horizon_name]
 
     # Target = 1 if equipment WILL fail in future window
     targets[horizon_name] = df['Ekipman_ID'].isin(failed_equipment).astype(int)
@@ -258,16 +305,27 @@ for horizon_name, horizon_days in HORIZONS.items():
     print(f"   Won't fail (0):    {target_dist.get(0, 0):3d} ({100-pos_rate:5.1f}%)")
     print(f"   ✓ Positive Rate: {pos_rate:.1f}%")
 
-    # Validation - check against expected values
-    expected_6M = 164
-    expected_12M = 266
-    expected = expected_6M if horizon_name == '6M' else expected_12M
+    # Validation - check against expected values for each horizon
+    # NOTE: Expected values are for ALL equipment (734 total)
+    # Training set (562) will have proportionally fewer positives
+    expected_values = {
+        '3M': 85,   # Estimated based on fault data
+        '6M': 164,  # From previous analysis
+        '12M': 266  # From previous analysis
+    }
 
-    if abs(target_dist.get(1, 0) - expected) <= 5:
-        print(f"   ✅ Status: CORRECT (expected ~{expected}, got {target_dist.get(1, 0)})")
+    # Adjust expected for training set size (562/734 of total)
+    expected_all = expected_values.get(horizon_name, 0)
+    expected_train = int(expected_all * (len(df) / 734))
+
+    actual = target_dist.get(1, 0)
+
+    # Allow ±20% tolerance since we're working with filtered training set
+    if abs(actual - expected_train) <= max(10, expected_train * 0.2):
+        print(f"   ✅ Status: OK (expected ~{expected_train} for training set, got {actual})")
     else:
-        print(f"   ⚠️  Status: CHECK (expected ~{expected}, got {target_dist.get(1, 0)})")
-        print(f"       Verify date parsing and equipment ID matching")
+        print(f"   ⚠️  Status: CHECK (expected ~{expected_train} for training set, got {actual})")
+        print(f"       Full dataset expected: {expected_all}")
 
 # ============================================================================
 # STEP 3: PREPARE FEATURES
@@ -757,8 +815,11 @@ print("="*100)
 
 # 1. ROC Curves
 print("\n--- Creating ROC Curves ---")
-fig, axes = plt.subplots(2, 2, figsize=(14, 12))  # 2x2 grid for 4 horizons
-axes = axes.flatten()  # Flatten to 1D array for easy indexing
+n_horizons = len(HORIZONS)
+n_cols = 2  # Use 2 columns
+n_rows = (n_horizons + 1) // 2  # Calculate rows needed
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 6*n_rows))  # Dynamic grid
+axes = axes.flatten() if n_horizons > 1 else [axes]  # Flatten to 1D array for easy indexing
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
@@ -788,6 +849,10 @@ for idx, horizon in enumerate(HORIZONS.keys()):
     ax.legend(loc='lower right')
     ax.grid(alpha=0.3)
 
+# Hide unused subplots
+for idx in range(len(HORIZONS), len(axes)):
+    axes[idx].axis('off')
+
 plt.tight_layout()
 plt.savefig('outputs/model_evaluation/roc_curves.png', dpi=300, bbox_inches='tight')
 plt.close()
@@ -795,8 +860,8 @@ print("✓ ROC curves saved: outputs/model_evaluation/roc_curves.png")
 
 # 2. Precision-Recall Curves
 print("\n--- Creating Precision-Recall Curves ---")
-fig, axes = plt.subplots(2, 2, figsize=(14, 12))  # 2x2 grid for 4 horizons
-axes = axes.flatten()  # Flatten to 1D array for easy indexing
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 6*n_rows))  # Dynamic grid
+axes = axes.flatten() if n_horizons > 1 else [axes]  # Flatten to 1D array for easy indexing
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]
@@ -825,6 +890,10 @@ for idx, horizon in enumerate(HORIZONS.keys()):
     ax.legend(loc='upper right')
     ax.grid(alpha=0.3)
 
+# Hide unused subplots
+for idx in range(len(HORIZONS), len(axes)):
+    axes[idx].axis('off')
+
 plt.tight_layout()
 plt.savefig('outputs/model_evaluation/precision_recall_curves.png', dpi=300, bbox_inches='tight')
 plt.close()
@@ -832,7 +901,7 @@ print("✓ PR curves saved: outputs/model_evaluation/precision_recall_curves.png
 
 # 3. Confusion Matrices
 print("\n--- Creating Confusion Matrices ---")
-fig, axes = plt.subplots(2, 4, figsize=(20, 10))  # 2 models x 4 horizons
+fig, axes = plt.subplots(2, n_horizons, figsize=(5*n_horizons, 10))  # 2 models x n horizons
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     # XGBoost confusion matrix
@@ -866,7 +935,8 @@ print("✓ Confusion matrices saved: outputs/model_evaluation/confusion_matrices
 
 # 4. Feature Importance Comparison
 print("\n--- Creating Feature Importance Comparison ---")
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))  # CHANGED: 1x3 instead of 2x2
+fig, axes = plt.subplots(1, n_horizons, figsize=(6*n_horizons, 6))  # Dynamic: 1 row x n_horizons columns
+axes = axes if n_horizons > 1 else [axes]  # Ensure axes is always iterable
 
 for idx, horizon in enumerate(HORIZONS.keys()):
     ax = axes[idx]

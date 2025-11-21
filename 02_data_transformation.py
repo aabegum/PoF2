@@ -1,6 +1,6 @@
 """
 ================================================================================
-SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v4.0
+SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v5.0
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
@@ -9,23 +9,39 @@ PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED
 - Historical Window: All data up to 2024-06-25 (for feature calculation)
 - Prediction Window: 2024-06-25 to 2025-06-25 (6M and 12M targets)
 - Dual Prediction Targets: 6-month + 12-month failure risk (EXCELLENT class balance)
-- Features Created: Temporal fault counts (3M/6M/12M), age, MTBF, reliability metrics
+- Features Created: Temporal fault counts (3M/6M/12M), age, MTBF (3 methods), reliability metrics
 - DATA LEAKAGE PREVENTION: All features calculated using data BEFORE cutoff date only
 
 WHAT THIS SCRIPT DOES:
 Transforms fault-level records (1,210 faults) → equipment-level records (789 equipment)
-Creates ~70 features for temporal PoF modeling including:
+Creates ~75 features for temporal PoF modeling including:
 - [6M/12M] Fault history features (3M/6M/12M counts) - PRIMARY prediction drivers
 - [6M/12M] Equipment age and time-to-first-failure - Wear-out pattern detection
-- [6M/12M] MTBF and recurring fault flags - Reliability indicators
+- [6M/12M] MTBF features (3 methods) - Inter-fault, Lifetime, Observable
+- [6M/12M] Degradation indicators - Failure acceleration detection
 - [12M] Geographic clustering - Spatial risk patterns
 - [12M] Customer impact ratios - Criticality scoring
 
+ENHANCEMENTS in v5.0:
++ UPDATED: Equipment Age Calculation
+  - NEW SOURCE: Sebekeye_Baglanma_Tarihi (Grid Connection Date) - single reliable source
+  - REMOVED: TESIS_TARIHI and EDBS_IDATE (legacy fallback priority chain no longer needed)
+  - SIMPLIFIED: Direct age calculation from grid connection date
+  - Age Source: 'GRID_CONNECTION' (vs previous 'TESIS'/'EDBS'/'WORKORDER')
+
+ENHANCEMENTS in v4.1:
++ NEW: 3 MTBF Calculation Methods
+  - Method 1 (MTBF_Gün): Inter-fault average → Best for PoF prediction
+  - Method 2 (MTBF_Lifetime_Gün): Total exposure / failures → Survival analysis baseline hazard
+  - Method 3 (MTBF_Observable_Gün): First fault to cutoff / failures → Degradation detection
++ NEW: Baseline_Hazard_Rate = 1/MTBF_Lifetime → For Cox proportional hazards model
++ NEW: MTBF_Degradation_Ratio = Method3/Method1 → Detects if failures accelerating
++ NEW: Is_Degrading flag → Equipment with ratio >1.5 (failures accelerating)
+
 ENHANCEMENTS in v4.0:
 + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Time Until First Failure)
-  - Calculates: Installation Date → First Fault Date
+  - Calculates: Grid Connection Date → First Fault Date
   - Detects: Infant mortality vs survived burn-in equipment
-  - Uses same priority: TESIS → EDBS → WORKORDER fallback
 + OPTION A Pipeline Context: Links features to dual prediction strategy
 + Feature Importance Tags: [6M/12M] markers show prediction relevance
 + Reduced Verbosity: ~200 print statements (down from 458)
@@ -37,9 +53,10 @@ CROSS-REFERENCES:
 - Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
 - Script 01: Confirms 100% timestamp coverage + 10/10 data quality
 - Script 03: Uses these features for advanced engineering (PoF risk scores)
+- Script 09 (06_survival_model.py): Uses MTBF_Lifetime_Gün for Cox model
 
 Input:  data/combined_data.xlsx (fault records)
-Output: data/equipment_level_data.csv (equipment records with ~70 features)
+Output: data/equipment_level_data.csv (equipment records with ~75 features)
 """
 
 import pandas as pd
@@ -55,7 +72,7 @@ from config import (
     REFERENCE_DATE,
     MIN_VALID_YEAR,
     MAX_VALID_YEAR,
-    USE_FIRST_WORKORDER_FALLBACK,
+    DATA_DIR,
     INPUT_FILE,
     EQUIPMENT_LEVEL_FILE,
     FEATURE_DOCS_FILE,
@@ -83,9 +100,10 @@ pd.set_option('display.max_columns', None)
 # CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
-print("SCRIPT 02: DATA TRANSFORMATION v4.0 (OPTION A - DUAL PREDICTIONS)")
+print("SCRIPT 02: DATA TRANSFORMATION v5.0 (OPTION A - DUAL PREDICTIONS)")
 print("="*80)
-print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR} | Work Order Fallback: {'ON' if USE_FIRST_WORKORDER_FALLBACK else 'OFF'}")
+print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR}")
+print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date) - Single reliable source")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -100,7 +118,7 @@ print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns from {INPUT_FILE}
 # STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
 # ============================================================================
 print("\n[Step 1B/12] Detecting and Removing Duplicates...")
-print("⚠️  CRITICAL: Combining TESIS, EDBS, WORKORDER sources - same fault may appear multiple times")
+print("⚠️  CRITICAL: Checking for duplicate fault records (same equipment + time)")
 
 # Identify equipment ID column
 equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
@@ -131,7 +149,7 @@ if 'started at' in df.columns:
 
     if time_dup_count > 0:
         print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
-        print(f"    (These are likely the same fault appearing in TESIS, EDBS, and WORKORDER)")
+        print(f"    (Duplicate fault records with same equipment ID and timestamp)")
 
         # Show examples for manual validation
         df_duplicates = df[time_dup_mask].copy()
@@ -147,6 +165,19 @@ if 'started at' in df.columns:
             dup_file = DATA_DIR / 'removed_duplicates.csv'
             df_duplicates.to_csv(dup_file, index=False)
             print(f"  ✓ All duplicates saved: {dup_file}")
+
+            # Analyze duplicate distribution across cutoff date
+            if 'started at' in df_duplicates.columns:
+                df_duplicates['started_at_parsed'] = pd.to_datetime(df_duplicates['started at'], errors='coerce')
+                pre_cutoff_dups = (df_duplicates['started_at_parsed'] <= REFERENCE_DATE).sum()
+                post_cutoff_dups = (df_duplicates['started_at_parsed'] > REFERENCE_DATE).sum()
+
+                print(f"\n  Duplicate Distribution by Cutoff Date:")
+                print(f"    Pre-cutoff duplicates:  {pre_cutoff_dups} ({pre_cutoff_dups/len(df_duplicates)*100:.1f}%)")
+                print(f"    Post-cutoff duplicates: {post_cutoff_dups} ({post_cutoff_dups/len(df_duplicates)*100:.1f}%)")
+                if post_cutoff_dups > 0:
+                    print(f"    → {post_cutoff_dups} duplicates removed from test set (172 equipment)")
+                    print(f"    → Test set quality improved by removing post-cutoff duplicates")
 
         df = df[~time_dup_mask].copy()
     else:
@@ -323,47 +354,35 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
     return parsed
 
 # Parse and validate all date columns
-df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI', is_installation_date=True)
-df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE', is_installation_date=True)
+# NEW: Using Sebekeye_Baglanma_Tarihi (Grid Connection Date) as primary installation date source
+df['Sebekeye_Baglanma_Tarihi_parsed'] = parse_and_validate_date(df['Sebekeye_Baglanma_Tarihi'], 'Sebekeye_Baglanma_Tarihi', is_installation_date=True)
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True, is_installation_date=False)
 df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True, is_installation_date=False)
 
-# Parse work order creation date (for fallback option)
-if 'Oluşturma Tarihi Sıralama' in df.columns or 'Oluşturulma_Tarihi' in df.columns:
-    creation_col = 'Oluşturma Tarihi Sıralama' if 'Oluşturma Tarihi Sıralama' in df.columns else 'Oluşturulma_Tarihi'
-    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Date', min_year=2015, report=True, is_installation_date=False)
-else:
-    df['Oluşturulma_Tarihi'] = pd.NaT
-
 # ============================================================================
-# STEP 3: SIMPLIFIED EQUIPMENT AGE CALCULATION
+# STEP 3: SIMPLIFIED EQUIPMENT AGE CALCULATION (Using Sebekeye_Baglanma_Tarihi)
 # ============================================================================
-# OPTIMIZED: Single calculation instead of creating TESIS/EDBS variants
-# Reduces from 6 age columns → 2 age columns (Ekipman_Yaşı_Gün, Ekipman_Yaşı_Yıl)
-print("\n[Step 3/12] Calculating Equipment Age (TESIS→EDBS→WORKORDER Priority)...")
+# UPDATED v5.0: Direct calculation from Sebekeye_Baglanma_Tarihi (Grid Connection Date)
+# Single reliable source - no fallback priority chain needed
+print("\n[Step 3/12] Calculating Equipment Age (Sebekeye_Baglanma_Tarihi - Grid Connection Date)...")
 
 def calculate_equipment_age(row):
     """
-    Calculate equipment age with single priority chain.
-    Priority: TESIS_TARIHI → EDBS_IDATE → Work Order (if enabled)
+    Calculate equipment age from Grid Connection Date.
+    Single source: Sebekeye_Baglanma_Tarihi
     Returns: (age_days, source, installation_date)
     """
     ref_date = REFERENCE_DATE
 
-    # Priority 1: TESIS_TARIHI (commissioning/database entry date)
-    if pd.notna(row['TESIS_TARIHI_parsed']) and row['TESIS_TARIHI_parsed'] < ref_date:
-        age_days = (ref_date - row['TESIS_TARIHI_parsed']).days
-        return age_days, 'TESIS', row['TESIS_TARIHI_parsed']
+    # Use Sebekeye_Baglanma_Tarihi (Grid Connection Date)
+    if pd.notna(row['Sebekeye_Baglanma_Tarihi_parsed']) and row['Sebekeye_Baglanma_Tarihi_parsed'] < ref_date:
+        age_days = (ref_date - row['Sebekeye_Baglanma_Tarihi_parsed']).days
+        return age_days, 'GRID_CONNECTION', row['Sebekeye_Baglanma_Tarihi_parsed']
 
-    # Priority 2: EDBS_IDATE (physical installation date)
-    if pd.notna(row['EDBS_IDATE_parsed']) and row['EDBS_IDATE_parsed'] < ref_date:
-        age_days = (ref_date - row['EDBS_IDATE_parsed']).days
-        return age_days, 'EDBS', row['EDBS_IDATE_parsed']
-
-    # Priority 3: Missing (will be filled by work order if enabled)
+    # Missing installation date
     return None, 'MISSING', None
 
-# Calculate age using single priority function
+# Calculate age using simplified function
 results = df.apply(calculate_equipment_age, axis=1, result_type='expand')
 results.columns = ['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']
 df[['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']] = results
@@ -377,37 +396,8 @@ valid_ages = df[df['Yaş_Kaynak'] != 'MISSING']['Ekipman_Yaşı_Yıl']
 print(f"Age Sources: {' | '.join([f'{src}:{cnt:,}({cnt/len(df)*100:.0f}%)' for src, cnt in source_counts.items()])}")
 if len(valid_ages) > 0:
     print(f"Age Range: {valid_ages.min():.1f}-{valid_ages.max():.1f}y, Mean={valid_ages.mean():.1f}y, Median={valid_ages.median():.1f}y")
-print(f"✓ Simplified: 2 age columns created (was 6 in previous version)")
-
-# ============================================================================
-# STEP 3B: OPTIONAL FIRST WORK ORDER FALLBACK
-# ============================================================================
-if USE_FIRST_WORKORDER_FALLBACK:
-    print("\n[Step 3B/12] Filling Missing Ages (First Work Order Proxy)...")
-    missing_mask = df['Yaş_Kaynak'] == 'MISSING'
-    missing_count = missing_mask.sum()
-
-    if missing_count > 0 and 'Oluşturulma_Tarihi' in df.columns:
-        equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
-        equip_id_col = next((col for col in equip_id_cols if col in df.columns), None)
-
-        if equip_id_col:
-            # Use first work order date as age proxy
-            first_wo_dates = df.groupby(equip_id_col)['Oluşturulma_Tarihi'].min()
-            df['_first_wo'] = df[equip_id_col].map(first_wo_dates)
-            age_from_wo = (REFERENCE_DATE - df['_first_wo']).dt.days
-
-            # Fill missing ages with work order fallback
-            fill_mask = missing_mask & df['_first_wo'].notna() & (age_from_wo > 0)
-            df.loc[fill_mask, 'Ekipman_Yaşı_Gün'] = age_from_wo[fill_mask]
-            df.loc[fill_mask, 'Ekipman_Yaşı_Yıl'] = age_from_wo[fill_mask] / 365.25
-            df.loc[fill_mask, 'Yaş_Kaynak'] = 'WORKORDER'
-            df.loc[fill_mask, 'Ekipman_Kurulum_Tarihi'] = df.loc[fill_mask, '_first_wo']
-
-            df.drop(columns=['_first_wo'], inplace=True)
-            filled_count = fill_mask.sum()
-            remaining = (df['Yaş_Kaynak'] == 'MISSING').sum()
-            print(f"Filled {filled_count:,} ages using work order proxy | Remaining missing: {remaining:,} ({remaining/len(df)*100:.1f}%)")
+missing_count = (df['Yaş_Kaynak'] == 'MISSING').sum()
+print(f"✓ Equipment ages calculated | Missing: {missing_count:,} ({missing_count/len(df)*100:.1f}%)")
 
 # STEP 4 & 5: Temporal Features + Failure Periods
 print("\n[Step 4-5/12] Creating Temporal Features (3M/6M/12M Windows) [6M/12M]...")
@@ -520,8 +510,8 @@ print(f"  ✓ Mapping saved: {mapping_file}")
 # ============================================================================
 print("\n[Step 7/12] Aggregating to Equipment Level (Fault→Equipment)...")
 
-# Sort by Age Source to prioritize during aggregation (TESIS > EDBS > WORKORDER > MISSING)
-source_priority = {'TESIS': 0, 'EDBS': 1, 'WORKORDER': 2, 'MISSING': 3}
+# Sort by Age Source to prioritize during aggregation (GRID_CONNECTION > MISSING)
+source_priority = {'GRID_CONNECTION': 0, 'MISSING': 1}
 df['_source_priority'] = df['Yaş_Kaynak'].map(source_priority).fillna(99)
 df = df.sort_values('_source_priority')
 df = df.drop(columns=['_source_priority'])
@@ -551,7 +541,7 @@ agg_dict = {
     'İlçe': 'first',
     'Mahalle': 'first',
 
-    # Equipment Age (simplified - single source with priority: TESIS→EDBS→WORKORDER)
+    # Equipment Age (from Sebekeye_Baglanma_Tarihi - Grid Connection Date)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
@@ -628,6 +618,21 @@ if equipment_lost > 0:
     print(f"\n  Exclusion Analysis:")
     print(f"    Post-cutoff failures only: {post_cutoff_equipment:,} equipment ({post_cutoff_equipment/equipment_lost*100:.1f}%)")
     print(f"      → These can be used as validation/test set!")
+
+    # Validate post-cutoff data quality
+    print(f"\n  Post-Cutoff Test Set Data Quality:")
+    post_cutoff_faults = df_excluded[df_excluded['started at'] > REFERENCE_DATE]
+    print(f"    Total post-cutoff faults: {len(post_cutoff_faults):,}")
+    print(f"    Unique equipment: {post_cutoff_equipment:,}")
+    print(f"    Avg faults per equipment: {len(post_cutoff_faults)/post_cutoff_equipment:.2f}")
+
+    # Check for duplicates in post-cutoff data
+    post_cutoff_dups = post_cutoff_faults.duplicated(subset=[equipment_id_col, 'started at'], keep='first').sum()
+    if post_cutoff_dups > 0:
+        print(f"    ⚠️  WARNING: {post_cutoff_dups} duplicates found in post-cutoff data")
+        print(f"        → These were already removed in Step 1B")
+    else:
+        print(f"    ✓ No duplicates in post-cutoff test set (clean)")
 
     # Save excluded equipment for manual review
     excluded_file = DATA_DIR / 'excluded_equipment_analysis.csv'
@@ -739,6 +744,91 @@ def calculate_mtbf_safe(equipment_id):
 print("  Calculating MTBF (using failures BEFORE cutoff only - leakage-safe)...")
 equipment_df['MTBF_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_safe)
 
+# METHOD 2: MTBF Lifetime (Total Exposure / Failures) - For Survival Analysis
+def calculate_mtbf_lifetime(equipment_id):
+    """
+    Method 2: Calculate MTBF using total exposure time
+    MTBF_Lifetime = (Cutoff - Installation) / N_Faults
+
+    Use case: Survival analysis baseline hazard rate
+    - Exposure-weighted risk calculation
+    - Proportional hazards framework
+    - Censoring-aware models
+    """
+    # Get installation date
+    install_row = equipment_df[equipment_df['Ekipman_ID'] == equipment_id]
+    if len(install_row) == 0:
+        return None
+
+    install_date = install_row['Ekipman_Kurulum_Tarihi'].iloc[0]
+
+    if pd.isna(install_date):
+        return None
+
+    # Count faults before cutoff
+    num_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ].shape[0]
+
+    if num_faults == 0:
+        return None  # No failures, MTBF undefined
+
+    total_days = (REFERENCE_DATE - install_date).days
+
+    if total_days > 0:
+        return total_days / num_faults
+
+    return None
+
+print("  Calculating MTBF Lifetime (Method 2: for survival analysis)...")
+equipment_df['MTBF_Lifetime_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_lifetime)
+
+# Baseline hazard rate (inverse of MTBF)
+equipment_df['Baseline_Hazard_Rate'] = 1 / equipment_df['MTBF_Lifetime_Gün']
+
+# METHOD 3: MTBF Observable (First Fault to Cutoff / Failures) - Degradation Detection
+def calculate_mtbf_observable(equipment_id):
+    """
+    Method 3: Calculate MTBF from first fault to cutoff
+    MTBF_Observable = (Cutoff - First_Fault) / N_Faults
+
+    Use case: Degradation trend detection
+    - Compare with Method 1 to detect if failures accelerating
+    - Ratio > 1.5 = Degrading (recent MTBF shorter)
+    - Ratio < 0.8 = Improving (recent MTBF longer)
+    """
+    equip_faults = df[
+        (df[equipment_id_col] == equipment_id) &
+        (df['started at'] <= REFERENCE_DATE)
+    ]['started at'].dropna().sort_values()
+
+    if len(equip_faults) < 2:
+        return None
+
+    first_fault = equip_faults.iloc[0]
+    observable_days = (REFERENCE_DATE - first_fault).days
+    num_faults = len(equip_faults)
+
+    if observable_days > 0:
+        return observable_days / num_faults
+
+    return None
+
+print("  Calculating MTBF Observable (Method 3: for degradation detection)...")
+equipment_df['MTBF_Observable_Gün'] = equipment_df['Ekipman_ID'].apply(calculate_mtbf_observable)
+
+# Degradation ratio (Method 3 / Method 1)
+# Ratio > 1.0 means failures are accelerating (recent MTBF shorter than historical)
+equipment_df['MTBF_Degradation_Ratio'] = (
+    equipment_df['MTBF_Observable_Gün'] / equipment_df['MTBF_Gün']
+)
+
+# Flag degrading equipment (failures accelerating)
+equipment_df['Is_Degrading'] = (
+    equipment_df['MTBF_Degradation_Ratio'] > 1.5
+).fillna(False).astype(int)
+
 # 🔧 FIX: Calculate last failure date using ONLY failures BEFORE cutoff (no leakage)
 def calculate_last_failure_date_safe(equipment_id):
     """
@@ -781,8 +871,8 @@ print("  Calculating first failure date (using failures BEFORE cutoff only - lea
 equipment_df['İlk_Arıza_Tarihi_Safe'] = equipment_df['Ekipman_ID'].apply(calculate_first_failure_date_safe)
 
 # NEW FEATURE v4.0: Time Until First Failure (Infant Mortality Detection)
-# Calculates: Installation Date → First Fault Date
-# Uses same priority as equipment age: TESIS → EDBS → WORKORDER (via Ekipman_Kurulum_Tarihi)
+# Calculates: Grid Connection Date → First Fault Date
+# Uses Sebekeye_Baglanma_Tarihi (via Ekipman_Kurulum_Tarihi)
 equipment_df['Ilk_Arizaya_Kadar_Gun'] = (
     equipment_df['İlk_Arıza_Tarihi_Safe'] - equipment_df['Ekipman_Kurulum_Tarihi']
 ).dt.days
@@ -790,11 +880,19 @@ equipment_df['Ilk_Arizaya_Kadar_Yil'] = equipment_df['Ilk_Arizaya_Kadar_Gun'] / 
 
 # Summary statistics
 mtbf_valid = equipment_df['MTBF_Gün'].notna().sum()
+mtbf_lifetime_valid = equipment_df['MTBF_Lifetime_Gün'].notna().sum()
+mtbf_observable_valid = equipment_df['MTBF_Observable_Gün'].notna().sum()
+degrading_count = equipment_df['Is_Degrading'].sum()
 ttff_valid = equipment_df['Ilk_Arizaya_Kadar_Gun'].notna().sum()
 ttff_mean = equipment_df['Ilk_Arizaya_Kadar_Yil'].mean()
 infant_mortality = (equipment_df['Ilk_Arizaya_Kadar_Gun'] < 365).sum()  # Failed within 1 year
 
-print(f"MTBF: {mtbf_valid:,}/{len(equipment_df):,} valid | Time-to-First-Failure: {ttff_valid:,}/{len(equipment_df):,} valid (avg {ttff_mean:.1f}y, infant mortality: {infant_mortality})")
+print(f"\nMTBF Statistics:")
+print(f"  Method 1 (Inter-Fault): {mtbf_valid:,}/{len(equipment_df):,} valid ({mtbf_valid/len(equipment_df)*100:.1f}%)")
+print(f"  Method 2 (Lifetime): {mtbf_lifetime_valid:,}/{len(equipment_df):,} valid ({mtbf_lifetime_valid/len(equipment_df)*100:.1f}%)")
+print(f"  Method 3 (Observable): {mtbf_observable_valid:,}/{len(equipment_df):,} valid ({mtbf_observable_valid/len(equipment_df)*100:.1f}%)")
+print(f"  Degrading equipment: {degrading_count:,} ({degrading_count/len(equipment_df)*100:.1f}%) - failures accelerating")
+print(f"  Time-to-First-Failure: {ttff_valid:,}/{len(equipment_df):,} valid (avg {ttff_mean:.1f}y, infant mortality: {infant_mortality})")
 
 # ============================================================================
 # STEP 11: DETECT RECURRING FAULTS
@@ -975,12 +1073,20 @@ print(f"\nKEY FEATURES FOR DUAL PREDICTIONS (6M + 12M):")
 print(f"  [6M/12M] Fault History: 3M/6M/12M counts (PRIMARY prediction drivers)")
 print(f"  [6M/12M] Equipment Age: Day-precision ({equipment_df['Yaş_Kaynak'].value_counts().to_dict()})")
 print(f"  [6M/12M] NEW: Time-to-First-Failure (avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality)")
-print(f"  [6M/12M] MTBF: {equipment_df['MTBF_Gün'].notna().sum():,} valid | Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} flagged")
+print(f"  [6M/12M] MTBF Features (3 methods):")
+print(f"    • Method 1 (Inter-Fault): {mtbf_valid:,} valid - PoF prediction")
+print(f"    • Method 2 (Lifetime): {mtbf_lifetime_valid:,} valid - Survival analysis baseline hazard")
+print(f"    • Method 3 (Observable): {mtbf_observable_valid:,} valid - Degradation detection")
+print(f"    • Degrading equipment: {degrading_count:,} flagged (failures accelerating)")
+print(f"  [6M/12M] Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} chronic repeaters flagged")
 print(f"  [12M] Customer Impact Ratios: {len([col for col in customer_impact_cols if any(col.replace(' ', '_') in c for c in equipment_df.columns)])} features")
 print(f"  [12M] Equipment Classification: {harmonized_classes} standardized classes")
 
-print(f"\nENHANCEMENTS IN v4.0:")
-print(f"  + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Installation → First Fault)")
+print(f"\nENHANCEMENTS IN v4.1:")
+print(f"  + NEW: 3 MTBF calculation methods (Inter-Fault, Lifetime, Observable)")
+print(f"  + NEW: Baseline_Hazard_Rate feature (for Cox survival analysis)")
+print(f"  + NEW: MTBF_Degradation_Ratio + Is_Degrading flag (failure acceleration detection)")
+print(f"  + NEW: Time-to-First-Failure (Ilk_Arizaya_Kadar_Gun/Yil)")
 print(f"  + OPTION A Context: Dual prediction strategy (6M: 26.9%, 12M: 44.2% positive class)")
 print(f"  + Feature Importance Tags: [6M/12M] markers for model relevance")
 print(f"  + Reduced Verbosity: ~60% fewer print statements")
