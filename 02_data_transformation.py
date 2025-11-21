@@ -4,23 +4,22 @@ SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v5.0
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
-PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED]
-- Cutoff Date: 2024-06-25 (from Script 00)
-- Historical Window: All data up to 2024-06-25 (for feature calculation)
-- Prediction Window: 2024-06-25 to 2025-06-25 (6M and 12M targets)
-- Dual Prediction Targets: 6-month + 12-month failure risk (EXCELLENT class balance)
-- Features Created: Temporal fault counts (3M/6M/12M), age, MTBF (3 methods), reliability metrics
+PIPELINE STRATEGY: Temporal Multi-Horizon Predictions
+- Cutoff Date: 2024-06-25 (configurable in config.py)
+- Historical Window: All data up to cutoff date (for feature calculation)
+- Prediction Windows: 3M, 6M, 12M multi-horizon failure risk
+- Features Created: Temporal fault counts, age, MTBF (3 methods), reliability metrics
 - DATA LEAKAGE PREVENTION: All features calculated using data BEFORE cutoff date only
 
 WHAT THIS SCRIPT DOES:
-Transforms fault-level records (1,210 faults) → equipment-level records (789 equipment)
-Creates ~75 features for temporal PoF modeling including:
-- [6M/12M] Fault history features (3M/6M/12M counts) - PRIMARY prediction drivers
-- [6M/12M] Equipment age and time-to-first-failure - Wear-out pattern detection
-- [6M/12M] MTBF features (3 methods) - Inter-fault, Lifetime, Observable
-- [6M/12M] Degradation indicators - Failure acceleration detection
-- [12M] Geographic clustering - Spatial risk patterns
-- [12M] Customer impact ratios - Criticality scoring
+Transforms fault-level records to equipment-level records with engineered features.
+Creates comprehensive features for temporal PoF modeling including:
+- Fault history features (3M/6M/12M counts) - PRIMARY prediction drivers
+- Equipment age and time-to-first-failure - Wear-out pattern detection
+- MTBF features (3 methods) - Inter-fault, Lifetime, Observable
+- Degradation indicators - Failure acceleration detection
+- Geographic features - Spatial risk patterns (if available)
+- Customer impact ratios - Criticality scoring (if available)
 
 ENHANCEMENTS in v5.0:
 + UPDATED: Equipment Age Calculation
@@ -42,21 +41,20 @@ ENHANCEMENTS in v4.0:
 + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Time Until First Failure)
   - Calculates: Grid Connection Date → First Fault Date
   - Detects: Infant mortality vs survived burn-in equipment
-+ OPTION A Pipeline Context: Links features to dual prediction strategy
-+ Feature Importance Tags: [6M/12M] markers show prediction relevance
-+ Reduced Verbosity: ~200 print statements (down from 458)
++ Multi-Horizon Predictions: Links features to 3M/6M/12M prediction windows
++ Reduced Verbosity: Concise progress indicators
 + Progress Indicators: [Step X/12] for pipeline visibility
-+ Flexible Date Parser: Recovers 25% "missing" timestamps (DD-MM-YYYY support)
-+ Smart Date Validation: Rejects Excel NULL + suspicious recent dates only
++ Flexible Date Parser: Multi-format support (DD-MM-YYYY, ISO, etc.)
++ Smart Date Validation: Rejects Excel NULL + suspicious recent dates
 
 CROSS-REFERENCES:
-- Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
-- Script 01: Confirms 100% timestamp coverage + 10/10 data quality
+- Script 01: Data quality profiling and validation
 - Script 03: Uses these features for advanced engineering (PoF risk scores)
-- Script 09 (06_survival_model.py): Uses MTBF_Lifetime_Gün for Cox model
+- Script 06: Temporal PoF Model (multi-horizon predictions)
+- Script 09: Cox Survival Model (uses MTBF_Lifetime_Gün)
 
-Input:  data/combined_data.xlsx (fault records)
-Output: data/equipment_level_data.csv (equipment records with ~75 features)
+Input:  data/combined_data_son.xlsx (fault records)
+Output: data/equipment_level_data.csv (equipment-level features)
 """
 
 import pandas as pd
@@ -100,10 +98,10 @@ pd.set_option('display.max_columns', None)
 # CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
-print("SCRIPT 02: DATA TRANSFORMATION v5.0 (OPTION A - DUAL PREDICTIONS)")
+print("SCRIPT 02: DATA TRANSFORMATION v5.0 (Multi-Horizon PoF)")
 print("="*80)
 print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR}")
-print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date) - Single reliable source")
+print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -440,7 +438,7 @@ df['Time_To_Repair_Hours'] = (df['ended at'] - df['started at']).dt.total_second
 
 # CRITICAL FIX: Use CUTOFF_DATE instead of df['started at'].max()
 # This ensures temporal features use ONLY historical data (before prediction window)
-reference_date = REFERENCE_DATE  # Use cutoff date from OPTION A (2024-06-25)
+reference_date = REFERENCE_DATE  # Use cutoff date from config.py
 cutoff_3m = reference_date - pd.Timedelta(days=90)   # 2024-03-27
 cutoff_6m = reference_date - pd.Timedelta(days=180)  # 2023-12-28
 cutoff_12m = reference_date - pd.Timedelta(days=365) # 2023-06-25
@@ -1097,36 +1095,32 @@ print(f"Saved: equipment_level_data.csv ({len(equipment_df):,} records x {len(eq
 # FINAL SUMMARY
 # ============================================================================
 print("\n" + "="*80)
-print("TRANSFORMATION COMPLETE - OPTION A DUAL PREDICTION FEATURES READY")
+print("TRANSFORMATION COMPLETE - MULTI-HORIZON POF FEATURES READY")
 print("="*80)
 
 print(f"\nPIPELINE STATUS: {original_fault_count:,} faults → {len(equipment_df):,} equipment ({len(equipment_df.columns)} features)")
 
-print(f"\nKEY FEATURES FOR DUAL PREDICTIONS (6M + 12M):")
-print(f"  [6M/12M] Fault History: 3M/6M/12M counts (PRIMARY prediction drivers)")
-print(f"  [6M/12M] Equipment Age: Day-precision ({equipment_df['Yaş_Kaynak'].value_counts().to_dict()})")
-print(f"  [6M/12M] NEW: Time-to-First-Failure (avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality)")
-print(f"  [6M/12M] MTBF Features (3 methods):")
-print(f"    • Method 1 (Inter-Fault): {mtbf_valid:,} valid - PoF prediction")
-print(f"    • Method 2 (Lifetime): {mtbf_lifetime_valid:,} valid - Survival analysis baseline hazard")
-print(f"    • Method 3 (Observable): {mtbf_observable_valid:,} valid - Degradation detection")
-print(f"    • Degrading equipment: {degrading_count:,} flagged (failures accelerating)")
-print(f"  [6M/12M] Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} chronic repeaters flagged")
-print(f"  [12M] Customer Impact Ratios: {len([col for col in customer_impact_cols if any(col.replace(' ', '_') in c for c in equipment_df.columns)])} features")
-print(f"  [12M] Equipment Classification: {harmonized_classes} standardized classes")
+print(f"\nKEY FEATURES FOR MULTI-HORIZON PREDICTIONS:")
+print(f"  • Fault History: 3M/6M/12M temporal counts (PRIMARY drivers)")
+print(f"  • Equipment Age: {equipment_df['Yaş_Kaynak'].value_counts().to_dict()}")
+print(f"  • Time-to-First-Failure: avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality cases")
+print(f"  • MTBF Features (3 methods):")
+print(f"    - Method 1 (Inter-Fault): {mtbf_valid:,} valid - PoF prediction")
+print(f"    - Method 2 (Lifetime): {mtbf_lifetime_valid:,} valid - Survival analysis")
+print(f"    - Method 3 (Observable): {mtbf_observable_valid:,} valid - Degradation detection")
+print(f"    - Degrading equipment: {degrading_count:,} flagged")
+print(f"  • Chronic Repeaters: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} flagged")
+print(f"  • Equipment Classes: {harmonized_classes} standardized")
 
-print(f"\nENHANCEMENTS IN v4.1:")
-print(f"  + NEW: 3 MTBF calculation methods (Inter-Fault, Lifetime, Observable)")
-print(f"  + NEW: Baseline_Hazard_Rate feature (for Cox survival analysis)")
-print(f"  + NEW: MTBF_Degradation_Ratio + Is_Degrading flag (failure acceleration detection)")
-print(f"  + NEW: Time-to-First-Failure (Ilk_Arizaya_Kadar_Gun/Yil)")
-print(f"  + OPTION A Context: Dual prediction strategy (6M: 26.9%, 12M: 44.2% positive class)")
-print(f"  + Feature Importance Tags: [6M/12M] markers for model relevance")
-print(f"  + Reduced Verbosity: ~60% fewer print statements")
-print(f"  + Progress Indicators: [Step X/12] pipeline visibility")
-print(f"  + Flexible Date Parser: Recovers 25% 'missing' timestamps")
+print(f"\nENHANCEMENTS IN v5.0:")
+print(f"  + NEW: Sebekeye_Baglanma_Tarihi as single age source (simplified)")
+print(f"  + 3 MTBF calculation methods (Inter-Fault, Lifetime, Observable)")
+print(f"  + Baseline_Hazard_Rate for Cox survival analysis")
+print(f"  + MTBF_Degradation_Ratio + Is_Degrading flag")
+print(f"  + Time-to-First-Failure (Ilk_Arizaya_Kadar_Gun/Yil)")
+print(f"  + Dynamic schema support (handles missing columns)")
 
 print(f"\nNEXT STEP: Run 03_feature_engineering.py")
-print(f"  → Creates advanced PoF risk scores, geographic clustering, expected life ratios")
-print(f"  → Links features to OPTION A dual prediction targets (6M + 12M)")
+print(f"  → Creates advanced PoF risk scores and geographic features")
+print(f"  → Prepares features for 3M/6M/12M temporal models")
 print("="*80)

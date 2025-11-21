@@ -62,7 +62,7 @@ PREDICTION_DIR = Path('predictions')
 RESULTS_DIR = Path('results')
 
 # Input files
-INPUT_FILE = DATA_DIR / 'combined_data.xlsx'
+INPUT_FILE = DATA_DIR / 'combined_data_son.xlsx'
 
 # Intermediate files
 EQUIPMENT_LEVEL_FILE = DATA_DIR / 'equipment_level_data.csv'
