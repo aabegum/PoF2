@@ -317,25 +317,25 @@ def calculate_mtbf_trend(row):
     """
     # This would require fault-level data to calculate inter-fault times
     # Since we only have equipment-level aggregates, we approximate using:
-    # - MTBF_InterFault_Gün (average inter-fault time)
+    # - MTBF_Gün (average inter-fault time)
     # - Son_Arıza_Gun_Sayisi (days since last fault)
     # - Toplam_Arıza_Sayisi_Lifetime (total fault count)
 
-    if pd.isna(row['MTBF_InterFault_Gün']) or row['Toplam_Arıza_Sayisi_Lifetime'] < 4:
+    if pd.isna(row['MTBF_Gün']) or row['Toplam_Arıza_Sayisi_Lifetime'] < 4:
         return None  # Need at least 4 faults for trend analysis
 
     # Approximation: If recent fault happened sooner than expected MTBF, equipment is degrading
-    # Trend = (Days since last fault) / MTBF_InterFault_Gün
+    # Trend = (Days since last fault) / MTBF_Gün
     # This is a proxy - ideally would use actual inter-fault time series
-    if pd.notna(row['Son_Arıza_Gun_Sayisi']) and row['MTBF_InterFault_Gün'] > 0:
+    if pd.notna(row['Son_Arıza_Gun_Sayisi']) and row['MTBF_Gün'] > 0:
         # Invert to get degradation indicator
         # If days_since < MTBF → recent fault was early → degrading → trend < 1
-        recent_ratio = row['Son_Arıza_Gun_Sayisi'] / row['MTBF_InterFault_Gün']
+        recent_ratio = row['Son_Arıza_Gun_Sayisi'] / row['MTBF_Gün']
         return recent_ratio
 
     return 1.0  # Default to stable
 
-if 'MTBF_InterFault_Gün' in df.columns:
+if 'MTBF_Gün' in df.columns:
     df['MTBF_InterFault_Trend'] = df.apply(calculate_mtbf_trend, axis=1)
 
     trend_available = df['MTBF_InterFault_Trend'].notna().sum()
@@ -355,7 +355,7 @@ if 'MTBF_InterFault_Gün' in df.columns:
         print(f"  Stable (0.8 ≤ trend ≤ 1.2): {stable:,} equipment")
         print(f"  Improving (trend > 1.2): {improving:,} equipment")
 else:
-    print("⚠ MTBF_InterFault_Gün not available - skipping MTBF_InterFault_Trend")
+    print("⚠ MTBF_Gün not available - skipping MTBF_InterFault_Trend")
     df['MTBF_InterFault_Trend'] = None
 
 # FEATURE 2: MTBF_InterFault_StdDev (Predictability Measure)
@@ -485,13 +485,13 @@ if 'Yas_Beklenen_Omur_Orani' in df.columns and 'Tekrarlayan_Arıza_90gün_Flag' 
 
 print("\n--- Calculating Overdue Factor (Imminent Risk Detector) ---")
 
-if 'Son_Arıza_Gun_Sayisi' in df.columns and 'MTBF_InterFault_Gün' in df.columns:
+if 'Son_Arıza_Gun_Sayisi' in df.columns and 'MTBF_Gün' in df.columns:
     def calculate_overdue_factor(row):
         """
         Calculate how overdue equipment is for next failure
         Requires valid MTBF and days since last failure
         """
-        if pd.isna(row['Son_Arıza_Gun_Sayisi']) or pd.isna(row['MTBF_InterFault_Gün']):
+        if pd.isna(row['Son_Arıza_Gun_Sayisi']) or pd.isna(row['MTBF_Gün']):
             return None
 
         # Equipment that never failed gets None (no pattern to base on)
@@ -499,11 +499,11 @@ if 'Son_Arıza_Gun_Sayisi' in df.columns and 'MTBF_InterFault_Gün' in df.column
             return None
 
         # Avoid division by zero
-        if row['MTBF_InterFault_Gün'] <= 0:
+        if row['MTBF_Gün'] <= 0:
             return None
 
         # Calculate overdue factor
-        overdue_factor = row['Son_Arıza_Gun_Sayisi'] / row['MTBF_InterFault_Gün']
+        overdue_factor = row['Son_Arıza_Gun_Sayisi'] / row['MTBF_Gün']
         return overdue_factor
 
     df['Overdue_Factor'] = df.apply(calculate_overdue_factor, axis=1)
