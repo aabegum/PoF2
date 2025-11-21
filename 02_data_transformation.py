@@ -1,6 +1,6 @@
 """
 ================================================================================
-SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v4.1
+SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v5.0
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
@@ -22,6 +22,13 @@ Creates ~75 features for temporal PoF modeling including:
 - [12M] Geographic clustering - Spatial risk patterns
 - [12M] Customer impact ratios - Criticality scoring
 
+ENHANCEMENTS in v5.0:
++ UPDATED: Equipment Age Calculation
+  - NEW SOURCE: Sebekeye_Baglanma_Tarihi (Grid Connection Date) - single reliable source
+  - REMOVED: TESIS_TARIHI and EDBS_IDATE (legacy fallback priority chain no longer needed)
+  - SIMPLIFIED: Direct age calculation from grid connection date
+  - Age Source: 'GRID_CONNECTION' (vs previous 'TESIS'/'EDBS'/'WORKORDER')
+
 ENHANCEMENTS in v4.1:
 + NEW: 3 MTBF Calculation Methods
   - Method 1 (MTBF_Gün): Inter-fault average → Best for PoF prediction
@@ -33,9 +40,8 @@ ENHANCEMENTS in v4.1:
 
 ENHANCEMENTS in v4.0:
 + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Time Until First Failure)
-  - Calculates: Installation Date → First Fault Date
+  - Calculates: Grid Connection Date → First Fault Date
   - Detects: Infant mortality vs survived burn-in equipment
-  - Uses same priority: TESIS → EDBS → WORKORDER fallback
 + OPTION A Pipeline Context: Links features to dual prediction strategy
 + Feature Importance Tags: [6M/12M] markers show prediction relevance
 + Reduced Verbosity: ~200 print statements (down from 458)
@@ -66,7 +72,6 @@ from config import (
     REFERENCE_DATE,
     MIN_VALID_YEAR,
     MAX_VALID_YEAR,
-    USE_FIRST_WORKORDER_FALLBACK,
     DATA_DIR,
     INPUT_FILE,
     EQUIPMENT_LEVEL_FILE,
@@ -95,9 +100,10 @@ pd.set_option('display.max_columns', None)
 # CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
-print("SCRIPT 02: DATA TRANSFORMATION v4.1 (OPTION A - DUAL PREDICTIONS)")
+print("SCRIPT 02: DATA TRANSFORMATION v5.0 (OPTION A - DUAL PREDICTIONS)")
 print("="*80)
-print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR} | Work Order Fallback: {'ON' if USE_FIRST_WORKORDER_FALLBACK else 'OFF'}")
+print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR}")
+print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date) - Single reliable source")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -112,7 +118,7 @@ print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns from {INPUT_FILE}
 # STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
 # ============================================================================
 print("\n[Step 1B/12] Detecting and Removing Duplicates...")
-print("⚠️  CRITICAL: Combining TESIS, EDBS, WORKORDER sources - same fault may appear multiple times")
+print("⚠️  CRITICAL: Checking for duplicate fault records (same equipment + time)")
 
 # Identify equipment ID column
 equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
@@ -143,7 +149,7 @@ if 'started at' in df.columns:
 
     if time_dup_count > 0:
         print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
-        print(f"    (These are likely the same fault appearing in TESIS, EDBS, and WORKORDER)")
+        print(f"    (Duplicate fault records with same equipment ID and timestamp)")
 
         # Show examples for manual validation
         df_duplicates = df[time_dup_mask].copy()
@@ -348,47 +354,35 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
     return parsed
 
 # Parse and validate all date columns
-df['TESIS_TARIHI_parsed'] = parse_and_validate_date(df['TESIS_TARIHI'], 'TESIS_TARIHI', is_installation_date=True)
-df['EDBS_IDATE_parsed'] = parse_and_validate_date(df['EDBS_IDATE'], 'EDBS_IDATE', is_installation_date=True)
+# NEW: Using Sebekeye_Baglanma_Tarihi (Grid Connection Date) as primary installation date source
+df['Sebekeye_Baglanma_Tarihi_parsed'] = parse_and_validate_date(df['Sebekeye_Baglanma_Tarihi'], 'Sebekeye_Baglanma_Tarihi', is_installation_date=True)
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True, is_installation_date=False)
 df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True, is_installation_date=False)
 
-# Parse work order creation date (for fallback option)
-if 'Oluşturma Tarihi Sıralama' in df.columns or 'Oluşturulma_Tarihi' in df.columns:
-    creation_col = 'Oluşturma Tarihi Sıralama' if 'Oluşturma Tarihi Sıralama' in df.columns else 'Oluşturulma_Tarihi'
-    df['Oluşturulma_Tarihi'] = parse_and_validate_date(df[creation_col], 'Work Order Date', min_year=2015, report=True, is_installation_date=False)
-else:
-    df['Oluşturulma_Tarihi'] = pd.NaT
-
 # ============================================================================
-# STEP 3: SIMPLIFIED EQUIPMENT AGE CALCULATION
+# STEP 3: SIMPLIFIED EQUIPMENT AGE CALCULATION (Using Sebekeye_Baglanma_Tarihi)
 # ============================================================================
-# OPTIMIZED: Single calculation instead of creating TESIS/EDBS variants
-# Reduces from 6 age columns → 2 age columns (Ekipman_Yaşı_Gün, Ekipman_Yaşı_Yıl)
-print("\n[Step 3/12] Calculating Equipment Age (TESIS→EDBS→WORKORDER Priority)...")
+# UPDATED v5.0: Direct calculation from Sebekeye_Baglanma_Tarihi (Grid Connection Date)
+# Single reliable source - no fallback priority chain needed
+print("\n[Step 3/12] Calculating Equipment Age (Sebekeye_Baglanma_Tarihi - Grid Connection Date)...")
 
 def calculate_equipment_age(row):
     """
-    Calculate equipment age with single priority chain.
-    Priority: TESIS_TARIHI → EDBS_IDATE → Work Order (if enabled)
+    Calculate equipment age from Grid Connection Date.
+    Single source: Sebekeye_Baglanma_Tarihi
     Returns: (age_days, source, installation_date)
     """
     ref_date = REFERENCE_DATE
 
-    # Priority 1: TESIS_TARIHI (commissioning/database entry date)
-    if pd.notna(row['TESIS_TARIHI_parsed']) and row['TESIS_TARIHI_parsed'] < ref_date:
-        age_days = (ref_date - row['TESIS_TARIHI_parsed']).days
-        return age_days, 'TESIS', row['TESIS_TARIHI_parsed']
+    # Use Sebekeye_Baglanma_Tarihi (Grid Connection Date)
+    if pd.notna(row['Sebekeye_Baglanma_Tarihi_parsed']) and row['Sebekeye_Baglanma_Tarihi_parsed'] < ref_date:
+        age_days = (ref_date - row['Sebekeye_Baglanma_Tarihi_parsed']).days
+        return age_days, 'GRID_CONNECTION', row['Sebekeye_Baglanma_Tarihi_parsed']
 
-    # Priority 2: EDBS_IDATE (physical installation date)
-    if pd.notna(row['EDBS_IDATE_parsed']) and row['EDBS_IDATE_parsed'] < ref_date:
-        age_days = (ref_date - row['EDBS_IDATE_parsed']).days
-        return age_days, 'EDBS', row['EDBS_IDATE_parsed']
-
-    # Priority 3: Missing (will be filled by work order if enabled)
+    # Missing installation date
     return None, 'MISSING', None
 
-# Calculate age using single priority function
+# Calculate age using simplified function
 results = df.apply(calculate_equipment_age, axis=1, result_type='expand')
 results.columns = ['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']
 df[['Ekipman_Yaşı_Gün', 'Yaş_Kaynak', 'Ekipman_Kurulum_Tarihi']] = results
@@ -402,37 +396,8 @@ valid_ages = df[df['Yaş_Kaynak'] != 'MISSING']['Ekipman_Yaşı_Yıl']
 print(f"Age Sources: {' | '.join([f'{src}:{cnt:,}({cnt/len(df)*100:.0f}%)' for src, cnt in source_counts.items()])}")
 if len(valid_ages) > 0:
     print(f"Age Range: {valid_ages.min():.1f}-{valid_ages.max():.1f}y, Mean={valid_ages.mean():.1f}y, Median={valid_ages.median():.1f}y")
-print(f"✓ Simplified: 2 age columns created (was 6 in previous version)")
-
-# ============================================================================
-# STEP 3B: OPTIONAL FIRST WORK ORDER FALLBACK
-# ============================================================================
-if USE_FIRST_WORKORDER_FALLBACK:
-    print("\n[Step 3B/12] Filling Missing Ages (First Work Order Proxy)...")
-    missing_mask = df['Yaş_Kaynak'] == 'MISSING'
-    missing_count = missing_mask.sum()
-
-    if missing_count > 0 and 'Oluşturulma_Tarihi' in df.columns:
-        equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
-        equip_id_col = next((col for col in equip_id_cols if col in df.columns), None)
-
-        if equip_id_col:
-            # Use first work order date as age proxy
-            first_wo_dates = df.groupby(equip_id_col)['Oluşturulma_Tarihi'].min()
-            df['_first_wo'] = df[equip_id_col].map(first_wo_dates)
-            age_from_wo = (REFERENCE_DATE - df['_first_wo']).dt.days
-
-            # Fill missing ages with work order fallback
-            fill_mask = missing_mask & df['_first_wo'].notna() & (age_from_wo > 0)
-            df.loc[fill_mask, 'Ekipman_Yaşı_Gün'] = age_from_wo[fill_mask]
-            df.loc[fill_mask, 'Ekipman_Yaşı_Yıl'] = age_from_wo[fill_mask] / 365.25
-            df.loc[fill_mask, 'Yaş_Kaynak'] = 'WORKORDER'
-            df.loc[fill_mask, 'Ekipman_Kurulum_Tarihi'] = df.loc[fill_mask, '_first_wo']
-
-            df.drop(columns=['_first_wo'], inplace=True)
-            filled_count = fill_mask.sum()
-            remaining = (df['Yaş_Kaynak'] == 'MISSING').sum()
-            print(f"Filled {filled_count:,} ages using work order proxy | Remaining missing: {remaining:,} ({remaining/len(df)*100:.1f}%)")
+missing_count = (df['Yaş_Kaynak'] == 'MISSING').sum()
+print(f"✓ Equipment ages calculated | Missing: {missing_count:,} ({missing_count/len(df)*100:.1f}%)")
 
 # STEP 4 & 5: Temporal Features + Failure Periods
 print("\n[Step 4-5/12] Creating Temporal Features (3M/6M/12M Windows) [6M/12M]...")
@@ -545,8 +510,8 @@ print(f"  ✓ Mapping saved: {mapping_file}")
 # ============================================================================
 print("\n[Step 7/12] Aggregating to Equipment Level (Fault→Equipment)...")
 
-# Sort by Age Source to prioritize during aggregation (TESIS > EDBS > WORKORDER > MISSING)
-source_priority = {'TESIS': 0, 'EDBS': 1, 'WORKORDER': 2, 'MISSING': 3}
+# Sort by Age Source to prioritize during aggregation (GRID_CONNECTION > MISSING)
+source_priority = {'GRID_CONNECTION': 0, 'MISSING': 1}
 df['_source_priority'] = df['Yaş_Kaynak'].map(source_priority).fillna(99)
 df = df.sort_values('_source_priority')
 df = df.drop(columns=['_source_priority'])
@@ -576,7 +541,7 @@ agg_dict = {
     'İlçe': 'first',
     'Mahalle': 'first',
 
-    # Equipment Age (simplified - single source with priority: TESIS→EDBS→WORKORDER)
+    # Equipment Age (from Sebekeye_Baglanma_Tarihi - Grid Connection Date)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
@@ -906,8 +871,8 @@ print("  Calculating first failure date (using failures BEFORE cutoff only - lea
 equipment_df['İlk_Arıza_Tarihi_Safe'] = equipment_df['Ekipman_ID'].apply(calculate_first_failure_date_safe)
 
 # NEW FEATURE v4.0: Time Until First Failure (Infant Mortality Detection)
-# Calculates: Installation Date → First Fault Date
-# Uses same priority as equipment age: TESIS → EDBS → WORKORDER (via Ekipman_Kurulum_Tarihi)
+# Calculates: Grid Connection Date → First Fault Date
+# Uses Sebekeye_Baglanma_Tarihi (via Ekipman_Kurulum_Tarihi)
 equipment_df['Ilk_Arizaya_Kadar_Gun'] = (
     equipment_df['İlk_Arıza_Tarihi_Safe'] - equipment_df['Ekipman_Kurulum_Tarihi']
 ).dt.days
