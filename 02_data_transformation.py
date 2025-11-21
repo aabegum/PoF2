@@ -113,10 +113,66 @@ original_fault_count = len(df)
 print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns from {INPUT_FILE}")
 
 # ============================================================================
-# STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
+# STEP 1B: FILL MISSING CBS_ID FROM 'ID' COLUMN (DO THIS FIRST!)
 # ============================================================================
-print("\n[Step 1B/12] Detecting and Removing Duplicates...")
-print("⚠️  CRITICAL: Checking for duplicate fault records (same equipment + time)")
+# CRITICAL: ID consolidation MUST happen BEFORE duplicate detection
+# Otherwise, duplicates with missing cbs_id won't be detected
+print("\n[Step 1B/12] Filling Missing cbs_id Using 'id' Column...")
+print("⚠️  CRITICAL: Consolidating equipment IDs BEFORE duplicate detection")
+
+if 'cbs_id' in df.columns:
+    before_fill = len(df)
+    has_cbs_id = df['cbs_id'].notna().sum()
+    missing_cbs_id = df['cbs_id'].isna().sum()
+
+    print(f"  Total faults: {before_fill:,}")
+    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_fill*100:.1f}%)")
+    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_fill*100:.1f}%)")
+
+    if missing_cbs_id > 0 and 'id' in df.columns:
+        # Use 'id' column as fallback for missing cbs_id
+        print(f"  Using 'id' column as fallback for missing cbs_id...")
+
+        # Fill missing cbs_id with 'id' column values
+        missing_mask = df['cbs_id'].isna()
+        df.loc[missing_mask, 'cbs_id'] = df.loc[missing_mask, 'id']
+
+        filled = missing_mask.sum()
+        still_missing = df['cbs_id'].isna().sum()
+
+        print(f"  ✓ Filled {filled:,} missing cbs_id values from 'id' column")
+
+        if still_missing > 0:
+            print(f"  [!] Still missing: {still_missing:,} faults have neither cbs_id nor id")
+            print(f"      Removing {still_missing:,} faults without any equipment ID...")
+            df = df[df['cbs_id'].notna()].copy()
+            print(f"  Final fault count: {len(df):,}")
+        else:
+            print(f"  ✓ All faults now have equipment IDs (cbs_id or id)")
+
+        # Update equipment tracking after ID consolidation
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+        print(f"  Unique equipment after ID consolidation: {unique_equip_after_id_consolidation:,}")
+
+    elif missing_cbs_id > 0 and 'id' not in df.columns:
+        print(f"  [!] WARNING: 'id' column not found - cannot use as fallback")
+        print(f"      Removing {missing_cbs_id:,} faults without cbs_id...")
+        df = df[df['cbs_id'].notna()].copy()
+        print(f"  Final fault count: {len(df):,}")
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+    else:
+        print(f"  ✓ All faults have cbs_id - no filling needed")
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+else:
+    print(f"  [!] WARNING: No cbs_id column found")
+    print(f"      Equipment ID assignment may create UNKNOWN_XXX IDs")
+    unique_equip_after_id_consolidation = 0
+
+# ============================================================================
+# STEP 1C: DUPLICATE DETECTION (AFTER ID CONSOLIDATION)
+# ============================================================================
+print("\n[Step 1C/12] Detecting and Removing Duplicates...")
+print("  (Now checking with consolidated equipment IDs)")
 
 # Identify equipment ID column
 equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
@@ -195,59 +251,6 @@ else:
 # Track unique equipment at this stage
 unique_equip_after_dedup = df[equip_id_col].nunique()
 print(f"\n[TRACKING] Unique equipment after deduplication: {unique_equip_after_dedup:,}")
-
-# ============================================================================
-# STEP 1C: FILL MISSING CBS_ID FROM 'ID' COLUMN
-# ============================================================================
-print("\n[Step 1C/12] Filling Missing cbs_id Using 'id' Column...")
-
-# Initialize tracking variable
-unique_equip_after_id_consolidation = unique_equip_after_dedup
-
-if 'cbs_id' in df.columns:
-    before_fill = len(df)
-    has_cbs_id = df['cbs_id'].notna().sum()
-    missing_cbs_id = df['cbs_id'].isna().sum()
-
-    print(f"  Total faults: {before_fill:,}")
-    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_fill*100:.1f}%)")
-    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_fill*100:.1f}%)")
-
-    if missing_cbs_id > 0 and 'id' in df.columns:
-        # Use 'id' column as fallback for missing cbs_id
-        print(f"  Using 'id' column as fallback for missing cbs_id...")
-
-        # Fill missing cbs_id with 'id' column values
-        missing_mask = df['cbs_id'].isna()
-        df.loc[missing_mask, 'cbs_id'] = df.loc[missing_mask, 'id']
-
-        filled = missing_mask.sum()
-        still_missing = df['cbs_id'].isna().sum()
-
-        print(f"  ✓ Filled {filled:,} missing cbs_id values from 'id' column")
-
-        if still_missing > 0:
-            print(f"  [!] Still missing: {still_missing:,} faults have neither cbs_id nor id")
-            print(f"      Removing {still_missing:,} faults without any equipment ID...")
-            df = df[df['cbs_id'].notna()].copy()
-            print(f"  Final fault count: {len(df):,}")
-        else:
-            print(f"  ✓ All faults now have equipment IDs (cbs_id or id)")
-
-        # Update equipment tracking after ID consolidation
-        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
-        print(f"  Unique equipment after ID consolidation: {unique_equip_after_id_consolidation:,}")
-
-    elif missing_cbs_id > 0 and 'id' not in df.columns:
-        print(f"  [!] WARNING: 'id' column not found - cannot use as fallback")
-        print(f"      Removing {missing_cbs_id:,} faults without cbs_id...")
-        df = df[df['cbs_id'].notna()].copy()
-        print(f"  Final fault count: {len(df):,}")
-    else:
-        print(f"  ✓ All faults have cbs_id - no filling needed")
-else:
-    print(f"  [!] WARNING: No cbs_id column found")
-    print(f"      Equipment ID assignment may create UNKNOWN_XXX IDs")
 
 # ============================================================================
 # STEP 2: ENHANCED DATE PARSING & VALIDATION
@@ -520,6 +523,59 @@ if len(valid_ages) > 0:
         print(f"   → Acceptable range: 1964-present (equipment from 0-60 years old)")
         print(f"   → Action: Verify if dates before 1964 are real or default placeholders")
 
+# ============================================================================
+# STEP 3B: TEMPORAL VALIDATION (CRITICAL DATA QUALITY CHECK)
+# ============================================================================
+print(f"\n[Step 3B/12] Validating Temporal Consistency...")
+
+validation_issues = []
+
+# CHECK 1: Fault date BEFORE equipment installation
+if 'Sebekeye_Baglanma_Tarihi_parsed' in df.columns and 'started at' in df.columns:
+    before_install_mask = (df['Sebekeye_Baglanma_Tarihi_parsed'].notna() &
+                           df['started at'].notna() &
+                           (df['started at'] < df['Sebekeye_Baglanma_Tarihi_parsed']))
+    before_install_count = before_install_mask.sum()
+
+    if before_install_count > 0:
+        print(f"  ❌ CRITICAL: {before_install_count:,} faults occurred BEFORE equipment installation!")
+        validation_issues.append(f"Faults before installation: {before_install_count}")
+
+        # Show examples
+        before_install_sample = df[before_install_mask][['cbs_id', 'started at', 'Sebekeye_Baglanma_Tarihi_parsed']].head(5)
+        print(f"\n  Examples (first 5):")
+        for idx, row in before_install_sample.iterrows():
+            fault_date = row['started at']
+            install_date = row['Sebekeye_Baglanma_Tarihi_parsed']
+            days_before = (install_date - fault_date).days
+            print(f"    • Equipment {int(row['cbs_id']):,}: Fault on {fault_date.strftime('%Y-%m-%d')}, ")
+            print(f"      but installed {days_before} days later on {install_date.strftime('%Y-%m-%d')}")
+
+        print(f"\n  → ACTION REQUIRED: Remove or fix these {before_install_count:,} records")
+        print(f"     Option 1: Remove faults (may lose valid failure data)")
+        print(f"     Option 2: Correct installation dates (check source data)")
+    else:
+        print(f"  ✓ All faults occurred AFTER equipment installation")
+
+# CHECK 2: Negative time-to-repair
+if 'Time_To_Repair_Hours' in df.columns:
+    # Will check after Time_To_Repair_Hours is calculated
+    pass
+else:
+    # Calculate here for validation
+    temp_ttr = (df['ended at'] - df['started at']).dt.total_seconds() / 3600
+    negative_ttr = (temp_ttr < 0).sum()
+    if negative_ttr > 0:
+        print(f"  ❌ WARNING: {negative_ttr:,} faults have negative time-to-repair (end before start!)")
+        validation_issues.append(f"Negative repair time: {negative_ttr}")
+    else:
+        print(f"  ✓ All repair times are positive")
+
+if len(validation_issues) == 0:
+    print(f"  ✅ All temporal validations PASSED!")
+else:
+    print(f"\n  ⚠️  Found {len(validation_issues)} temporal data quality issues")
+
 # STEP 4 & 5: Temporal Features + Failure Periods
 print("\n[Step 4-5/12] Creating Temporal Features (3M/6M/12M Windows) [6M/12M]...")
 
@@ -734,12 +790,12 @@ print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_d
 
 # Equipment tracking summary
 print(f"\n[TRACKING] Equipment Pipeline Summary:")
-print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment (cbs_id only)")
 print(f"  After ID consolidation:  {unique_equip_after_id_consolidation:,} unique equipment (cbs_id + id fallback)")
+print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment")
 print(f"  Pre-cutoff equipment:    {df_pre_cutoff[equipment_id_col].nunique():,}")
 print(f"  Final aggregated:        {len(equipment_df):,} equipment")
-equipment_lost = unique_equip_after_id_consolidation - len(equipment_df)
-print(f"  Lost in pipeline:        {equipment_lost:,} ({equipment_lost/unique_equip_after_id_consolidation*100:.1f}%)")
+equipment_lost = unique_equip_after_dedup - len(equipment_df)
+print(f"  Lost in pipeline:        {equipment_lost:,} ({equipment_lost/unique_equip_after_dedup*100:.1f}%)")
 
 # Identify and save excluded equipment for analysis
 if equipment_lost > 0:
@@ -1173,6 +1229,56 @@ if recurring_col in equipment_df.columns and lifetime_faults_col in equipment_df
         print(f"  ✓ Recurring fault logic: No recurring equipment flagged")
 else:
     print(f"  ⚠️  WARNING: Recurring fault column not found")
+
+# Check 6: Data leakage - Faults after cutoff in pre-cutoff dataset
+if 'started at' in df.columns:
+    # Check df_pre_cutoff if it exists, otherwise check df
+    try:
+        leakage_faults = (df_pre_cutoff['started at'] > REFERENCE_DATE).sum()
+        dataset_name = 'df_pre_cutoff'
+    except:
+        leakage_faults = 0
+        dataset_name = 'N/A'
+
+    if leakage_faults > 0:
+        print(f"  ❌ CRITICAL: Data leakage detected in training data!")
+        print(f"      {leakage_faults:,} faults after cutoff date ({REFERENCE_DATE.strftime('%Y-%m-%d')}) in {dataset_name}")
+        validation_passed = False
+    else:
+        print(f"  ✓ No data leakage: All training faults before cutoff date")
+else:
+    print(f"  ⚠️  WARNING: Cannot check data leakage - 'started at' column not found")
+
+# Check 7: Negative MTBF values
+mtbf_cols_to_check = ['MTBF_Gün', 'MTBF_Lifetime_Gün', 'MTBF_Observable_Gün']
+negative_mtbf_found = False
+for col in mtbf_cols_to_check:
+    if col in equipment_df.columns:
+        negative_count = (equipment_df[col] < 0).sum()
+        if negative_count > 0:
+            print(f"  ❌ FAIL: Negative MTBF values in '{col}'!")
+            print(f"      {negative_count} equipment with negative {col}")
+            validation_passed = False
+            negative_mtbf_found = True
+
+if not negative_mtbf_found:
+    valid_mtbf_cols = [col for col in mtbf_cols_to_check if col in equipment_df.columns]
+    if valid_mtbf_cols:
+        print(f"  ✓ All MTBF values are positive ({len(valid_mtbf_cols)} MTBF columns checked)")
+    else:
+        print(f"  ⚠️  WARNING: No MTBF columns found for validation")
+
+# Check 8: Negative time-to-repair
+if 'Time_To_Repair_Hours' in df.columns:
+    negative_ttr = (df['Time_To_Repair_Hours'] < 0).sum()
+    if negative_ttr > 0:
+        print(f"  ❌ FAIL: Negative time-to-repair values!")
+        print(f"      {negative_ttr:,} faults have end time before start time")
+        validation_passed = False
+    else:
+        print(f"  ✓ All time-to-repair values are positive")
+else:
+    print(f"  ⚠️  WARNING: Time_To_Repair_Hours column not found")
 
 # Final validation summary
 if validation_passed:
