@@ -16,6 +16,20 @@ CHECKS:
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import sys
+
+# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+# Import config for input filename
+from config import INPUT_FILE
 
 print("="*100)
 print("EQUIPMENT ID MISMATCH DIAGNOSTIC")
@@ -29,8 +43,8 @@ print("STEP 1: LOADING DATA FROM ALL SOURCES")
 print("="*100)
 
 # Raw fault data (source of truth)
-print("\n1. Raw Fault Data (combined_data.xlsx):")
-faults = pd.read_excel('data/combined_data.xlsx')
+print(f"\n1. Raw Fault Data ({INPUT_FILE.name}):")
+faults = pd.read_excel(INPUT_FILE)
 print(f"   Total faults: {len(faults):,}")
 print(f"   Columns with 'ID' or 'id': {[col for col in faults.columns if 'id' in col.lower() or 'ID' in col]}")
 
@@ -47,7 +61,7 @@ try:
     print(f"   Total equipment: {len(features):,}")
     print(f"   ID column: {[col for col in features.columns if 'ID' in col or col == 'Ekipman_ID']}")
 except FileNotFoundError:
-    print("   ⚠️  File not found (run feature selection first)")
+    print("   [!] File not found (run feature selection first)")
     features = None
 
 # ============================================================================
@@ -63,18 +77,18 @@ if 'cbs_id' in faults.columns:
     missing_cbs_id = faults['cbs_id'].isna().sum()
     unique_cbs_ids = faults['cbs_id'].nunique()
 
-    print(f"\n📊 cbs_id Statistics:")
+    print(f"\n[*] cbs_id Statistics:")
     print(f"   Total faults: {total_faults:,}")
     print(f"   Has cbs_id: {has_cbs_id:,} ({has_cbs_id/total_faults*100:.1f}%)")
     print(f"   Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/total_faults*100:.1f}%)")
     print(f"   Unique cbs_ids: {unique_cbs_ids:,}")
 
     if missing_cbs_id > 0:
-        print(f"\n   ⚠️  {missing_cbs_id} faults missing cbs_id!")
+        print(f"\n   [!] {missing_cbs_id} faults missing cbs_id!")
         print(f"      These may have been assigned fallback IDs in Step 2")
 else:
-    print("\n   ❌ CRITICAL: No 'cbs_id' column found in raw data!")
-    print("      Check column names in combined_data.xlsx")
+    print("\n   [X] CRITICAL: No 'cbs_id' column found in raw data!")
+    print("      Check column names in combined_data_son.xlsx")
 
 # ============================================================================
 # STEP 3: CHECK Ekipman_ID IN PROCESSED DATA
@@ -85,13 +99,13 @@ print("="*100)
 
 if 'Ekipman_ID' in equipment.columns:
     unique_ekipman_ids = equipment['Ekipman_ID'].nunique()
-    print(f"\n📊 Ekipman_ID Statistics:")
+    print(f"\n[*] Ekipman_ID Statistics:")
     print(f"   Total equipment records: {len(equipment):,}")
     print(f"   Unique Ekipman_IDs: {unique_ekipman_ids:,}")
 
     # Check for duplicates
     if unique_ekipman_ids < len(equipment):
-        print(f"   ⚠️  WARNING: {len(equipment) - unique_ekipman_ids} duplicate Ekipman_IDs!")
+        print(f"   [!]  WARNING: {len(equipment) - unique_ekipman_ids} duplicate Ekipman_IDs!")
     else:
         print(f"   ✓ No duplicates (each equipment has unique ID)")
 
@@ -102,10 +116,10 @@ if 'Ekipman_ID' in equipment.columns:
     # Check for generated IDs (fallback)
     generated_ids = equipment[equipment['Ekipman_ID'].astype(str).str.contains('UNKNOWN', na=False)]
     if len(generated_ids) > 0:
-        print(f"\n   ⚠️  {len(generated_ids)} equipment have GENERATED IDs (UNKNOWN_XXX)")
+        print(f"\n   [!]  {len(generated_ids)} equipment have GENERATED IDs (UNKNOWN_XXX)")
         print(f"      These had missing cbs_id and fallback IDs")
 else:
-    print("\n   ❌ CRITICAL: No 'Ekipman_ID' column found!")
+    print("\n   [X] CRITICAL: No 'Ekipman_ID' column found!")
 
 # ============================================================================
 # STEP 4: CHECK ID OVERLAP
@@ -124,7 +138,7 @@ if 'cbs_id' in faults.columns and 'Ekipman_ID' in equipment.columns:
     cbs_only = cbs_ids - ekipman_ids
     ekipman_only = ekipman_ids - cbs_ids
 
-    print(f"\n📊 ID Overlap Analysis:")
+    print(f"\n[*] ID Overlap Analysis:")
     print(f"   cbs_ids (from faults):      {len(cbs_ids):,}")
     print(f"   Ekipman_IDs (from equipment): {len(ekipman_ids):,}")
     print(f"   Overlap (in both):          {len(overlap):,}")
@@ -137,11 +151,11 @@ if 'cbs_id' in faults.columns and 'Ekipman_ID' in equipment.columns:
         print(f"\n   Match Rate: {match_pct:.1f}% of cbs_ids found in Ekipman_IDs")
 
         if match_pct < 95:
-            print(f"   ❌ CRITICAL: Only {match_pct:.1f}% match!")
+            print(f"   [X] CRITICAL: Only {match_pct:.1f}% match!")
             print(f"      Target creation uses cbs_id, but features use Ekipman_ID")
             print(f"      This means targets are assigned to WRONG equipment!")
         elif match_pct < 100:
-            print(f"   ⚠️  WARNING: {100-match_pct:.1f}% mismatch")
+            print(f"   [!]  WARNING: {100-match_pct:.1f}% mismatch")
         else:
             print(f"   ✓ Perfect match (100%)")
 
@@ -161,7 +175,7 @@ print("\n" + "="*100)
 print("STEP 5: TARGET CREATION ALIGNMENT CHECK")
 print("="*100)
 
-print("\n🔍 Checking 06_temporal_pof_model.py logic:")
+print("\n[?] Checking 06_temporal_pof_model.py logic:")
 
 # Simulate what target creation does
 from config import CUTOFF_DATE
@@ -185,7 +199,7 @@ if 'Ekipman_ID' in equipment.columns:
 
     missing = len(future_faults_6M_cbs) - len(valid_in_equipment)
     if missing > 0:
-        print(f"      ❌ MISSING: {missing} equipment IDs NOT in feature data!")
+        print(f"      [X] MISSING: {missing} equipment IDs NOT in feature data!")
         print(f"         These will have targets=0 (wrong!) because .isin() returns False")
 
 # ============================================================================
@@ -201,7 +215,7 @@ if 'cbs_id' in faults.columns and 'Ekipman_ID' in equipment.columns:
     match_pct = len(overlap) / len(cbs_ids) * 100 if len(cbs_ids) > 0 else 0
 
     if match_pct < 95:
-        print("\n❌ CRITICAL MISMATCH DETECTED!")
+        print("\n[X] CRITICAL MISMATCH DETECTED!")
         print("\n1. IMMEDIATE FIX REQUIRED:")
         print("   Current: Target creation uses 'cbs_id' from raw fault data")
         print("   Problem: Feature data uses 'Ekipman_ID' (may be different)")
@@ -215,13 +229,13 @@ if 'cbs_id' in faults.columns and 'Ekipman_ID' in equipment.columns:
         print("   Re-run this script after fix to confirm 100% match")
 
     elif match_pct < 100:
-        print("\n⚠️  MINOR MISMATCH DETECTED")
+        print("\n[!]  MINOR MISMATCH DETECTED")
         print(f"   {100-match_pct:.1f}% of IDs don't match")
         print("   These are likely equipment with missing cbs_id (assigned UNKNOWN_XXX)")
         print("   Action: Document that these equipment are excluded from modeling")
 
     else:
-        print("\n✅ NO MISMATCH DETECTED")
+        print("\n[OK] NO MISMATCH DETECTED")
         print("   cbs_id and Ekipman_ID have 100% overlap")
         print("   Target creation is correctly aligned")
         print("   No fixes needed")
