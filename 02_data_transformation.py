@@ -355,6 +355,37 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
 
 # Parse and validate all date columns
 # NEW: Using Sebekeye_Baglanma_Tarihi (Grid Connection Date) as primary installation date source
+
+# Check if required column exists
+if 'Sebekeye_Baglanma_Tarihi' not in df.columns:
+    print("\n❌ ERROR: Required column 'Sebekeye_Baglanma_Tarihi' not found in input file!")
+    print("\nAvailable columns in input file (showing first 20):")
+    for i, col in enumerate(df.columns[:20], 1):
+        print(f"  {i:2d}. {col}")
+    if len(df.columns) > 20:
+        print(f"  ... and {len(df.columns) - 20} more columns")
+
+    # Look for potential date columns
+    potential_date_cols = [col for col in df.columns if any(
+        keyword in col.upper() for keyword in ['TARIH', 'DATE', 'BAGLAN', 'KURULUM', 'TESIS', 'EDBS', 'INSTALL']
+    )]
+    if potential_date_cols:
+        print(f"\n💡 Found {len(potential_date_cols)} potential date/installation columns:")
+        for col in potential_date_cols:
+            print(f"  - {col}")
+        print("\n⚠️  Please update your input file to include 'Sebekeye_Baglanma_Tarihi' column")
+        print("   OR update the script to use one of the columns above.")
+    else:
+        print("\n⚠️  No date-like columns found. Please check your input file structure.")
+
+    print("\n" + "="*80)
+    print("SOLUTION:")
+    print("  1. Add 'Sebekeye_Baglanma_Tarihi' column to your input file")
+    print("  OR")
+    print("  2. If using different column name, update line 358 in 02_data_transformation.py")
+    print("="*80)
+    sys.exit(1)
+
 df['Sebekeye_Baglanma_Tarihi_parsed'] = parse_and_validate_date(df['Sebekeye_Baglanma_Tarihi'], 'Sebekeye_Baglanma_Tarihi', is_installation_date=True)
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True, is_installation_date=False)
 df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True, is_installation_date=False)
