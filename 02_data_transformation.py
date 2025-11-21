@@ -486,14 +486,22 @@ missing_count = (df['Yaş_Kaynak'] == 'MISSING').sum()
 print(f"✓ Equipment ages calculated | Missing: {missing_count:,} ({missing_count/len(df)*100:.1f}%)")
 
 # Check for suspicious old dates (before 1964 = oldest acceptable data)
+# FLAG but KEEP these records (per user request)
 if len(valid_ages) > 0:
     very_old_mask = valid_ages > 60  # Equipment older than 1964 (2025 - 60 = 1965)
     very_old_count = very_old_mask.sum()
+
+    # Add flag columns for data quality tracking
+    df['Suspicious_Install_Date_Flag'] = 0  # Initialize
+    df['Default_Date_Flag'] = 0  # Initialize
 
     if very_old_count > 0:
         very_old_equip = df[df['Ekipman_Yaşı_Yıl'] > 60][['cbs_id', 'Sebekeye_Baglanma_Tarihi_parsed', 'Ekipman_Yaşı_Yıl']].drop_duplicates('cbs_id')
         print(f"\n⚠️  WARNING: {very_old_count:,} records have equipment older than 60 years (before 1964)")
         print(f"   Unique old equipment: {len(very_old_equip):,}")
+
+        # Flag very old equipment (but keep them)
+        df.loc[df['Ekipman_Yaşı_Yıl'] > 60, 'Suspicious_Install_Date_Flag'] = 1
 
         # Check for common default dates
         default_dates = [
@@ -509,19 +517,24 @@ if len(valid_ages) > 0:
             print(f"   [!] {default_date_count:,} records use common default dates (1.01.1978, 1.01.1970, etc.)")
             print(f"       These may be placeholder values rather than real installation dates")
 
-        # Show examples for review
+            # Flag default dates (but keep them)
+            df.loc[default_date_mask, 'Default_Date_Flag'] = 1
+
+        # Show examples for review (with integer IDs)
         if len(very_old_equip) > 0:
             print(f"\n   Examples of very old equipment (showing first 5):")
             for idx, row in very_old_equip.head(5).iterrows():
                 install_date = row['Sebekeye_Baglanma_Tarihi_parsed']
                 age = row['Ekipman_Yaşı_Yıl']
                 cbs = row['cbs_id']
-                if pd.notna(install_date):
-                    print(f"     • Equipment {int(cbs):,}: Installed {install_date.strftime('%Y-%m-%d')} (Age: {age:.1f} years)")
+                if pd.notna(install_date) and pd.notna(cbs):
+                    equip_id = int(cbs)
+                    print(f"     • Equipment {equip_id}: Installed {install_date.strftime('%Y-%m-%d')} (Age: {age:.1f} years)")
 
-        print(f"\n   → RECOMMENDATION: Review these dates for data quality issues")
+        print(f"\n   → Records FLAGGED but INCLUDED in training (age-based features may be unreliable)")
+        print(f"   → Flags added: 'Suspicious_Install_Date_Flag' and 'Default_Date_Flag'")
         print(f"   → Acceptable range: 1964-present (equipment from 0-60 years old)")
-        print(f"   → Action: Verify if dates before 1964 are real or default placeholders")
+        print(f"   → Action: Review flagged equipment predictions with caution")
 
 # ============================================================================
 # STEP 3B: TEMPORAL VALIDATION (CRITICAL DATA QUALITY CHECK)
@@ -541,19 +554,30 @@ if 'Sebekeye_Baglanma_Tarihi_parsed' in df.columns and 'started at' in df.column
         print(f"  ❌ CRITICAL: {before_install_count:,} faults occurred BEFORE equipment installation!")
         validation_issues.append(f"Faults before installation: {before_install_count}")
 
-        # Show examples
+        # Show examples (with integer IDs)
         before_install_sample = df[before_install_mask][['cbs_id', 'started at', 'Sebekeye_Baglanma_Tarihi_parsed']].head(5)
         print(f"\n  Examples (first 5):")
         for idx, row in before_install_sample.iterrows():
             fault_date = row['started at']
             install_date = row['Sebekeye_Baglanma_Tarihi_parsed']
             days_before = (install_date - fault_date).days
-            print(f"    • Equipment {int(row['cbs_id']):,}: Fault on {fault_date.strftime('%Y-%m-%d')}, ")
+            equip_id = int(row['cbs_id']) if pd.notna(row['cbs_id']) else 'UNKNOWN'
+            print(f"    • Equipment {equip_id}: Fault on {fault_date.strftime('%Y-%m-%d')}, ")
             print(f"      but installed {days_before} days later on {install_date.strftime('%Y-%m-%d')}")
 
-        print(f"\n  → ACTION REQUIRED: Remove or fix these {before_install_count:,} records")
-        print(f"     Option 1: Remove faults (may lose valid failure data)")
-        print(f"     Option 2: Correct installation dates (check source data)")
+        # EXCLUDE these faults from model training (per user request)
+        print(f"\n  → EXCLUDING {before_install_count:,} temporally invalid faults from dataset")
+        print(f"     (Cannot train on faults that occurred before equipment existed)")
+
+        # Save excluded records for audit
+        excluded_temporal = df[before_install_mask].copy()
+        excluded_file = DATA_DIR / 'excluded_temporal_invalid.csv'
+        excluded_temporal.to_csv(excluded_file, index=False)
+        print(f"  ✓ Excluded faults saved to: {excluded_file}")
+
+        # Remove from dataset
+        df = df[~before_install_mask].copy()
+        print(f"  ✓ Remaining faults: {len(df):,}")
     else:
         print(f"  ✓ All faults occurred AFTER equipment installation")
 
