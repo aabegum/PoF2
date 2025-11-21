@@ -196,38 +196,54 @@ unique_equip_after_dedup = df[equip_id_col].nunique()
 print(f"\n[TRACKING] Unique equipment after deduplication: {unique_equip_after_dedup:,}")
 
 # ============================================================================
-# STEP 1C: FILTER FAULTS WITHOUT CBS_ID
+# STEP 1C: FILL MISSING CBS_ID FROM 'ID' COLUMN
 # ============================================================================
-print("\n[Step 1C/12] Filtering Faults Without cbs_id...")
+print("\n[Step 1C/12] Filling Missing cbs_id Using 'id' Column...")
 
 if 'cbs_id' in df.columns:
-    before_filter = len(df)
+    before_fill = len(df)
     has_cbs_id = df['cbs_id'].notna().sum()
     missing_cbs_id = df['cbs_id'].isna().sum()
 
-    print(f"  Total faults: {before_filter:,}")
-    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_filter*100:.1f}%)")
-    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_filter*100:.1f}%)")
+    print(f"  Total faults: {before_fill:,}")
+    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_fill*100:.1f}%)")
+    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_fill*100:.1f}%)")
 
-    if missing_cbs_id > 0:
-        print(f"  Removing {missing_cbs_id:,} faults without cbs_id...")
-        print(f"    (These cannot be matched to equipment and would create UNKNOWN_XXX IDs)")
+    if missing_cbs_id > 0 and 'id' in df.columns:
+        # Use 'id' column as fallback for missing cbs_id
+        print(f"  Using 'id' column as fallback for missing cbs_id...")
 
-        # Keep only faults with cbs_id
-        df = df[df['cbs_id'].notna()].copy()
+        # Fill missing cbs_id with 'id' column values
+        missing_mask = df['cbs_id'].isna()
+        df.loc[missing_mask, 'cbs_id'] = df.loc[missing_mask, 'id']
 
-        removed = before_filter - len(df)
-        print(f"  ✓ Removed {removed:,} faults ({removed/before_filter*100:.1f}%)")
-        print(f"  Final fault count: {len(df):,}")
+        filled = missing_mask.sum()
+        still_missing = df['cbs_id'].isna().sum()
+
+        print(f"  ✓ Filled {filled:,} missing cbs_id values from 'id' column")
+
+        if still_missing > 0:
+            print(f"  [!] Still missing: {still_missing:,} faults have neither cbs_id nor id")
+            print(f"      Removing {still_missing:,} faults without any equipment ID...")
+            df = df[df['cbs_id'].notna()].copy()
+            print(f"  Final fault count: {len(df):,}")
+        else:
+            print(f"  ✓ All faults now have equipment IDs (cbs_id or id)")
 
         # Update equipment tracking
-        unique_equip_after_filter = df[equip_id_col].nunique()
-        print(f"  Unique equipment after filter: {unique_equip_after_filter:,}")
+        unique_equip_after_fill = df[equip_id_col].nunique()
+        print(f"  Unique equipment after ID consolidation: {unique_equip_after_fill:,}")
+
+    elif missing_cbs_id > 0 and 'id' not in df.columns:
+        print(f"  [!] WARNING: 'id' column not found - cannot use as fallback")
+        print(f"      Removing {missing_cbs_id:,} faults without cbs_id...")
+        df = df[df['cbs_id'].notna()].copy()
+        print(f"  Final fault count: {len(df):,}")
     else:
-        print(f"  ✓ All faults have cbs_id - no filtering needed")
+        print(f"  ✓ All faults have cbs_id - no filling needed")
 else:
-    print(f"  [!] WARNING: No cbs_id column found - cannot filter")
-    print(f"      Equipment ID assignment may create many UNKNOWN_XXX IDs")
+    print(f"  [!] WARNING: No cbs_id column found")
+    print(f"      Equipment ID assignment may create UNKNOWN_XXX IDs")
 
 # ============================================================================
 # STEP 2: ENHANCED DATE PARSING & VALIDATION
