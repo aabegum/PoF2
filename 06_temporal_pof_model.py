@@ -567,7 +567,7 @@ for horizon in HORIZONS.keys():
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(xgb_best_params).T
-    best_params_df.to_csv(RESULTS_DIR / 'xgboost_best_params.csv')
+    best_params_df.to_csv(RESULTS_DIR / 'xgboost_best_params.csv', encoding='utf-8-sig')
     print(f"\n💾 Best parameters saved: {RESULTS_DIR / 'xgboost_best_params.csv'}")
 
 # ============================================================================
@@ -713,7 +713,7 @@ for horizon in HORIZONS.keys():
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(catboost_best_params).T
-    best_params_df.to_csv(RESULTS_DIR / 'catboost_best_params.csv')
+    best_params_df.to_csv(RESULTS_DIR / 'catboost_best_params.csv', encoding='utf-8-sig')
     print(f"\n💾 Best parameters saved: {RESULTS_DIR / 'catboost_best_params.csv'}")
 # ============================================================================
 # STEP 7: MODEL COMPARISON
@@ -752,7 +752,7 @@ print("\n📊 Model Performance Comparison:")
 print(comparison_df.to_string(index=False))
 
 # Save comparison
-comparison_df.to_csv(RESULTS_DIR / 'model_performance_comparison.csv', index=False)
+comparison_df.to_csv(RESULTS_DIR / 'model_performance_comparison.csv', index=False, encoding='utf-8-sig')
 print(f"\n✓ Comparison saved: {RESULTS_DIR / 'model_performance_comparison.csv'}")
 
 # Determine best model per horizon
@@ -804,7 +804,7 @@ for horizon in HORIZONS.keys():
         print(f"  {i:2d}. {row.Feature:<35} {row.Importance:.4f}")
 
 # Save feature importance
-importance_df.to_csv(RESULTS_DIR / 'feature_importance_by_horizon.csv', index=False)
+importance_df.to_csv(RESULTS_DIR / 'feature_importance_by_horizon.csv', index=False, encoding='utf-8-sig')
 print(f"\n✓ Feature importance saved: {RESULTS_DIR / 'feature_importance_by_horizon.csv'}")
 
 # ============================================================================
@@ -1001,7 +1001,7 @@ for horizon in HORIZONS.keys():
     
     # Save predictions
     pred_path = PREDICTION_DIR / f'predictions_{horizon.lower()}.csv'
-    pred_df.to_csv(pred_path, index=False)
+    pred_df.to_csv(pred_path, index=False, encoding='utf-8-sig')
     
     print(f"\n✓ {horizon} Predictions:")
     print(f"  Saved to: {pred_path}")
@@ -1051,7 +1051,7 @@ if len(high_risk) > 0:
     
     # Save high-risk report
     high_risk_path = RESULTS_DIR / 'high_risk_equipment_report.csv'
-    high_risk.to_csv(high_risk_path, index=False)
+    high_risk.to_csv(high_risk_path, index=False, encoding='utf-8-sig')
     print(f"\n✓ High-risk report saved: {high_risk_path}")
 else:
     print("\n✓ No equipment with average risk > 50")

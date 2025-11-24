@@ -390,7 +390,7 @@ for horizon in HORIZONS:
 explanation_df = pd.DataFrame(explanation_records)
 
 # Save report
-explanation_df.to_csv('reports/risk_explanations.csv', index=False)
+explanation_df.to_csv('reports/risk_explanations.csv', index=False, encoding='utf-8-sig')
 print(f"✓ Saved: reports/risk_explanations.csv")
 print(f"   Total explanations: {len(explanation_df)}")
 
@@ -470,7 +470,7 @@ importance_df = pd.DataFrame({
     'Feature': [f[0] for f in sorted_features],
     'Mean_SHAP_Importance': [f[1] for f in sorted_features]
 })
-importance_df.to_csv(RESULTS_DIR / 'shap_global_importance.csv', index=False)
+importance_df.to_csv(RESULTS_DIR / 'shap_global_importance.csv', index=False, encoding='utf-8-sig')
 print("\n✓ Saved: results/shap_global_importance.csv")
 
 # ============================================================================

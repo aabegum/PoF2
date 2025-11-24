@@ -521,7 +521,7 @@ for feat in original_features:
 
 report_df = pd.DataFrame(report_data)
 report_path = Path('outputs/feature_selection/comprehensive_selection_report.csv')
-report_df.to_csv(report_path, index=False)
+report_df.to_csv(report_path, index=False, encoding='utf-8-sig')
 print(f"✓ Report saved to: {report_path}")
 
 # ============================================================================

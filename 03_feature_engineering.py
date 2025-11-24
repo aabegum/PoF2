@@ -1008,7 +1008,7 @@ def categorize_feature(name):
 
 feature_catalog['Category'] = feature_catalog['Feature_Name'].apply(categorize_feature)
 
-feature_catalog.to_csv(FEATURE_CATALOG_FILE, index=False)
+feature_catalog.to_csv(FEATURE_CATALOG_FILE, index=False, encoding='utf-8-sig')
 print(f"✅ Feature catalog saved to: {FEATURE_CATALOG_FILE}")
 
 # Print summary by category

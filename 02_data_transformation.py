@@ -113,60 +113,35 @@ original_fault_count = len(df)
 print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns from {INPUT_FILE}")
 
 # ============================================================================
-# STEP 1B: FILL MISSING CBS_ID FROM 'ID' COLUMN (DO THIS FIRST!)
+# STEP 1B: FILTER TO CBS_ID ONLY (NO FALLBACK)
 # ============================================================================
-# CRITICAL: ID consolidation MUST happen BEFORE duplicate detection
-# Otherwise, duplicates with missing cbs_id won't be detected
-print("\n[Step 1B/12] Filling Missing cbs_id Using 'id' Column...")
-print("⚠️  CRITICAL: Consolidating equipment IDs BEFORE duplicate detection")
+# Using cbs_id column only - missing records will be eliminated
+print("\n[Step 1B/12] Filtering to Records with cbs_id Only...")
+print("⚠️  CRITICAL: Using cbs_id only - no fallback to 'id' column")
 
 if 'cbs_id' in df.columns:
-    before_fill = len(df)
+    before_filter = len(df)
     has_cbs_id = df['cbs_id'].notna().sum()
     missing_cbs_id = df['cbs_id'].isna().sum()
 
-    print(f"  Total faults: {before_fill:,}")
-    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_fill*100:.1f}%)")
-    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_fill*100:.1f}%)")
+    print(f"  Total faults: {before_filter:,}")
+    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_filter*100:.1f}%)")
+    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_filter*100:.1f}%)")
 
-    if missing_cbs_id > 0 and 'id' in df.columns:
-        # Use 'id' column as fallback for missing cbs_id
-        print(f"  Using 'id' column as fallback for missing cbs_id...")
-
-        # Fill missing cbs_id with 'id' column values
-        missing_mask = df['cbs_id'].isna()
-        df.loc[missing_mask, 'cbs_id'] = df.loc[missing_mask, 'id']
-
-        filled = missing_mask.sum()
-        still_missing = df['cbs_id'].isna().sum()
-
-        print(f"  ✓ Filled {filled:,} missing cbs_id values from 'id' column")
-
-        if still_missing > 0:
-            print(f"  [!] Still missing: {still_missing:,} faults have neither cbs_id nor id")
-            print(f"      Removing {still_missing:,} faults without any equipment ID...")
-            df = df[df['cbs_id'].notna()].copy()
-            print(f"  Final fault count: {len(df):,}")
-        else:
-            print(f"  ✓ All faults now have equipment IDs (cbs_id or id)")
-
-        # Update equipment tracking after ID consolidation
-        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
-        print(f"  Unique equipment after ID consolidation: {unique_equip_after_id_consolidation:,}")
-
-    elif missing_cbs_id > 0 and 'id' not in df.columns:
-        print(f"  [!] WARNING: 'id' column not found - cannot use as fallback")
-        print(f"      Removing {missing_cbs_id:,} faults without cbs_id...")
+    if missing_cbs_id > 0:
+        # Remove records without cbs_id (NO FALLBACK)
+        print(f"  → Eliminating {missing_cbs_id:,} faults without cbs_id...")
         df = df[df['cbs_id'].notna()].copy()
-        print(f"  Final fault count: {len(df):,}")
-        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+        print(f"  ✓ Remaining faults: {len(df):,}")
     else:
-        print(f"  ✓ All faults have cbs_id - no filling needed")
-        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+        print(f"  ✓ All faults have cbs_id")
+
+    unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+    print(f"  Unique equipment (cbs_id): {unique_equip_after_id_consolidation:,}")
 else:
-    print(f"  [!] WARNING: No cbs_id column found")
-    print(f"      Equipment ID assignment may create UNKNOWN_XXX IDs")
-    unique_equip_after_id_consolidation = 0
+    print(f"  ❌ ERROR: No cbs_id column found!")
+    print(f"      Available columns: {[c for c in df.columns if 'id' in c.lower()]}")
+    sys.exit(1)
 
 # ============================================================================
 # STEP 1C: DUPLICATE DETECTION (AFTER ID CONSOLIDATION)
@@ -217,7 +192,7 @@ if 'started at' in df.columns:
 
             # Save all duplicates for audit
             dup_file = DATA_DIR / 'removed_duplicates.csv'
-            df_duplicates.to_csv(dup_file, index=False)
+            df_duplicates.to_csv(dup_file, index=False, encoding='utf-8-sig')
             print(f"  ✓ All duplicates saved: {dup_file}")
 
             # Analyze duplicate distribution across cutoff date
@@ -572,7 +547,7 @@ if 'Sebekeye_Baglanma_Tarihi_parsed' in df.columns and 'started at' in df.column
         # Save excluded records for audit
         excluded_temporal = df[before_install_mask].copy()
         excluded_file = DATA_DIR / 'excluded_temporal_invalid.csv'
-        excluded_temporal.to_csv(excluded_file, index=False)
+        excluded_temporal.to_csv(excluded_file, index=False, encoding='utf-8-sig')
         print(f"  ✓ Excluded faults saved to: {excluded_file}")
 
         # Remove from dataset
@@ -679,13 +654,36 @@ print(f"  No UNKNOWN_XXX IDs generated (all equipment have real cbs_id)")
 equipment_id_col = 'Equipment_ID_Primary'
 
 # ============================================================================
-# STEP 6B: CREATE UNIFIED EQUIPMENT CLASSIFICATION
+# STEP 6B: CREATE UNIFIED EQUIPMENT CLASSIFICATION (Using Şebeke Unsuru)
 # ============================================================================
-print("\n[Step 6B/12] Harmonizing Equipment Classifications...")
+print("\n[Step 6B/12] Extracting Equipment Type from Şebeke Unsuru...")
+
+def extract_equipment_from_sebeke_unsuru(value):
+    """
+    Extract equipment type from Şebeke Unsuru column.
+    Example: "Ayırıcı Arızaları" → "Ayırıcı"
+             "Kesici Arızaları" → "Kesici"
+             "Trafo Arızaları" → "Trafo"
+    """
+    if pd.isna(value):
+        return None
+    value_str = str(value).strip()
+    # Remove "Arızaları" suffix and get the equipment type
+    if 'Arızaları' in value_str:
+        return value_str.replace('Arızaları', '').strip()
+    elif 'Arızası' in value_str:
+        return value_str.replace('Arızası', '').strip()
+    elif 'Ariza' in value_str:
+        return value_str.replace('Ariza', '').strip()
+    return value_str
 
 def get_equipment_class(row):
-    """Priority: Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı"""
-    if pd.notna(row.get('Equipment_Type')):
+    """Priority: Şebeke Unsuru → Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı"""
+    # Primary: Use Şebeke Unsuru (extract part before Arızaları)
+    if pd.notna(row.get('Şebeke Unsuru')):
+        return extract_equipment_from_sebeke_unsuru(row['Şebeke Unsuru'])
+    # Fallback options
+    elif pd.notna(row.get('Equipment_Type')):
         return row['Equipment_Type']
     elif pd.notna(row.get('Ekipman Sınıfı')):
         return row['Ekipman Sınıfı']
@@ -694,6 +692,15 @@ def get_equipment_class(row):
     elif pd.notna(row.get('Ekipman Sınıf')):
         return row['Ekipman Sınıf']
     return None
+
+# Check if Şebeke Unsuru column exists
+if 'Şebeke Unsuru' in df.columns:
+    sebeke_coverage = df['Şebeke Unsuru'].notna().sum() / len(df) * 100
+    print(f"  ✓ Şebeke Unsuru column found: {sebeke_coverage:.1f}% coverage")
+    unique_values = df['Şebeke Unsuru'].dropna().unique()[:10]
+    print(f"  Sample values: {list(unique_values)}")
+else:
+    print(f"  ⚠️  Şebeke Unsuru column not found - using fallback columns")
 
 df['Equipment_Class_Primary'] = df.apply(get_equipment_class, axis=1)
 
@@ -717,7 +724,7 @@ for original, harmonized in EQUIPMENT_CLASS_MAPPING.items():
     mapping_records.append({'Original': original, 'Harmonized': harmonized, 'Count': count})
 mapping_df = pd.DataFrame(mapping_records)
 mapping_file = DATA_DIR / 'equipment_class_mapping.csv'
-mapping_df.to_csv(mapping_file, index=False)
+mapping_df.to_csv(mapping_file, index=False, encoding='utf-8-sig')
 print(f"  ✓ Mapping saved: {mapping_file}")
 
 # ============================================================================
@@ -854,7 +861,7 @@ if equipment_lost > 0:
 
     # Save excluded equipment for manual review
     excluded_file = DATA_DIR / 'excluded_equipment_analysis.csv'
-    df_excluded.to_csv(excluded_file, index=False)
+    df_excluded.to_csv(excluded_file, index=False, encoding='utf-8-sig')
     print(f"  ✓ Excluded equipment saved: {excluded_file}")
 
 # ============================================================================
@@ -1324,7 +1331,7 @@ feature_docs = pd.DataFrame({
     'Data_Type': equipment_df.dtypes.astype(str),
     'Completeness_%': (equipment_df.notna().sum() / len(equipment_df) * 100).round(1)
 })
-feature_docs.to_csv(FEATURE_DOCS_FILE, index=False)
+feature_docs.to_csv(FEATURE_DOCS_FILE, index=False, encoding='utf-8-sig')
 
 print(f"Saved: equipment_level_data.csv ({len(equipment_df):,} records x {len(equipment_df.columns)} features) + feature_documentation.csv")
 

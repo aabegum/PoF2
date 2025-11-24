@@ -524,7 +524,7 @@ for horizon in HORIZONS:
 
     # Save
     pred_path = PREDICTION_DIR / f'calibrated_predictions_{horizon.lower()}.csv'
-    pred_df.to_csv(pred_path, index=False)
+    pred_df.to_csv(pred_path, index=False, encoding='utf-8-sig')
     print(f"✓ Saved: {pred_path}")
 
     # Show top 10 high-risk
@@ -539,7 +539,7 @@ print("STEP 9: SAVING CALIBRATION RESULTS")
 print("="*100)
 
 # Save metrics
-metrics_df.to_csv(RESULTS_DIR / 'calibration_metrics.csv', index=False)
+metrics_df.to_csv(RESULTS_DIR / 'calibration_metrics.csv', index=False, encoding='utf-8-sig')
 print("✓ Saved: results/calibration_metrics.csv")
 
 # Calculate improvements
@@ -560,7 +560,7 @@ for horizon in HORIZONS:
     })
 
 improvements_df = pd.DataFrame(improvements)
-improvements_df.to_csv(RESULTS_DIR / 'calibration_improvements.csv', index=False)
+improvements_df.to_csv(RESULTS_DIR / 'calibration_improvements.csv', index=False, encoding='utf-8-sig')
 print("✓ Saved: results/calibration_improvements.csv")
 
 # ============================================================================
