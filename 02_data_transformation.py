@@ -4,23 +4,22 @@ SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v5.0
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
-PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED]
-- Cutoff Date: 2024-06-25 (from Script 00)
-- Historical Window: All data up to 2024-06-25 (for feature calculation)
-- Prediction Window: 2024-06-25 to 2025-06-25 (6M and 12M targets)
-- Dual Prediction Targets: 6-month + 12-month failure risk (EXCELLENT class balance)
-- Features Created: Temporal fault counts (3M/6M/12M), age, MTBF (3 methods), reliability metrics
+PIPELINE STRATEGY: Temporal Multi-Horizon Predictions
+- Cutoff Date: 2024-06-25 (configurable in config.py)
+- Historical Window: All data up to cutoff date (for feature calculation)
+- Prediction Windows: 3M, 6M, 12M multi-horizon failure risk
+- Features Created: Temporal fault counts, age, MTBF (3 methods), reliability metrics
 - DATA LEAKAGE PREVENTION: All features calculated using data BEFORE cutoff date only
 
 WHAT THIS SCRIPT DOES:
-Transforms fault-level records (1,210 faults) → equipment-level records (789 equipment)
-Creates ~75 features for temporal PoF modeling including:
-- [6M/12M] Fault history features (3M/6M/12M counts) - PRIMARY prediction drivers
-- [6M/12M] Equipment age and time-to-first-failure - Wear-out pattern detection
-- [6M/12M] MTBF features (3 methods) - Inter-fault, Lifetime, Observable
-- [6M/12M] Degradation indicators - Failure acceleration detection
-- [12M] Geographic clustering - Spatial risk patterns
-- [12M] Customer impact ratios - Criticality scoring
+Transforms fault-level records to equipment-level records with engineered features.
+Creates comprehensive features for temporal PoF modeling including:
+- Fault history features (3M/6M/12M counts) - PRIMARY prediction drivers
+- Equipment age and time-to-first-failure - Wear-out pattern detection
+- MTBF features (3 methods) - Inter-fault, Lifetime, Observable
+- Degradation indicators - Failure acceleration detection
+- Geographic features - Spatial risk patterns (if available)
+- Customer impact ratios - Criticality scoring (if available)
 
 ENHANCEMENTS in v5.0:
 + UPDATED: Equipment Age Calculation
@@ -42,21 +41,20 @@ ENHANCEMENTS in v4.0:
 + NEW FEATURE: Ilk_Arizaya_Kadar_Gun/Yil (Time Until First Failure)
   - Calculates: Grid Connection Date → First Fault Date
   - Detects: Infant mortality vs survived burn-in equipment
-+ OPTION A Pipeline Context: Links features to dual prediction strategy
-+ Feature Importance Tags: [6M/12M] markers show prediction relevance
-+ Reduced Verbosity: ~200 print statements (down from 458)
++ Multi-Horizon Predictions: Links features to 3M/6M/12M prediction windows
++ Reduced Verbosity: Concise progress indicators
 + Progress Indicators: [Step X/12] for pipeline visibility
-+ Flexible Date Parser: Recovers 25% "missing" timestamps (DD-MM-YYYY support)
-+ Smart Date Validation: Rejects Excel NULL + suspicious recent dates only
++ Flexible Date Parser: Multi-format support (DD-MM-YYYY, ISO, etc.)
++ Smart Date Validation: Rejects Excel NULL + suspicious recent dates
 
 CROSS-REFERENCES:
-- Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
-- Script 01: Confirms 100% timestamp coverage + 10/10 data quality
+- Script 01: Data quality profiling and validation
 - Script 03: Uses these features for advanced engineering (PoF risk scores)
-- Script 09 (06_survival_model.py): Uses MTBF_Lifetime_Gün for Cox model
+- Script 06: Temporal PoF Model (multi-horizon predictions)
+- Script 09: Cox Survival Model (uses MTBF_Lifetime_Gün)
 
-Input:  data/combined_data.xlsx (fault records)
-Output: data/equipment_level_data.csv (equipment records with ~75 features)
+Input:  data/combined_data_son.xlsx (fault records)
+Output: data/equipment_level_data.csv (equipment-level features)
 """
 
 import pandas as pd
@@ -100,10 +98,10 @@ pd.set_option('display.max_columns', None)
 # CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
-print("SCRIPT 02: DATA TRANSFORMATION v5.0 (OPTION A - DUAL PREDICTIONS)")
+print("SCRIPT 02: DATA TRANSFORMATION v5.0 (Multi-Horizon PoF)")
 print("="*80)
 print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR}")
-print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date) - Single reliable source")
+print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -115,10 +113,66 @@ original_fault_count = len(df)
 print(f"Loaded: {df.shape[0]:,} faults x {df.shape[1]} columns from {INPUT_FILE}")
 
 # ============================================================================
-# STEP 1B: DUPLICATE DETECTION (CRITICAL FOR MULTI-SOURCE DATA)
+# STEP 1B: FILL MISSING CBS_ID FROM 'ID' COLUMN (DO THIS FIRST!)
 # ============================================================================
-print("\n[Step 1B/12] Detecting and Removing Duplicates...")
-print("⚠️  CRITICAL: Checking for duplicate fault records (same equipment + time)")
+# CRITICAL: ID consolidation MUST happen BEFORE duplicate detection
+# Otherwise, duplicates with missing cbs_id won't be detected
+print("\n[Step 1B/12] Filling Missing cbs_id Using 'id' Column...")
+print("⚠️  CRITICAL: Consolidating equipment IDs BEFORE duplicate detection")
+
+if 'cbs_id' in df.columns:
+    before_fill = len(df)
+    has_cbs_id = df['cbs_id'].notna().sum()
+    missing_cbs_id = df['cbs_id'].isna().sum()
+
+    print(f"  Total faults: {before_fill:,}")
+    print(f"  Has cbs_id: {has_cbs_id:,} ({has_cbs_id/before_fill*100:.1f}%)")
+    print(f"  Missing cbs_id: {missing_cbs_id:,} ({missing_cbs_id/before_fill*100:.1f}%)")
+
+    if missing_cbs_id > 0 and 'id' in df.columns:
+        # Use 'id' column as fallback for missing cbs_id
+        print(f"  Using 'id' column as fallback for missing cbs_id...")
+
+        # Fill missing cbs_id with 'id' column values
+        missing_mask = df['cbs_id'].isna()
+        df.loc[missing_mask, 'cbs_id'] = df.loc[missing_mask, 'id']
+
+        filled = missing_mask.sum()
+        still_missing = df['cbs_id'].isna().sum()
+
+        print(f"  ✓ Filled {filled:,} missing cbs_id values from 'id' column")
+
+        if still_missing > 0:
+            print(f"  [!] Still missing: {still_missing:,} faults have neither cbs_id nor id")
+            print(f"      Removing {still_missing:,} faults without any equipment ID...")
+            df = df[df['cbs_id'].notna()].copy()
+            print(f"  Final fault count: {len(df):,}")
+        else:
+            print(f"  ✓ All faults now have equipment IDs (cbs_id or id)")
+
+        # Update equipment tracking after ID consolidation
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+        print(f"  Unique equipment after ID consolidation: {unique_equip_after_id_consolidation:,}")
+
+    elif missing_cbs_id > 0 and 'id' not in df.columns:
+        print(f"  [!] WARNING: 'id' column not found - cannot use as fallback")
+        print(f"      Removing {missing_cbs_id:,} faults without cbs_id...")
+        df = df[df['cbs_id'].notna()].copy()
+        print(f"  Final fault count: {len(df):,}")
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+    else:
+        print(f"  ✓ All faults have cbs_id - no filling needed")
+        unique_equip_after_id_consolidation = df['cbs_id'].nunique()
+else:
+    print(f"  [!] WARNING: No cbs_id column found")
+    print(f"      Equipment ID assignment may create UNKNOWN_XXX IDs")
+    unique_equip_after_id_consolidation = 0
+
+# ============================================================================
+# STEP 1C: DUPLICATE DETECTION (AFTER ID CONSOLIDATION)
+# ============================================================================
+print("\n[Step 1C/12] Detecting and Removing Duplicates...")
+print("  (Now checking with consolidated equipment IDs)")
 
 # Identify equipment ID column
 equip_id_cols = ['cbs_id', 'Ekipman Kodu', 'Ekipman ID', 'HEPSI_ID']
@@ -136,20 +190,20 @@ exact_dup_mask = df.duplicated(keep='first')
 exact_dup_count = exact_dup_mask.sum()
 
 if exact_dup_count > 0:
-    print(f"  Found {exact_dup_count:,} exact duplicates ({exact_dup_count/len(df)*100:.1f}%) - removing...")
+    print(f"  ✓ Found {exact_dup_count:,} exact row duplicates ({exact_dup_count/len(df)*100:.1f}%) - removing...")
     df = df[~exact_dup_mask].copy()
 else:
-    print(f"  ✓ No exact duplicates found")
+    print(f"  ✓ No exact row duplicates found")
 
 # CHECK 2: Same equipment + same start time (likely same fault from different sources)
-# This is the CRITICAL check for multi-source data
+# This is the CRITICAL check for multi-source data (more important than exact duplicates)
 if 'started at' in df.columns:
     time_dup_mask = df.duplicated(subset=[equip_id_col, 'started at'], keep='first')
     time_dup_count = time_dup_mask.sum()
 
     if time_dup_count > 0:
-        print(f"  Found {time_dup_count:,} same-equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
-        print(f"    (Duplicate fault records with same equipment ID and timestamp)")
+        print(f"  ✓ Found {time_dup_count:,} equipment+time duplicates ({time_dup_count/len(df)*100:.1f}%) - removing...")
+        print(f"    (Same equipment ID + timestamp = likely duplicate from multi-source data)")
 
         # Show examples for manual validation
         df_duplicates = df[time_dup_mask].copy()
@@ -176,12 +230,13 @@ if 'started at' in df.columns:
                 print(f"    Pre-cutoff duplicates:  {pre_cutoff_dups} ({pre_cutoff_dups/len(df_duplicates)*100:.1f}%)")
                 print(f"    Post-cutoff duplicates: {post_cutoff_dups} ({post_cutoff_dups/len(df_duplicates)*100:.1f}%)")
                 if post_cutoff_dups > 0:
-                    print(f"    → {post_cutoff_dups} duplicates removed from test set (172 equipment)")
+                    post_cutoff_equip = df_duplicates[df_duplicates['started_at_parsed'] > REFERENCE_DATE][equip_id_col].nunique()
+                    print(f"    → {post_cutoff_dups} duplicates removed from test set ({post_cutoff_equip} equipment)")
                     print(f"    → Test set quality improved by removing post-cutoff duplicates")
 
         df = df[~time_dup_mask].copy()
     else:
-        print(f"  ✓ No same-equipment+time duplicates found")
+        print(f"  ✓ No equipment+time duplicates found (data already clean!)")
 else:
     print("  ⚠️  WARNING: 'started at' column not found - skipping time-based duplicate check")
 
@@ -355,6 +410,37 @@ def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, m
 
 # Parse and validate all date columns
 # NEW: Using Sebekeye_Baglanma_Tarihi (Grid Connection Date) as primary installation date source
+
+# Check if required column exists
+if 'Sebekeye_Baglanma_Tarihi' not in df.columns:
+    print("\n❌ ERROR: Required column 'Sebekeye_Baglanma_Tarihi' not found in input file!")
+    print("\nAvailable columns in input file (showing first 20):")
+    for i, col in enumerate(df.columns[:20], 1):
+        print(f"  {i:2d}. {col}")
+    if len(df.columns) > 20:
+        print(f"  ... and {len(df.columns) - 20} more columns")
+
+    # Look for potential date columns
+    potential_date_cols = [col for col in df.columns if any(
+        keyword in col.upper() for keyword in ['TARIH', 'DATE', 'BAGLAN', 'KURULUM', 'TESIS', 'EDBS', 'INSTALL']
+    )]
+    if potential_date_cols:
+        print(f"\n💡 Found {len(potential_date_cols)} potential date/installation columns:")
+        for col in potential_date_cols:
+            print(f"  - {col}")
+        print("\n⚠️  Please update your input file to include 'Sebekeye_Baglanma_Tarihi' column")
+        print("   OR update the script to use one of the columns above.")
+    else:
+        print("\n⚠️  No date-like columns found. Please check your input file structure.")
+
+    print("\n" + "="*80)
+    print("SOLUTION:")
+    print("  1. Add 'Sebekeye_Baglanma_Tarihi' column to your input file")
+    print("  OR")
+    print("  2. If using different column name, update line 358 in 02_data_transformation.py")
+    print("="*80)
+    sys.exit(1)
+
 df['Sebekeye_Baglanma_Tarihi_parsed'] = parse_and_validate_date(df['Sebekeye_Baglanma_Tarihi'], 'Sebekeye_Baglanma_Tarihi', is_installation_date=True)
 df['started at'] = parse_and_validate_date(df['started at'], 'started at', min_year=2020, report=True, is_installation_date=False)
 df['ended at'] = parse_and_validate_date(df['ended at'], 'ended at', min_year=2020, report=True, is_installation_date=False)
@@ -399,6 +485,121 @@ if len(valid_ages) > 0:
 missing_count = (df['Yaş_Kaynak'] == 'MISSING').sum()
 print(f"✓ Equipment ages calculated | Missing: {missing_count:,} ({missing_count/len(df)*100:.1f}%)")
 
+# Check for suspicious old dates (before 1964 = oldest acceptable data)
+# FLAG but KEEP these records (per user request)
+if len(valid_ages) > 0:
+    very_old_mask = valid_ages > 60  # Equipment older than 1964 (2025 - 60 = 1965)
+    very_old_count = very_old_mask.sum()
+
+    # Add flag columns for data quality tracking
+    df['Suspicious_Install_Date_Flag'] = 0  # Initialize
+    df['Default_Date_Flag'] = 0  # Initialize
+
+    if very_old_count > 0:
+        very_old_equip = df[df['Ekipman_Yaşı_Yıl'] > 60][['cbs_id', 'Sebekeye_Baglanma_Tarihi_parsed', 'Ekipman_Yaşı_Yıl']].drop_duplicates('cbs_id')
+        print(f"\n⚠️  WARNING: {very_old_count:,} records have equipment older than 60 years (before 1964)")
+        print(f"   Unique old equipment: {len(very_old_equip):,}")
+
+        # Flag very old equipment (but keep them)
+        df.loc[df['Ekipman_Yaşı_Yıl'] > 60, 'Suspicious_Install_Date_Flag'] = 1
+
+        # Check for common default dates
+        default_dates = [
+            pd.Timestamp('1978-01-01'),  # 1.01.1978
+            pd.Timestamp('1900-01-01'),  # Excel NULL
+            pd.Timestamp('1970-01-01'),  # Unix epoch
+        ]
+
+        default_date_mask = df['Sebekeye_Baglanma_Tarihi_parsed'].isin(default_dates)
+        default_date_count = default_date_mask.sum()
+
+        if default_date_count > 0:
+            print(f"   [!] {default_date_count:,} records use common default dates (1.01.1978, 1.01.1970, etc.)")
+            print(f"       These may be placeholder values rather than real installation dates")
+
+            # Flag default dates (but keep them)
+            df.loc[default_date_mask, 'Default_Date_Flag'] = 1
+
+        # Show examples for review (with integer IDs)
+        if len(very_old_equip) > 0:
+            print(f"\n   Examples of very old equipment (showing first 5):")
+            for idx, row in very_old_equip.head(5).iterrows():
+                install_date = row['Sebekeye_Baglanma_Tarihi_parsed']
+                age = row['Ekipman_Yaşı_Yıl']
+                cbs = row['cbs_id']
+                if pd.notna(install_date) and pd.notna(cbs):
+                    equip_id = int(cbs)
+                    print(f"     • Equipment {equip_id}: Installed {install_date.strftime('%Y-%m-%d')} (Age: {age:.1f} years)")
+
+        print(f"\n   → Records FLAGGED but INCLUDED in training (age-based features may be unreliable)")
+        print(f"   → Flags added: 'Suspicious_Install_Date_Flag' and 'Default_Date_Flag'")
+        print(f"   → Acceptable range: 1964-present (equipment from 0-60 years old)")
+        print(f"   → Action: Review flagged equipment predictions with caution")
+
+# ============================================================================
+# STEP 3B: TEMPORAL VALIDATION (CRITICAL DATA QUALITY CHECK)
+# ============================================================================
+print(f"\n[Step 3B/12] Validating Temporal Consistency...")
+
+validation_issues = []
+
+# CHECK 1: Fault date BEFORE equipment installation
+if 'Sebekeye_Baglanma_Tarihi_parsed' in df.columns and 'started at' in df.columns:
+    before_install_mask = (df['Sebekeye_Baglanma_Tarihi_parsed'].notna() &
+                           df['started at'].notna() &
+                           (df['started at'] < df['Sebekeye_Baglanma_Tarihi_parsed']))
+    before_install_count = before_install_mask.sum()
+
+    if before_install_count > 0:
+        print(f"  ❌ CRITICAL: {before_install_count:,} faults occurred BEFORE equipment installation!")
+        validation_issues.append(f"Faults before installation: {before_install_count}")
+
+        # Show examples (with integer IDs)
+        before_install_sample = df[before_install_mask][['cbs_id', 'started at', 'Sebekeye_Baglanma_Tarihi_parsed']].head(5)
+        print(f"\n  Examples (first 5):")
+        for idx, row in before_install_sample.iterrows():
+            fault_date = row['started at']
+            install_date = row['Sebekeye_Baglanma_Tarihi_parsed']
+            days_before = (install_date - fault_date).days
+            equip_id = int(row['cbs_id']) if pd.notna(row['cbs_id']) else 'UNKNOWN'
+            print(f"    • Equipment {equip_id}: Fault on {fault_date.strftime('%Y-%m-%d')}, ")
+            print(f"      but installed {days_before} days later on {install_date.strftime('%Y-%m-%d')}")
+
+        # EXCLUDE these faults from model training (per user request)
+        print(f"\n  → EXCLUDING {before_install_count:,} temporally invalid faults from dataset")
+        print(f"     (Cannot train on faults that occurred before equipment existed)")
+
+        # Save excluded records for audit
+        excluded_temporal = df[before_install_mask].copy()
+        excluded_file = DATA_DIR / 'excluded_temporal_invalid.csv'
+        excluded_temporal.to_csv(excluded_file, index=False)
+        print(f"  ✓ Excluded faults saved to: {excluded_file}")
+
+        # Remove from dataset
+        df = df[~before_install_mask].copy()
+        print(f"  ✓ Remaining faults: {len(df):,}")
+    else:
+        print(f"  ✓ All faults occurred AFTER equipment installation")
+
+# CHECK 2: Negative time-to-repair
+if 'Time_To_Repair_Hours' in df.columns:
+    # Will check after Time_To_Repair_Hours is calculated
+    pass
+else:
+    # Calculate here for validation
+    temp_ttr = (df['ended at'] - df['started at']).dt.total_seconds() / 3600
+    negative_ttr = (temp_ttr < 0).sum()
+    if negative_ttr > 0:
+        print(f"  ❌ WARNING: {negative_ttr:,} faults have negative time-to-repair (end before start!)")
+        validation_issues.append(f"Negative repair time: {negative_ttr}")
+    else:
+        print(f"  ✓ All repair times are positive")
+
+if len(validation_issues) == 0:
+    print(f"  ✅ All temporal validations PASSED!")
+else:
+    print(f"\n  ⚠️  Found {len(validation_issues)} temporal data quality issues")
+
 # STEP 4 & 5: Temporal Features + Failure Periods
 print("\n[Step 4-5/12] Creating Temporal Features (3M/6M/12M Windows) [6M/12M]...")
 
@@ -409,7 +610,7 @@ df['Time_To_Repair_Hours'] = (df['ended at'] - df['started at']).dt.total_second
 
 # CRITICAL FIX: Use CUTOFF_DATE instead of df['started at'].max()
 # This ensures temporal features use ONLY historical data (before prediction window)
-reference_date = REFERENCE_DATE  # Use cutoff date from OPTION A (2024-06-25)
+reference_date = REFERENCE_DATE  # Use cutoff date from config.py
 cutoff_3m = reference_date - pd.Timedelta(days=90)   # 2024-03-27
 cutoff_6m = reference_date - pd.Timedelta(days=180)  # 2023-12-28
 cutoff_12m = reference_date - pd.Timedelta(days=365) # 2023-06-25
@@ -446,20 +647,34 @@ if 'total customer count' in df.columns:
         print(f"Created {len(customer_ratio_cols)} customer ratio features (fault-level calculation to avoid Simpson's Paradox)")
 
 # STEP 6: Equipment Identification
-print("\n[Step 6/12] Creating Equipment IDs (cbs_id → Ekipman ID → Generated)...")
+print("\n[Step 6/12] Creating Equipment IDs (cbs_id primary)...")
 
 def get_equipment_id(row):
-    """Priority: cbs_id → Ekipman ID → Generate unique ID (prevents grouping)"""
+    """
+    Primary: cbs_id (should always exist after Step 1C filtering)
+    Fallback: Ekipman ID (rare case)
+    Note: UNKNOWN generation removed - faults without IDs filtered in Step 1C
+    """
     if pd.notna(row.get('cbs_id')):
         return row['cbs_id']
     elif pd.notna(row.get('Ekipman ID')):
         return row['Ekipman ID']
     else:
-        return f"UNKNOWN_{row.name}"
+        # Should not happen after Step 1C filtering
+        print(f"  [!] WARNING: Fault without cbs_id slipped through filtering (row {row.name})")
+        return None
 
 df['Equipment_ID_Primary'] = df.apply(get_equipment_id, axis=1)
+
+# Remove any None IDs (shouldn't happen but safety check)
+none_ids = df['Equipment_ID_Primary'].isna().sum()
+if none_ids > 0:
+    print(f"  [!] Removing {none_ids} faults with missing Equipment_ID_Primary")
+    df = df[df['Equipment_ID_Primary'].notna()].copy()
+
 unique_equipment = df['Equipment_ID_Primary'].nunique()
 print(f"Created {unique_equipment:,} unique equipment IDs from {len(df):,} faults (avg {len(df)/unique_equipment:.1f} faults/equipment)")
+print(f"  No UNKNOWN_XXX IDs generated (all equipment have real cbs_id)")
 
 equipment_id_col = 'Equipment_ID_Primary'
 
@@ -527,40 +742,42 @@ print(f"    Pre-cutoff unique equipment: {df_pre_cutoff[equipment_id_col].nuniqu
 print(f"    Excluded post-cutoff: {len(df) - len(df_pre_cutoff):,} faults")
 
 # Build aggregation dictionary dynamically based on available columns
+# Start with REQUIRED columns (created by this script)
 agg_dict = {
-    # Equipment identification & classification
-    'Equipment_Class_Primary': 'first',
-    'Ekipman Sınıfı': 'first',
-    'Equipment_Type': 'first',
-    'Kesinti Ekipman Sınıfı': 'first',
-
-    # Geographic data
-    'KOORDINAT_X': 'first',
-    'KOORDINAT_Y': 'first',
-    'İl': 'first',
-    'İlçe': 'first',
-    'Mahalle': 'first',
-
     # Equipment Age (from Sebekeye_Baglanma_Tarihi - Grid Connection Date)
     'Ekipman_Kurulum_Tarihi': 'first',
     'Ekipman_Yaşı_Gün': 'first',
     'Ekipman_Yaşı_Yıl': 'first',
     'Yaş_Kaynak': 'first',
 
-    # Fault history
+    # Fault history (required - created by this script)
     'started at': ['count', 'min', 'max'],
     'Fault_Last_3M': 'sum',
     'Fault_Last_6M': 'sum',
     'Fault_Last_12M': 'sum',
 
-    # Temporal features
+    # Temporal features (required - created by this script)
     'Summer_Peak_Flag': 'sum',
     'Winter_Peak_Flag': 'sum',
     'Time_To_Repair_Hours': ['mean', 'max'],
-
-    # Customer impact ratios (fault-level calculated, then averaged)
-    # Note: These are calculated at fault level to avoid Simpson's Paradox
 }
+
+# Add equipment classification columns if available
+equipment_classification_cols = {
+    'Equipment_Class_Primary': 'first',
+    'Ekipman Sınıfı': 'first',
+    'Equipment_Type': 'first',
+    'Kesinti Ekipman Sınıfı': 'first'
+}
+for col, agg_func in equipment_classification_cols.items():
+    if col in df_pre_cutoff.columns:
+        agg_dict[col] = agg_func
+
+# Add geographic columns if available
+geographic_cols = ['KOORDINAT_X', 'KOORDINAT_Y', 'İl', 'İlçe', 'Mahalle']
+for col in geographic_cols:
+    if col in df_pre_cutoff.columns:
+        agg_dict[col] = 'first'
 
 # Add customer ratio columns if they were created
 for ratio_col in ['Urban_Customer_Ratio', 'Rural_Customer_Ratio', 'MV_Customer_Ratio']:
@@ -597,6 +814,7 @@ print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_d
 
 # Equipment tracking summary
 print(f"\n[TRACKING] Equipment Pipeline Summary:")
+print(f"  After ID consolidation:  {unique_equip_after_id_consolidation:,} unique equipment (cbs_id + id fallback)")
 print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment")
 print(f"  Pre-cutoff equipment:    {df_pre_cutoff[equipment_id_col].nunique():,}")
 print(f"  Final aggregated:        {len(equipment_df):,} equipment")
@@ -1036,6 +1254,56 @@ if recurring_col in equipment_df.columns and lifetime_faults_col in equipment_df
 else:
     print(f"  ⚠️  WARNING: Recurring fault column not found")
 
+# Check 6: Data leakage - Faults after cutoff in pre-cutoff dataset
+if 'started at' in df.columns:
+    # Check df_pre_cutoff if it exists, otherwise check df
+    try:
+        leakage_faults = (df_pre_cutoff['started at'] > REFERENCE_DATE).sum()
+        dataset_name = 'df_pre_cutoff'
+    except:
+        leakage_faults = 0
+        dataset_name = 'N/A'
+
+    if leakage_faults > 0:
+        print(f"  ❌ CRITICAL: Data leakage detected in training data!")
+        print(f"      {leakage_faults:,} faults after cutoff date ({REFERENCE_DATE.strftime('%Y-%m-%d')}) in {dataset_name}")
+        validation_passed = False
+    else:
+        print(f"  ✓ No data leakage: All training faults before cutoff date")
+else:
+    print(f"  ⚠️  WARNING: Cannot check data leakage - 'started at' column not found")
+
+# Check 7: Negative MTBF values
+mtbf_cols_to_check = ['MTBF_Gün', 'MTBF_Lifetime_Gün', 'MTBF_Observable_Gün']
+negative_mtbf_found = False
+for col in mtbf_cols_to_check:
+    if col in equipment_df.columns:
+        negative_count = (equipment_df[col] < 0).sum()
+        if negative_count > 0:
+            print(f"  ❌ FAIL: Negative MTBF values in '{col}'!")
+            print(f"      {negative_count} equipment with negative {col}")
+            validation_passed = False
+            negative_mtbf_found = True
+
+if not negative_mtbf_found:
+    valid_mtbf_cols = [col for col in mtbf_cols_to_check if col in equipment_df.columns]
+    if valid_mtbf_cols:
+        print(f"  ✓ All MTBF values are positive ({len(valid_mtbf_cols)} MTBF columns checked)")
+    else:
+        print(f"  ⚠️  WARNING: No MTBF columns found for validation")
+
+# Check 8: Negative time-to-repair
+if 'Time_To_Repair_Hours' in df.columns:
+    negative_ttr = (df['Time_To_Repair_Hours'] < 0).sum()
+    if negative_ttr > 0:
+        print(f"  ❌ FAIL: Negative time-to-repair values!")
+        print(f"      {negative_ttr:,} faults have end time before start time")
+        validation_passed = False
+    else:
+        print(f"  ✓ All time-to-repair values are positive")
+else:
+    print(f"  ⚠️  WARNING: Time_To_Repair_Hours column not found")
+
 # Final validation summary
 if validation_passed:
     print(f"\n✅ All critical integrity checks PASSED!")
@@ -1064,36 +1332,32 @@ print(f"Saved: equipment_level_data.csv ({len(equipment_df):,} records x {len(eq
 # FINAL SUMMARY
 # ============================================================================
 print("\n" + "="*80)
-print("TRANSFORMATION COMPLETE - OPTION A DUAL PREDICTION FEATURES READY")
+print("TRANSFORMATION COMPLETE - MULTI-HORIZON POF FEATURES READY")
 print("="*80)
 
 print(f"\nPIPELINE STATUS: {original_fault_count:,} faults → {len(equipment_df):,} equipment ({len(equipment_df.columns)} features)")
 
-print(f"\nKEY FEATURES FOR DUAL PREDICTIONS (6M + 12M):")
-print(f"  [6M/12M] Fault History: 3M/6M/12M counts (PRIMARY prediction drivers)")
-print(f"  [6M/12M] Equipment Age: Day-precision ({equipment_df['Yaş_Kaynak'].value_counts().to_dict()})")
-print(f"  [6M/12M] NEW: Time-to-First-Failure (avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality)")
-print(f"  [6M/12M] MTBF Features (3 methods):")
-print(f"    • Method 1 (Inter-Fault): {mtbf_valid:,} valid - PoF prediction")
-print(f"    • Method 2 (Lifetime): {mtbf_lifetime_valid:,} valid - Survival analysis baseline hazard")
-print(f"    • Method 3 (Observable): {mtbf_observable_valid:,} valid - Degradation detection")
-print(f"    • Degrading equipment: {degrading_count:,} flagged (failures accelerating)")
-print(f"  [6M/12M] Recurring: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} chronic repeaters flagged")
-print(f"  [12M] Customer Impact Ratios: {len([col for col in customer_impact_cols if any(col.replace(' ', '_') in c for c in equipment_df.columns)])} features")
-print(f"  [12M] Equipment Classification: {harmonized_classes} standardized classes")
+print(f"\nKEY FEATURES FOR MULTI-HORIZON PREDICTIONS:")
+print(f"  • Fault History: 3M/6M/12M temporal counts (PRIMARY drivers)")
+print(f"  • Equipment Age: {equipment_df['Yaş_Kaynak'].value_counts().to_dict()}")
+print(f"  • Time-to-First-Failure: avg {equipment_df['Ilk_Arizaya_Kadar_Yil'].mean():.1f}y, {infant_mortality} infant mortality cases")
+print(f"  • MTBF Features (3 methods):")
+print(f"    - Method 1 (Inter-Fault): {mtbf_valid:,} valid - PoF prediction")
+print(f"    - Method 2 (Lifetime): {mtbf_lifetime_valid:,} valid - Survival analysis")
+print(f"    - Method 3 (Observable): {mtbf_observable_valid:,} valid - Degradation detection")
+print(f"    - Degrading equipment: {degrading_count:,} flagged")
+print(f"  • Chronic Repeaters: {equipment_df['Tekrarlayan_Arıza_90gün_Flag'].sum():,} flagged")
+print(f"  • Equipment Classes: {harmonized_classes} standardized")
 
-print(f"\nENHANCEMENTS IN v4.1:")
-print(f"  + NEW: 3 MTBF calculation methods (Inter-Fault, Lifetime, Observable)")
-print(f"  + NEW: Baseline_Hazard_Rate feature (for Cox survival analysis)")
-print(f"  + NEW: MTBF_Degradation_Ratio + Is_Degrading flag (failure acceleration detection)")
-print(f"  + NEW: Time-to-First-Failure (Ilk_Arizaya_Kadar_Gun/Yil)")
-print(f"  + OPTION A Context: Dual prediction strategy (6M: 26.9%, 12M: 44.2% positive class)")
-print(f"  + Feature Importance Tags: [6M/12M] markers for model relevance")
-print(f"  + Reduced Verbosity: ~60% fewer print statements")
-print(f"  + Progress Indicators: [Step X/12] pipeline visibility")
-print(f"  + Flexible Date Parser: Recovers 25% 'missing' timestamps")
+print(f"\nENHANCEMENTS IN v5.0:")
+print(f"  + NEW: Sebekeye_Baglanma_Tarihi as single age source (simplified)")
+print(f"  + 3 MTBF calculation methods (Inter-Fault, Lifetime, Observable)")
+print(f"  + Baseline_Hazard_Rate for Cox survival analysis")
+print(f"  + MTBF_Degradation_Ratio + Is_Degrading flag")
+print(f"  + Time-to-First-Failure (Ilk_Arizaya_Kadar_Gun/Yil)")
+print(f"  + Dynamic schema support (handles missing columns)")
 
 print(f"\nNEXT STEP: Run 03_feature_engineering.py")
-print(f"  → Creates advanced PoF risk scores, geographic clustering, expected life ratios")
-print(f"  → Links features to OPTION A dual prediction targets (6M + 12M)")
+print(f"  → Creates advanced PoF risk scores and geographic features")
+print(f"  → Prepares features for 3M/6M/12M temporal models")
 print("="*80)

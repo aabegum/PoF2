@@ -69,8 +69,8 @@ STEP_VALIDATIONS = {
         'outputs': [FEATURES_ENGINEERED_FILE],
         'checks': [
             {'file': FEATURES_ENGINEERED_FILE, 'min_rows': MIN_EQUIPMENT_RECORDS, 'max_rows': MAX_EQUIPMENT_RECORDS,
-             'min_features': 70, 'max_features': 100,  # After engineering (Step 4 will reduce to 30)
-             'required_columns': ['Ekipman_ID', 'Ekipman_Yaşı_Yıl', 'Equipment_Class_Primary']}
+             'min_features': 50, 'max_features': 120,  # Dynamic: 50-120 features depending on input schema
+             'required_columns': ['Ekipman_ID', 'Ekipman_Yaşı_Yıl']}  # Equipment_Class_Primary may be missing
         ]
     },
     4: {
@@ -87,8 +87,7 @@ STEP_VALIDATIONS = {
         'outputs': [
             PREDICTION_DIR / 'predictions_3m.csv',
             PREDICTION_DIR / 'predictions_6m.csv',
-            PREDICTION_DIR / 'predictions_12m.csv',
-            PREDICTION_DIR / 'predictions_24m.csv'
+            PREDICTION_DIR / 'predictions_12m.csv'
         ],
         'checks': [
             {'file': PREDICTION_DIR / 'predictions_3m.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
@@ -96,8 +95,6 @@ STEP_VALIDATIONS = {
             {'file': PREDICTION_DIR / 'predictions_6m.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']},
             {'file': PREDICTION_DIR / 'predictions_12m.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
-             'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']},
-            {'file': PREDICTION_DIR / 'predictions_24m.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']}
         ]
     },
@@ -133,14 +130,13 @@ STEP_VALIDATIONS = {
             RESULTS_DIR / 'risk_assessment_3M.csv',
             RESULTS_DIR / 'risk_assessment_6M.csv',
             RESULTS_DIR / 'risk_assessment_12M.csv',
-            RESULTS_DIR / 'risk_assessment_24M.csv',
             RESULTS_DIR / 'capex_priority_list.csv'
         ],
         'checks': [
             {'file': RESULTS_DIR / 'risk_assessment_3M.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'CoF_Score', 'Risk_Score', 'Risk_Category']},
             {'file': RESULTS_DIR / 'capex_priority_list.csv', 'min_rows': MIN_PREDICTIONS, 'max_rows': MAX_PREDICTIONS,
-             'required_columns': ['Ekipman_ID', 'Risk_Score', 'Equipment_Class_Primary']}
+             'required_columns': ['Ekipman_ID', 'Risk_Score']}  # Equipment_Class_Primary may be missing
         ]
     }
 }

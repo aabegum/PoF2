@@ -1,34 +1,34 @@
 """
 ================================================================================
-SCRIPT 01: DATA PROFILING v4.0
+SCRIPT 01: DATA PROFILING v5.0
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
-PIPELINE STRATEGY: OPTION A (12-Month Cutoff with Dual Predictions) [RECOMMENDED]
+PIPELINE STRATEGY: Multi-Horizon PoF Prediction (3M, 6M, 12M)
 - Validates data quality for temporal PoF modeling
-- Confirms 100% timestamp coverage (DD-MM-YYYY + YYYY-MM-DD support)
+- Confirms timestamp coverage with flexible date parser
 - Reports equipment ID strategy, age calculation sources, customer impact coverage
 
 WHAT THIS SCRIPT DOES:
 Comprehensive data quality profiling of fault-level data before transformation:
-- Equipment identification strategy (cbs_id → Ekipman ID priority)
+- Equipment identification strategy (cbs_id → id fallback priority)
 - Temporal coverage validation (fault timestamps, installation dates)
 - Data completeness scoring (10/10 quality score expected)
 - Customer impact coverage analysis
 
-ENHANCEMENTS in v4.0:
-+ OPTION A Pipeline Context: Shows data quality for dual prediction strategy
+ENHANCEMENTS in v5.0:
++ Updated for Sebekeye_Baglanma_Tarihi (Grid Connection Date) as age source
++ ID Strategy: cbs_id → id fallback (no UNKNOWN generation)
++ Dynamic input file from config (combined_data_son.xlsx)
 + Progress Indicators: [Step X/Y] for pipeline visibility
-+ Reduced Icons: Minimal use, kept for quality ratings only
-+ Cross-Script References: Links to Scripts 00, 02, 03
-+ Flexible Date Parser: Recovers 25% "missing" timestamps
++ Flexible Date Parser: Supports mixed date formats
 
 CROSS-REFERENCES:
-- Script 00: Validates OPTION A strategy (6M: 26.9%, 12M: 44.2% positive class)
 - Script 02: Uses validated data for equipment-level transformation
 - Script 03: Creates advanced features from validated equipment data
+- config.py: Defines INPUT_FILE and validation thresholds
 
-Input:  data/combined_data.xlsx (fault records)
+Input:  config.INPUT_FILE (fault records)
 Output: Data quality report + validation for Script 02
 """
 
@@ -60,7 +60,7 @@ pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', 60)
 
 print("\n" + "="*80)
-print("SCRIPT 01: DATA PROFILING v4.0 (OPTION A - DUAL PREDICTIONS)")
+print("SCRIPT 01: DATA PROFILING v5.0 (Multi-Horizon PoF)")
 print("="*80)
 
 # ============================================================================
@@ -68,11 +68,13 @@ print("="*80)
 # ============================================================================
 print("\n[Step 1/7] Loading Fault-Level Data...")
 
-data_path = Path('data/combined_data.xlsx')
+# Import INPUT_FILE from config
+from config import INPUT_FILE
+data_path = INPUT_FILE
 
 if not data_path.exists():
     print(f"\n❌ ERROR: File not found at {data_path}")
-    print("\nPlease ensure combined_data.xlsx is in the 'data' directory")
+    print(f"\nPlease ensure {data_path.name} is in the '{data_path.parent}' directory")
     exit(1)
 
 print(f"\nLoading: {data_path}")
@@ -104,7 +106,7 @@ report_lines.append(f"Total Columns: {df.shape[1]}")
 # ============================================================================
 print("\n[Step 2/7] Equipment Identification Strategy...")
 
-id_columns_priority = ['cbs_id', 'Ekipman ID', 'HEPSI_ID', 'Ekipman Kodu']
+id_columns_priority = ['cbs_id', 'id', 'Ekipman ID', 'HEPSI_ID', 'Ekipman Kodu']
 available_id_cols = [col for col in id_columns_priority if col in df.columns]
 
 print(f"\nEquipment ID Priority Order:")
@@ -358,55 +360,48 @@ def parse_date_flexible(value):
     return pd.NaT
 
 # Convert date columns with flexible parser
-for col in ['TESIS_TARIHI', 'EDBS_IDATE', 'started at', 'ended at']:
+for col in ['Sebekeye_Baglanma_Tarihi', 'started at', 'ended at']:
     if col in df.columns and df[col].dtype != 'datetime64[ns]':
         df[col] = df[col].apply(parse_date_flexible)
 
-# Calculate age sources
+# Calculate age from Sebekeye_Baglanma_Tarihi (Grid Connection Date)
 age_source_col = None
 
-if 'TESIS_TARIHI' in df.columns:
-    df['_age_from_tesis'] = current_year - df['TESIS_TARIHI'].dt.year
-    age_source_col = '_age_from_tesis'
+if 'Sebekeye_Baglanma_Tarihi' in df.columns:
+    df['_age_from_grid_connection'] = current_year - df['Sebekeye_Baglanma_Tarihi'].dt.year
+    age_source_col = '_age_from_grid_connection'
 
-if 'EDBS_IDATE' in df.columns:
-    df['_age_from_edbs'] = current_year - df['EDBS_IDATE'].dt.year
-    if age_source_col is None:
-        age_source_col = '_age_from_edbs'
-
-# Create combined age column with source tracking
-if 'TESIS_TARIHI' in df.columns or 'EDBS_IDATE' in df.columns:
+    # Create combined age column with source tracking
     df['_equipment_age'] = np.nan
     df['_age_source'] = 'MISSING'
 
-    if 'TESIS_TARIHI' in df.columns:
-        mask = df['TESIS_TARIHI'].notna()
-        df.loc[mask, '_equipment_age'] = df.loc[mask, '_age_from_tesis']
-        df.loc[mask, '_age_source'] = 'TESIS_TARIHI'
-
-    if 'EDBS_IDATE' in df.columns:
-        mask = df['_equipment_age'].isna() & df['EDBS_IDATE'].notna()
-        df.loc[mask, '_equipment_age'] = df.loc[mask, '_age_from_edbs']
-        df.loc[mask, '_age_source'] = 'EDBS_IDATE'
+    mask = df['Sebekeye_Baglanma_Tarihi'].notna()
+    df.loc[mask, '_equipment_age'] = df.loc[mask, '_age_from_grid_connection']
+    df.loc[mask, '_age_source'] = 'GRID_CONNECTION'
 
     # Age source distribution
     print(f"\nAGE SOURCE DISTRIBUTION:")
     report_lines.append(f"\nAGE SOURCE DISTRIBUTION:")
 
     age_source_counts = df['_age_source'].value_counts()
-    for source in ['TESIS_TARIHI', 'EDBS_IDATE', 'MISSING']:
+    for source in ['GRID_CONNECTION', 'MISSING']:
         count = age_source_counts.get(source, 0)
         pct = count / len(df) * 100
         avg_age = df[df['_age_source'] == source]['_equipment_age'].mean()
         avg_age_str = f"{avg_age:.1f}" if not np.isnan(avg_age) else "nan"
 
-        print(f"  {source:15s}: {count:>6,} ({pct:>5.1f}%) - Avg age: {avg_age_str:>5s} yrs")
-        report_lines.append(f"  {source:15s}: {count:>6,} ({pct:>5.1f}%) - Avg age: {avg_age_str:>5s} yrs")
+        print(f"  {source:20s}: {count:>6,} ({pct:>5.1f}%) - Avg age: {avg_age_str:>5s} yrs")
+        report_lines.append(f"  {source:20s}: {count:>6,} ({pct:>5.1f}%) - Avg age: {avg_age_str:>5s} yrs")
+else:
+    print(f"\n⚠️  WARNING: 'Sebekeye_Baglanma_Tarihi' column not found!")
+    print(f"   Equipment age calculation will not be possible")
+    df['_equipment_age'] = np.nan
+    df['_age_source'] = 'MISSING'
 
-    # Equipment age statistics
-    valid_ages = df['_equipment_age'].dropna()
+# Equipment age statistics
+valid_ages = df['_equipment_age'].dropna()
 
-    if len(valid_ages) > 0:
+if len(valid_ages) > 0:
         print(f"\nEQUIPMENT AGE STATISTICS:")
         print(f"  Mean:   {valid_ages.mean():>6.1f} years")
         print(f"  Median: {valid_ages.median():>6.1f} years")
@@ -596,14 +591,9 @@ if best_class_col:
 else:
     quality_checks.append(('Equipment Class', False, 0))
 
-# 3. Installation Date
-if 'TESIS_TARIHI' in df.columns or 'EDBS_IDATE' in df.columns:
-    age_coverage = 0
-    if 'TESIS_TARIHI' in df.columns:
-        age_coverage = max(age_coverage, df['TESIS_TARIHI'].notna().sum() / len(df) * 100)
-    if 'EDBS_IDATE' in df.columns:
-        combined = df['TESIS_TARIHI'].notna() | df['EDBS_IDATE'].notna()
-        age_coverage = combined.sum() / len(df) * 100
+# 3. Installation Date (Grid Connection Date)
+if 'Sebekeye_Baglanma_Tarihi' in df.columns:
+    age_coverage = df['Sebekeye_Baglanma_Tarihi'].notna().sum() / len(df) * 100
     quality_checks.append(('Installation Date', age_coverage > 80, age_coverage))
 else:
     quality_checks.append(('Installation Date', False, 0))
@@ -792,9 +782,8 @@ print("       - Son_Arıza_Gun_Sayisi (days since last fault)")
 print("       - Tekrarlayan_Arıza flags (recurring patterns)")
 
 print("\n  2. EQUIPMENT AGE CALCULATION")
-print("     • Primary: TESIS_TARIHI")
-print("     • Fallback: EDBS_IDATE")
-print(f"     • Formula: Equipment_Age = {current_year} - Installation_Year")
+print("     • Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date)")
+print(f"     • Formula: Equipment_Age = {current_year} - Grid_Connection_Year")
 
 print("\n  3. TEMPORAL FEATURE ENGINEERING")
 print("     • Extract from 'started at':")
@@ -856,10 +845,12 @@ print(f"   • Quality Score: {quality_score}/10 {rating}")
 print(f"\n🎯 KEY COLUMNS IDENTIFIED:")
 if best_id_col:
     print(f"   • Equipment ID: {best_id_col}")
+if 'id' in df.columns:
+    print(f"   • ID Fallback: id (for missing cbs_id)")
 if best_class_col:
     print(f"   • Equipment Class: {best_class_col}")
     print(f"   • Equipment Types: {df[best_class_col].nunique()} unique")
-print(f"   • Installation Date: TESIS_TARIHI → EDBS_IDATE")
+print(f"   • Installation Date: Sebekeye_Baglanma_Tarihi (Grid Connection)")
 print(f"   • Fault Timestamp: started at, ended at")
 
 if 'started at' in df.columns and df['started at'].notna().sum() > 0:

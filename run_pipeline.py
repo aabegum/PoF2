@@ -12,16 +12,16 @@ NOTE: For structured logging in individual scripts, use logger.py:
     log_script_end(logger, "Script Name")
 
 PIPELINE FLOW (10 STEPS):
-    1. Data Profiling         → Validate data quality
-    2. Data Transformation    → Fault → Equipment level (1,210 → 789)
-    3. Feature Engineering    → Create 30 optimal features
-    4. Feature Selection      → Leakage removal + VIF (merged: includes 05b)
-    5. Temporal PoF Model     → XGBoost/CatBoost (06_temporal_pof_model.py)
-    6. Chronic Classifier     → Identify failure-prone equipment (06_chronic_classifier.py)
-    7. Model Explainability   → SHAP feature importance (07_explainability.py)
-    8. Probability Calibration → Calibrate risk estimates (08_calibration.py)
-    9. Cox Survival Model     → Multi-horizon predictions (06_survival_model.py)
-   10. Risk Assessment        → PoF × CoF → CAPEX priority list (10_consequence_of_failure.py)
+    1. Data Profiling         → Validate data quality and temporal coverage
+    2. Data Transformation    → Transform fault-level to equipment-level
+    3. Feature Engineering    → Create optimal feature set
+    4. Feature Selection      → Leakage removal + VIF reduction
+    5. Temporal PoF Model     → XGBoost/CatBoost multi-horizon predictions
+    6. Chronic Classifier     → Identify failure-prone equipment
+    7. Model Explainability   → SHAP feature importance
+    8. Probability Calibration → Calibrate risk estimates
+    9. Cox Survival Model     → Multi-horizon survival analysis
+   10. Risk Assessment        → PoF × CoF → CAPEX priority list
 
 OPTIONAL SCRIPTS (in analysis/ folder):
     • analysis/exploratory/04_eda.py - 16 exploratory analyses
@@ -61,19 +61,19 @@ PIPELINE_STEPS = [
         'step': 2,
         'name': 'Data Transformation',
         'script': '02_data_transformation.py',
-        'description': 'Transform fault-level → equipment-level (1,210 → 789)'
+        'description': 'Transform fault-level to equipment-level'
     },
     {
         'step': 3,
         'name': 'Feature Engineering',
         'script': '03_feature_engineering.py',
-        'description': 'Create optimal 30-feature set (TIER 1-8)'
+        'description': 'Create optimal feature set (TIER 1-8)'
     },
     {
         'step': 4,
         'name': 'Feature Selection',
         'script': '05_feature_selection.py',
-        'description': 'Leakage removal + VIF analysis (30 → 25-30 features)'
+        'description': 'Leakage removal + VIF analysis'
     },
     {
         'step': '4b',
@@ -281,22 +281,20 @@ def run_pipeline():
 
         f.write("OUTPUT FILES GENERATED:\n")
         f.write("  DATA OUTPUTS:\n")
-        f.write("    • data/equipment_level_data.csv - Equipment-level dataset (789 records)\n")
-        f.write("    • data/features_engineered.csv - Engineered features (30 features)\n")
-        f.write("    • data/features_reduced.csv - Final feature set (25-30 features)\n\n")
+        f.write("    • data/equipment_level_data.csv - Equipment-level dataset\n")
+        f.write("    • data/features_engineered.csv - Engineered features\n")
+        f.write("    • data/features_reduced.csv - Final feature set\n\n")
         f.write("  PREDICTIONS:\n")
         f.write("    • predictions/predictions_3m.csv - 3-month temporal PoF\n")
         f.write("    • predictions/predictions_6m.csv - 6-month temporal PoF\n")
         f.write("    • predictions/predictions_12m.csv - 12-month temporal PoF\n")
-        f.write("    • predictions/predictions_24m.csv - 24-month temporal PoF\n")
         f.write("    • predictions/chronic_repeaters.csv - Chronic repeater classifications\n")
         f.write("    • predictions/pof_multi_horizon_predictions.csv - Multi-horizon survival\n\n")
         f.write("  RISK ASSESSMENT:\n")
         f.write("    • results/risk_assessment_3M.csv - 3-month risk scores\n")
         f.write("    • results/risk_assessment_6M.csv - 6-month risk scores\n")
         f.write("    • results/risk_assessment_12M.csv - 12-month risk scores\n")
-        f.write("    • results/risk_assessment_24M.csv - 24-month risk scores\n")
-        f.write("    • results/capex_priority_list.csv - Top 100 CAPEX priorities\n\n")
+        f.write("    • results/capex_priority_list.csv - CAPEX priority list\n\n")
         f.write("  MODELS:\n")
         f.write("    • models/*.pkl - Trained XGBoost/CatBoost models\n\n")
         f.write("  VISUALIZATIONS:\n")
@@ -335,18 +333,18 @@ def run_pipeline():
     print()
     print("📊 KEY OUTPUT FILES:")
     print("   DATA:")
-    print("     • data/equipment_level_data.csv (789 records)")
-    print("     • data/features_engineered.csv (30 features)")
-    print("     • data/features_reduced.csv (25-30 features)")
+    print("     • data/equipment_level_data.csv")
+    print("     • data/features_engineered.csv")
+    print("     • data/features_reduced.csv")
     print()
     print("   PREDICTIONS:")
-    print("     • predictions/predictions_*.csv (3M, 6M, 12M, 24M)")
+    print("     • predictions/predictions_*.csv (3M, 6M, 12M)")
     print("     • predictions/chronic_repeaters.csv")
     print("     • predictions/pof_multi_horizon_predictions.csv")
     print()
     print("   RISK & CAPEX:")
-    print("     • results/risk_assessment_*.csv (3M, 6M, 12M, 24M)")
-    print("     • results/capex_priority_list.csv (Top 100)")
+    print("     • results/risk_assessment_*.csv (3M, 6M, 12M)")
+    print("     • results/capex_priority_list.csv")
     print()
     print("   MODELS & VISUALIZATIONS:")
     print("     • models/*.pkl")

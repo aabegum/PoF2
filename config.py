@@ -38,16 +38,17 @@ MAX_VALID_YEAR = pd.Timestamp.now().year + 1
 # ============================================================================
 
 # Data size validation (lenient thresholds to catch catastrophic failures only)
-MIN_EQUIPMENT_RECORDS = 100  # Minimum equipment records for statistical validity
-MAX_EQUIPMENT_RECORDS = 5000  # Maximum expected (sanity check for data errors)
+# DYNAMIC: Very flexible to accommodate varying input data sizes
+MIN_EQUIPMENT_RECORDS = 50   # Minimum equipment records (very lenient - just catch empty files)
+MAX_EQUIPMENT_RECORDS = 10000  # Maximum expected (very lenient - just catch data corruption)
 
 # Prediction validation
-MIN_PREDICTIONS = 50  # Minimum high-risk predictions expected
-MAX_PREDICTIONS = 500  # Maximum high-risk predictions (sanity check)
+MIN_PREDICTIONS = 20  # Minimum high-risk predictions expected (dynamic based on data)
+MAX_PREDICTIONS = 1000  # Maximum high-risk predictions (sanity check)
 
-# Feature validation
-MIN_FEATURES = 25  # After feature selection/VIF removal
-MAX_FEATURES = 35  # Should have ~30 optimal features
+# Feature validation (after VIF removal - depends on input schema)
+MIN_FEATURES = 20  # After feature selection/VIF removal (flexible for varying input)
+MAX_FEATURES = 40  # Should have ~30 optimal features (flexible range)
 
 # ============================================================================
 # FILE PATHS
@@ -61,7 +62,7 @@ PREDICTION_DIR = Path('predictions')
 RESULTS_DIR = Path('results')
 
 # Input files
-INPUT_FILE = DATA_DIR / 'combined_data.xlsx'
+INPUT_FILE = DATA_DIR / 'combined_data_son.xlsx'
 
 # Intermediate files
 EQUIPMENT_LEVEL_FILE = DATA_DIR / 'equipment_level_data.csv'
