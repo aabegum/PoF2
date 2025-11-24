@@ -486,7 +486,7 @@ print(comparison.to_string(index=False))
 
 # Save comparison
 comparison_path = RESULTS_DIR / 'chronic_repeater_model_comparison.csv'
-comparison.to_csv(comparison_path, index=False)
+comparison.to_csv(comparison_path, index=False, encoding='utf-8-sig')
 print(f"\n✓ Comparison saved: {comparison_path}")
 
 # Best model
@@ -515,7 +515,7 @@ for i, row in importance_df.head(10).iterrows():
 
 # Save feature importance
 importance_path = RESULTS_DIR / 'chronic_repeater_feature_importance.csv'
-importance_df.to_csv(importance_path, index=False)
+importance_df.to_csv(importance_path, index=False, encoding='utf-8-sig')
 print(f"\n✓ Feature importance saved: {importance_path}")
 
 # ============================================================================
@@ -545,7 +545,7 @@ predictions = pd.DataFrame({
 
 # Save predictions
 pred_path = PREDICTION_DIR / 'chronic_repeaters.csv'
-predictions.to_csv(pred_path, index=False)
+predictions.to_csv(pred_path, index=False, encoding='utf-8-sig')
 
 # Distribution
 risk_dist = predictions['Risk_Category'].value_counts()
@@ -597,7 +597,7 @@ for idx, (i, row) in enumerate(high_risk_full.head(10).iterrows(), 1):
 
 # Save high-risk report
 report_path = RESULTS_DIR / 'high_risk_chronic_repeaters.csv'
-high_risk_full.to_csv(report_path, index=False)
+high_risk_full.to_csv(report_path, index=False, encoding='utf-8-sig')
 print(f"\n✓ High-risk chronic repeater report saved: {report_path}")
 
 # ============================================================================

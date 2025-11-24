@@ -278,6 +278,25 @@ REDUNDANT_FEATURES = {
         'keep_instead': 'Equipment_Class_Primary',
         'correlation': 'N/A'
     },
+
+    # ========================================================================
+    # PHASE 2 REMOVALS: Low-Value/Constant Features (VIF cleanup)
+    # ========================================================================
+    'Tek_Neden_Flag': {
+        'reason': '🚫 HIGH VIF (89): Correlated with Arıza_Nedeni_Tutarlılık',
+        'keep_instead': 'Arıza_Nedeni_Tutarlılık (more informative continuous variable)',
+        'correlation': 0.85
+    },
+    'Is_HV': {
+        'reason': '🚫 CONSTANT: All zeros (no high voltage equipment in dataset)',
+        'keep_instead': 'Voltage_Class (covers all voltage levels)',
+        'correlation': 'N/A'
+    },
+    'Yaş_Kaynak': {
+        'reason': '🚫 CONSTANT: Single unique value (no variance, zero predictive power)',
+        'keep_instead': 'None needed (all equipment use same age source)',
+        'correlation': 'N/A'
+    },
 }
 
 # NOTE: Tekrarlayan_Arıza_90gün_Flag is KEPT - it's the TARGET for chronic repeater classification
@@ -502,7 +521,7 @@ for feat in original_features:
 
 report_df = pd.DataFrame(report_data)
 report_path = Path('outputs/feature_selection/comprehensive_selection_report.csv')
-report_df.to_csv(report_path, index=False)
+report_df.to_csv(report_path, index=False, encoding='utf-8-sig')
 print(f"✓ Report saved to: {report_path}")
 
 # ============================================================================

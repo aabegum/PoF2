@@ -815,7 +815,7 @@ print(f"\n✓ Quality report saved: {report_path}")
 # Save detailed missing data CSV
 if len(missing_stats) > 0:
     missing_path = 'reports/missing_data_analysis.csv'
-    missing_stats.to_csv(missing_path, index=False)
+    missing_stats.to_csv(missing_path, index=False, encoding='utf-8-sig')
     print(f"✓ Missing data analysis saved: {missing_path}")
 
 # Save column inventory
@@ -827,7 +827,7 @@ col_inventory = pd.DataFrame({
     'Null_Percentage': (df.isnull().sum() / len(df) * 100).round(2)
 })
 col_inventory_path = 'reports/column_inventory.csv'
-col_inventory.to_csv(col_inventory_path, index=False)
+col_inventory.to_csv(col_inventory_path, index=False, encoding='utf-8-sig')
 print(f"✓ Column inventory saved: {col_inventory_path}")
 
 # ============================================================================

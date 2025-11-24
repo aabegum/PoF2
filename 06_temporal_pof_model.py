@@ -145,9 +145,10 @@ if USE_GRIDSEARCH:
     print(f"   Verbosity Level: {GRIDSEARCH_VERBOSE} (1=progress bar, cleaner output)")
 print(f"\n🎯 TEMPORAL POF PREDICTION (v4.0):")
 print(f"   • Target = Equipment that WILL fail in future windows")
+print(f"   • 3M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=3)).date()}")
 print(f"   • 6M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=6)).date()}")
 print(f"   • 12M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=12)).date()}")
-print(f"   • Expected positive class: 6M=20.8%, 12M=33.7%")
+print(f"   • Expected positive class: 3M~7%, 6M~10%, 12M~15%")
 print(f"   • Expected AUC: 0.75-0.85 (realistic temporal prediction)")
 print(f"\n✓  Target Creation: Using ACTUAL future failures (prospective, not retrospective)")
 
@@ -566,7 +567,7 @@ for horizon in HORIZONS.keys():
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(xgb_best_params).T
-    best_params_df.to_csv(RESULTS_DIR / 'xgboost_best_params.csv')
+    best_params_df.to_csv(RESULTS_DIR / 'xgboost_best_params.csv', encoding='utf-8-sig')
     print(f"\n💾 Best parameters saved: {RESULTS_DIR / 'xgboost_best_params.csv'}")
 
 # ============================================================================
@@ -712,7 +713,7 @@ for horizon in HORIZONS.keys():
 # Save best parameters if GridSearch was used
 if USE_GRIDSEARCH:
     best_params_df = pd.DataFrame(catboost_best_params).T
-    best_params_df.to_csv(RESULTS_DIR / 'catboost_best_params.csv')
+    best_params_df.to_csv(RESULTS_DIR / 'catboost_best_params.csv', encoding='utf-8-sig')
     print(f"\n💾 Best parameters saved: {RESULTS_DIR / 'catboost_best_params.csv'}")
 # ============================================================================
 # STEP 7: MODEL COMPARISON
@@ -751,7 +752,7 @@ print("\n📊 Model Performance Comparison:")
 print(comparison_df.to_string(index=False))
 
 # Save comparison
-comparison_df.to_csv(RESULTS_DIR / 'model_performance_comparison.csv', index=False)
+comparison_df.to_csv(RESULTS_DIR / 'model_performance_comparison.csv', index=False, encoding='utf-8-sig')
 print(f"\n✓ Comparison saved: {RESULTS_DIR / 'model_performance_comparison.csv'}")
 
 # Determine best model per horizon
@@ -803,7 +804,7 @@ for horizon in HORIZONS.keys():
         print(f"  {i:2d}. {row.Feature:<35} {row.Importance:.4f}")
 
 # Save feature importance
-importance_df.to_csv(RESULTS_DIR / 'feature_importance_by_horizon.csv', index=False)
+importance_df.to_csv(RESULTS_DIR / 'feature_importance_by_horizon.csv', index=False, encoding='utf-8-sig')
 print(f"\n✓ Feature importance saved: {RESULTS_DIR / 'feature_importance_by_horizon.csv'}")
 
 # ============================================================================
@@ -983,13 +984,13 @@ for horizon in HORIZONS.keys():
     pred_df = pd.DataFrame({
         'Ekipman_ID': df['Ekipman_ID'],
         'Equipment_Class': df['Equipment_Class_Primary'],
-        f'Failure_Probability_{horizon}': predictions,
+        'PoF_Probability': predictions,  # Standardized column name for validation
         f'Actual_Target_{horizon}': df[f'Target_{horizon}'],
         'Risk_Score': predictions * 100  # Convert to 0-100 score
     })
-    
-    # Add risk category
-    pred_df['Risk_Level'] = pd.cut(
+
+    # Add risk category (Risk_Class for validation compatibility)
+    pred_df['Risk_Class'] = pd.cut(
         pred_df['Risk_Score'],
         bins=[0, 25, 50, 75, 100],
         labels=['Low', 'Medium', 'High', 'Critical']
@@ -1000,14 +1001,14 @@ for horizon in HORIZONS.keys():
     
     # Save predictions
     pred_path = PREDICTION_DIR / f'predictions_{horizon.lower()}.csv'
-    pred_df.to_csv(pred_path, index=False)
+    pred_df.to_csv(pred_path, index=False, encoding='utf-8-sig')
     
     print(f"\n✓ {horizon} Predictions:")
     print(f"  Saved to: {pred_path}")
     print(f"  Total equipment: {len(pred_df):,}")
     
     # Risk distribution
-    risk_dist = pred_df['Risk_Level'].value_counts()
+    risk_dist = pred_df['Risk_Class'].value_counts()
     for risk_level in ['Critical', 'High', 'Medium', 'Low']:
         count = risk_dist.get(risk_level, 0)
         pct = count / len(pred_df) * 100
@@ -1029,7 +1030,7 @@ high_risk_data = df[['Ekipman_ID', 'Equipment_Class_Primary']].copy()
 for horizon in HORIZONS.keys():
     pred_df = pd.read_csv(PREDICTION_DIR / f'predictions_{horizon.lower()}.csv')
     high_risk_data[f'Risk_Score_{horizon}'] = pred_df['Risk_Score'].values
-    high_risk_data[f'Risk_Level_{horizon}'] = pred_df['Risk_Level'].values
+    high_risk_data[f'Risk_Class_{horizon}'] = pred_df['Risk_Class'].values
 
 # Calculate average risk score across all horizons
 risk_cols = [f'Risk_Score_{h}' for h in HORIZONS.keys()]
@@ -1050,7 +1051,7 @@ if len(high_risk) > 0:
     
     # Save high-risk report
     high_risk_path = RESULTS_DIR / 'high_risk_equipment_report.csv'
-    high_risk.to_csv(high_risk_path, index=False)
+    high_risk.to_csv(high_risk_path, index=False, encoding='utf-8-sig')
     print(f"\n✓ High-risk report saved: {high_risk_path}")
 else:
     print("\n✓ No equipment with average risk > 50")
