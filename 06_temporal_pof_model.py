@@ -145,9 +145,10 @@ if USE_GRIDSEARCH:
     print(f"   Verbosity Level: {GRIDSEARCH_VERBOSE} (1=progress bar, cleaner output)")
 print(f"\n🎯 TEMPORAL POF PREDICTION (v4.0):")
 print(f"   • Target = Equipment that WILL fail in future windows")
+print(f"   • 3M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=3)).date()}")
 print(f"   • 6M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=6)).date()}")
 print(f"   • 12M window: {CUTOFF_DATE.date()} → {(CUTOFF_DATE + pd.DateOffset(months=12)).date()}")
-print(f"   • Expected positive class: 6M=20.8%, 12M=33.7%")
+print(f"   • Expected positive class: 3M~7%, 6M~10%, 12M~15%")
 print(f"   • Expected AUC: 0.75-0.85 (realistic temporal prediction)")
 print(f"\n✓  Target Creation: Using ACTUAL future failures (prospective, not retrospective)")
 
