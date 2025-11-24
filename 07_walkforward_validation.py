@@ -27,9 +27,21 @@ from pathlib import Path
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_fscore_support
 from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
-from config import CUTOFF_DATE, XGBOOST_PARAMS
+from config import (
+    CUTOFF_DATE,
+    XGBOOST_PARAMS,
+    FEATURES_REDUCED_FILE,
+    FEATURES_WITH_TARGETS_FILE,
+    EQUIPMENT_LEVEL_FILE,
+    INPUT_FILE,
+    OUTPUT_DIR
+)
+from utils.date_parser import parse_date_flexible
+from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
+
+# NOTE: parse_date_flexible() is now imported from utils.date_parser
 
 print("="*100)
 print("WALK-FORWARD TEMPORAL VALIDATION")
@@ -43,7 +55,7 @@ print("STEP 1: LOADING DATA WITH TEMPORAL FEATURES")
 print("="*100)
 
 # Load reduced features
-df = pd.read_csv('data/features_reduced.csv')
+df = pd.read_csv(FEATURES_REDUCED_FILE)
 print(f"\n✓ Loaded features: {len(df)} equipment × {len(df.columns)} columns")
 
 # Check if targets exist
@@ -52,23 +64,37 @@ has_targets = all(f'Target_{h}' in df.columns for h in horizons)
 
 if not has_targets:
     print("\n⚠️  WARNING: Targets not found in features_reduced.csv")
-    print("   Attempting to load from equipment_level_data.csv...")
+    print("   Attempting to load from outputs/features_with_targets.csv...")
 
-    # Try loading from equipment-level data (which has targets after running Step 5)
+    # Try loading from features_with_targets.csv (created by 06_temporal_pof_model.py)
     try:
-        df_with_targets = pd.read_csv('data/equipment_level_data.csv')
-
-        # Merge targets with features
+        df_with_targets = pd.read_csv(FEATURES_WITH_TARGETS_FILE)
         target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_with_targets.columns]
 
         if len(target_cols) > 0:
             df = df.merge(df_with_targets[['Ekipman_ID'] + target_cols], on='Ekipman_ID', how='left')
-            print(f"   ✓ Loaded {len(target_cols)} targets from equipment_level_data.csv")
+            print(f"   ✓ Loaded {len(target_cols)} targets from features_with_targets.csv")
             has_targets = True
         else:
-            print("   ⚠️  Targets not found in equipment_level_data.csv either")
+            print("   ⚠️  Targets not found in features_with_targets.csv")
     except FileNotFoundError:
-        print("   ⚠️  equipment_level_data.csv not found")
+        print("   ⚠️  features_with_targets.csv not found")
+
+    # Fallback: Try equipment_level_data.csv
+    if not has_targets:
+        print("   Attempting fallback: equipment_level_data.csv...")
+        try:
+            df_with_targets = pd.read_csv(EQUIPMENT_LEVEL_FILE)
+            target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_with_targets.columns]
+
+            if len(target_cols) > 0:
+                df = df.merge(df_with_targets[['Ekipman_ID'] + target_cols], on='Ekipman_ID', how='left')
+                print(f"   ✓ Loaded {len(target_cols)} targets from equipment_level_data.csv")
+                has_targets = True
+            else:
+                print("   ⚠️  Targets not found in equipment_level_data.csv either")
+        except FileNotFoundError:
+            print("   ⚠️  equipment_level_data.csv not found")
 
 if not has_targets:
     print("\n❌ ERROR: Cannot run walk-forward validation without targets")
@@ -77,7 +103,7 @@ if not has_targets:
     exit(1)
 
 # Load original data to get installation dates for temporal splitting
-df_full = pd.read_csv('data/equipment_level_data.csv')
+df_full = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 
 # Merge to get installation date
 df = df.merge(df_full[['Ekipman_ID', 'Ekipman_Kurulum_Tarihi']], on='Ekipman_ID', how='left')
@@ -102,8 +128,8 @@ print("STEP 2: TEMPORAL DATA QUALITY CHECKS")
 print("="*100)
 
 # Load fault data to check temporal consistency
-faults = pd.read_excel('data/combined_data.xlsx')
-faults['started at'] = pd.to_datetime(faults['started at'], dayfirst=True, errors='coerce')
+faults = pd.read_excel(INPUT_FILE)
+faults['started at'] = faults['started at'].apply(parse_date_flexible)
 
 # Check 1: Faults before installation
 print("\n🔍 CHECK 1: Faults Before Installation Date")

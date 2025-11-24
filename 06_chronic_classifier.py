@@ -536,9 +536,9 @@ chronic_proba = best_model.predict_proba(X)[:, 1]
 # Create predictions dataframe
 predictions = pd.DataFrame({
     'Ekipman_ID': df[id_col],
-    'Chronic_Repeater_Probability': chronic_proba,
+    'Chronic_Probability': chronic_proba,
     'Chronic_Repeater_Flag_Actual': df['Tekrarlayan_Arıza_90gün_Flag'],
-    'Risk_Category': pd.cut(chronic_proba,
+    'Chronic_Class': pd.cut(chronic_proba,
                             bins=[0, 0.3, 0.5, 0.7, 1.0],
                             labels=['Low', 'Medium', 'High', 'Critical'])
 })
@@ -548,7 +548,7 @@ pred_path = PREDICTION_DIR / 'chronic_repeaters.csv'
 predictions.to_csv(pred_path, index=False, encoding='utf-8-sig')
 
 # Distribution
-risk_dist = predictions['Risk_Category'].value_counts()
+risk_dist = predictions['Chronic_Class'].value_counts()
 print(f"\n✓ Chronic Repeater Predictions:")
 print(f"  Saved to: {pred_path}")
 print(f"  Total equipment: {len(predictions):,}")
@@ -567,7 +567,7 @@ print("="*100)
 print(f"\n--- Identifying High-Risk Chronic Repeaters ---")
 
 # High-risk threshold
-high_risk = predictions[predictions['Chronic_Repeater_Probability'] > 0.50]
+high_risk = predictions[predictions['Chronic_Probability'] > 0.50]
 
 print(f"\n🚨 High-Risk Chronic Repeaters Identified: {len(high_risk)}")
 print(f"   Threshold: Probability > 50%")
@@ -588,12 +588,12 @@ if 'Equipment_Class_Primary' in label_encoders:
     )
 
 # Sort by probability
-high_risk_full = high_risk_full.sort_values('Chronic_Repeater_Probability', ascending=False)
+high_risk_full = high_risk_full.sort_values('Chronic_Probability', ascending=False)
 
 print(f"\n--- Top 10 Highest Risk Chronic Repeaters ---")
 for idx, (i, row) in enumerate(high_risk_full.head(10).iterrows(), 1):
     print(f"  {idx:2d}. ID: {row['Ekipman_ID']} | Class: {row.get('Equipment_Class_Primary', 'N/A')} | "
-          f"Probability: {row['Chronic_Repeater_Probability']*100:.1f}%")
+          f"Probability: {row['Chronic_Probability']*100:.1f}%")
 
 # Save high-risk report
 report_path = RESULTS_DIR / 'high_risk_chronic_repeaters.csv'

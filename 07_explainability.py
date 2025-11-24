@@ -19,7 +19,7 @@ Strategy:
 - Generate explanations for top 100 high-risk equipment
 - Create visual reports for stakeholders
 
-Input:  models/monotonic_*.pkl, data/features_selected_clean.csv
+Input:  models/xgboost_*.pkl, data/features_reduced.csv
 Output: outputs/explainability/*.png, reports/risk_explanations.csv
 
 Author: Data Analytics Team
@@ -160,7 +160,7 @@ models = {}
 predictions = {}
 
 for horizon in HORIZONS:
-    model_path = MODEL_DIR / f'monotonic_xgboost_{horizon.lower()}.pkl'
+    model_path = MODEL_DIR / f'xgboost_{horizon.lower()}.pkl'
 
     if Path(model_path).exists():
         with open(model_path, 'rb') as f:
@@ -173,7 +173,7 @@ for horizon in HORIZONS:
 
     else:
         print(f"⚠️  Model not found: {model_path}")
-        print(f"   Run 06c_monotonic_models.py first!")
+        print(f"   Run 06_temporal_pof_model.py first!")
         exit(1)
 
 # ============================================================================

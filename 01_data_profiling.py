@@ -11,14 +11,15 @@ PIPELINE STRATEGY: Multi-Horizon PoF Prediction (3M, 6M, 12M)
 
 WHAT THIS SCRIPT DOES:
 Comprehensive data quality profiling of fault-level data before transformation:
-- Equipment identification strategy (cbs_id → id fallback priority)
+- Equipment identification strategy (cbs_id only, no fallback)
 - Temporal coverage validation (fault timestamps, installation dates)
 - Data completeness scoring (10/10 quality score expected)
 - Customer impact coverage analysis
 
 ENHANCEMENTS in v5.0:
 + Updated for Sebekeye_Baglanma_Tarihi (Grid Connection Date) as age source
-+ ID Strategy: cbs_id → id fallback (no UNKNOWN generation)
++ ID Strategy: cbs_id only (no fallback, no UNKNOWN generation)
++ Equipment Type: Şebeke Unsuru only (no fallback)
 + Dynamic input file from config (combined_data_son.xlsx)
 + Progress Indicators: [Step X/Y] for pipeline visibility
 + Flexible Date Parser: Supports mixed date formats
@@ -70,6 +71,9 @@ print("\n[Step 1/7] Loading Fault-Level Data...")
 
 # Import INPUT_FILE from config
 from config import INPUT_FILE
+
+# Import shared date parser
+from utils.date_parser import parse_date_flexible
 data_path = INPUT_FILE
 
 if not data_path.exists():
@@ -300,66 +304,7 @@ print("="*100)
 current_year = datetime.now().year
 print(f"\nCurrent Year: {current_year}")
 
-# Flexible date parser (handles mixed formats)
-def parse_date_flexible(value):
-    """
-    Parse date with multiple format support - handles mixed format data
-    Supports: ISO, Turkish (DD-MM-YYYY), European (DD/MM/YYYY), Excel serial dates
-    """
-    # Already a timestamp/datetime
-    if isinstance(value, (pd.Timestamp, datetime)):
-        return pd.Timestamp(value)
-
-    # Handle NaN/None
-    if pd.isna(value):
-        return pd.NaT
-
-    # Excel serial date (numeric)
-    if isinstance(value, (int, float)):
-        if 1 <= value <= 100000:
-            try:
-                return pd.Timestamp('1899-12-30') + pd.Timedelta(days=value)
-            except:
-                return pd.NaT
-        else:
-            return pd.NaT
-
-    # String parsing with multiple format attempts
-    if isinstance(value, str):
-        value = value.strip()
-
-        if not value:
-            return pd.NaT
-
-        # Try multiple formats in order of likelihood
-        formats = [
-            '%Y-%m-%d %H:%M:%S',     # 2021-01-15 12:30:45 (ISO)
-            '%d-%m-%Y %H:%M:%S',     # 15-01-2021 12:30:45 (Turkish/European with dash)
-            '%d/%m/%Y %H:%M:%S',     # 15/01/2021 12:30:45 (Turkish/European with slash)
-            '%Y-%m-%d',              # 2021-01-15
-            '%d-%m-%Y',              # 15-01-2021
-            '%d/%m/%Y',              # 15/01/2021
-            '%d.%m.%Y %H:%M:%S',     # 15.01.2021 12:30:45 (Turkish dot format)
-            '%d.%m.%Y',              # 15.01.2021
-            '%m/%d/%Y %H:%M:%S',     # 01/15/2021 12:30:45 (US format - try last)
-            '%m/%d/%Y',              # 01/15/2021
-        ]
-
-        for fmt in formats:
-            try:
-                return pd.to_datetime(value, format=fmt)
-            except:
-                continue
-
-        # Last resort: let pandas infer
-        try:
-            return pd.to_datetime(value, infer_datetime_format=True, dayfirst=True)
-        except:
-            return pd.NaT
-
-    return pd.NaT
-
-# Convert date columns with flexible parser
+# Convert date columns with flexible parser (imported from utils)
 for col in ['Sebekeye_Baglanma_Tarihi', 'started at', 'ended at']:
     if col in df.columns and df[col].dtype != 'datetime64[ns]':
         df[col] = df[col].apply(parse_date_flexible)
@@ -844,9 +789,7 @@ print(f"   • Quality Score: {quality_score}/10 {rating}")
 
 print(f"\n🎯 KEY COLUMNS IDENTIFIED:")
 if best_id_col:
-    print(f"   • Equipment ID: {best_id_col}")
-if 'id' in df.columns:
-    print(f"   • ID Fallback: id (for missing cbs_id)")
+    print(f"   • Equipment ID: {best_id_col} (cbs_id only, no fallback)")
 if best_class_col:
     print(f"   • Equipment Class: {best_class_col}")
     print(f"   • Equipment Types: {df[best_class_col].nunique()} unique")
