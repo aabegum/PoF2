@@ -293,8 +293,11 @@ class SmartFeatureSelector:
 
                 if is_near_constant and not is_protected_feature(col):
                     near_constant_features.append(col)
-                    self._mark_removed(col, 'NEAR_CONSTANT', 1,
-                                       f'Low variance ({variance:.6f}) or few unique ({n_unique})')
+                    if variance is not None:
+                        reason = f'Low variance ({variance:.6f}) or few unique ({n_unique})'
+                    else:
+                        reason = f'Few unique values ({n_unique})'
+                    self._mark_removed(col, 'NEAR_CONSTANT', 1, reason)
 
         # Remove identified features
         all_to_remove = constant_features + near_constant_features

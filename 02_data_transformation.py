@@ -678,19 +678,10 @@ def extract_equipment_from_sebeke_unsuru(value):
     return value_str
 
 def get_equipment_class(row):
-    """Priority: Şebeke Unsuru → Equipment_Type → Ekipman Sınıfı → Kesinti Ekipman Sınıfı"""
-    # Primary: Use Şebeke Unsuru (extract part before Arızaları)
+    """Extract equipment class from Şebeke Unsuru column only (NO FALLBACK)"""
+    # Use Şebeke Unsuru only (extract part before Arızaları)
     if pd.notna(row.get('Şebeke Unsuru')):
         return extract_equipment_from_sebeke_unsuru(row['Şebeke Unsuru'])
-    # Fallback options
-    elif pd.notna(row.get('Equipment_Type')):
-        return row['Equipment_Type']
-    elif pd.notna(row.get('Ekipman Sınıfı')):
-        return row['Ekipman Sınıfı']
-    elif pd.notna(row.get('Kesinti Ekipman Sınıfı')):
-        return row['Kesinti Ekipman Sınıfı']
-    elif pd.notna(row.get('Ekipman Sınıf')):
-        return row['Ekipman Sınıf']
     return None
 
 # Check if Şebeke Unsuru column exists
@@ -821,7 +812,7 @@ print(f"Aggregated {len(df_pre_cutoff):,} pre-cutoff faults → {len(equipment_d
 
 # Equipment tracking summary
 print(f"\n[TRACKING] Equipment Pipeline Summary:")
-print(f"  After ID consolidation:  {unique_equip_after_id_consolidation:,} unique equipment (cbs_id + id fallback)")
+print(f"  After ID consolidation:  {unique_equip_after_id_consolidation:,} unique equipment (cbs_id only)")
 print(f"  After deduplication:     {unique_equip_after_dedup:,} unique equipment")
 print(f"  Pre-cutoff equipment:    {df_pre_cutoff[equipment_id_col].nunique():,}")
 print(f"  Final aggregated:        {len(equipment_df):,} equipment")

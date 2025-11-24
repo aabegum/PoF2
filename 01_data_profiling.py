@@ -11,14 +11,15 @@ PIPELINE STRATEGY: Multi-Horizon PoF Prediction (3M, 6M, 12M)
 
 WHAT THIS SCRIPT DOES:
 Comprehensive data quality profiling of fault-level data before transformation:
-- Equipment identification strategy (cbs_id → id fallback priority)
+- Equipment identification strategy (cbs_id only, no fallback)
 - Temporal coverage validation (fault timestamps, installation dates)
 - Data completeness scoring (10/10 quality score expected)
 - Customer impact coverage analysis
 
 ENHANCEMENTS in v5.0:
 + Updated for Sebekeye_Baglanma_Tarihi (Grid Connection Date) as age source
-+ ID Strategy: cbs_id → id fallback (no UNKNOWN generation)
++ ID Strategy: cbs_id only (no fallback, no UNKNOWN generation)
++ Equipment Type: Şebeke Unsuru only (no fallback)
 + Dynamic input file from config (combined_data_son.xlsx)
 + Progress Indicators: [Step X/Y] for pipeline visibility
 + Flexible Date Parser: Supports mixed date formats
@@ -844,9 +845,7 @@ print(f"   • Quality Score: {quality_score}/10 {rating}")
 
 print(f"\n🎯 KEY COLUMNS IDENTIFIED:")
 if best_id_col:
-    print(f"   • Equipment ID: {best_id_col}")
-if 'id' in df.columns:
-    print(f"   • ID Fallback: id (for missing cbs_id)")
+    print(f"   • Equipment ID: {best_id_col} (cbs_id only, no fallback)")
 if best_class_col:
     print(f"   • Equipment Class: {best_class_col}")
     print(f"   • Equipment Types: {df[best_class_col].nunique()} unique")
