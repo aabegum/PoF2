@@ -19,6 +19,11 @@ from collections import Counter
 import matplotlib.pyplot as plt
 from pathlib import Path
 from sklearn.preprocessing import LabelEncoder
+from config import (
+    FEATURES_REDUCED_FILE,
+    EQUIPMENT_LEVEL_FILE,
+    FEATURES_WITH_TARGETS_FILE
+)
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -33,8 +38,8 @@ print("\n" + "="*100)
 print("STEP 1: LOADING DATA")
 print("="*100)
 
-df = pd.read_csv('data/features_reduced.csv')
-df_full = pd.read_csv('data/equipment_level_data.csv')
+df = pd.read_csv(FEATURES_REDUCED_FILE)
+df_full = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 
 print(f"\n✓ Loaded: {len(df)} equipment × {len(df.columns)} columns")
 
@@ -46,7 +51,7 @@ target_cols = []
 if not has_targets:
     # Try to load targets from features_with_targets.csv (created by 06_temporal_pof_model.py)
     try:
-        df_targets = pd.read_csv('outputs/features_with_targets.csv')
+        df_targets = pd.read_csv(FEATURES_WITH_TARGETS_FILE)
         target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_targets.columns]
         if len(target_cols) > 0:
             df = df.merge(df_targets[['Ekipman_ID'] + target_cols], on='Ekipman_ID', how='left')

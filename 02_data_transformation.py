@@ -77,6 +77,9 @@ from config import (
     EQUIPMENT_CLASS_MAPPING
 )
 
+# Import shared date parser
+from utils.date_parser import parse_date_flexible
+
 warnings.filterwarnings('ignore')
 
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
@@ -232,67 +235,8 @@ print(f"\n[TRACKING] Unique equipment after deduplication: {unique_equip_after_d
 # ============================================================================
 print("\n[Step 2/12] Parsing Dates (Flexible Multi-Format Parser)...")
 
-def parse_date_flexible(value):
-    """
-    Parse date with multiple format support - handles mixed format data
-    Supports: ISO, Turkish (DD-MM-YYYY), European (DD/MM/YYYY), Excel serial dates
-
-    This function solves the 25% "missing" timestamp issue caused by mixed date formats
-    """
-    # Already a timestamp/datetime
-    if isinstance(value, (pd.Timestamp, datetime)):
-        return pd.Timestamp(value)
-
-    # Handle NaN/None
-    if pd.isna(value):
-        return pd.NaT
-
-    # Excel serial date (numeric)
-    if isinstance(value, (int, float)):
-        if 1 <= value <= 100000:
-            try:
-                # Excel epoch starts at 1900-01-01
-                # Excel has a leap year bug for 1900
-                return pd.Timestamp('1899-12-30') + pd.Timedelta(days=value)
-            except:
-                return pd.NaT
-        else:
-            return pd.NaT
-
-    # String parsing with multiple format attempts
-    if isinstance(value, str):
-        value = value.strip()
-
-        if not value:
-            return pd.NaT
-
-        # Try multiple formats in order of likelihood
-        formats = [
-            '%Y-%m-%d %H:%M:%S',     # 2021-01-15 12:30:45 (ISO)
-            '%d-%m-%Y %H:%M:%S',     # 15-01-2021 12:30:45 (Turkish/European with dash)
-            '%d/%m/%Y %H:%M:%S',     # 15/01/2021 12:30:45 (Turkish/European with slash)
-            '%Y-%m-%d',              # 2021-01-15
-            '%d-%m-%Y',              # 15-01-2021
-            '%d/%m/%Y',              # 15/01/2021
-            '%d.%m.%Y %H:%M:%S',     # 15.01.2021 12:30:45 (Turkish dot format)
-            '%d.%m.%Y',              # 15.01.2021
-            '%m/%d/%Y %H:%M:%S',     # 01/15/2021 12:30:45 (US format - try last)
-            '%m/%d/%Y',              # 01/15/2021
-        ]
-
-        for fmt in formats:
-            try:
-                return pd.to_datetime(value, format=fmt)
-            except:
-                continue
-
-        # Last resort: let pandas infer
-        try:
-            return pd.to_datetime(value, infer_datetime_format=True, dayfirst=True)
-        except:
-            return pd.NaT
-
-    return pd.NaT
+# NOTE: parse_date_flexible() is now imported from utils.date_parser
+# This eliminates code duplication across multiple scripts
 
 def parse_and_validate_date(date_series, column_name, min_year=MIN_VALID_YEAR, max_year=MAX_VALID_YEAR,
                             report=True, is_installation_date=False):

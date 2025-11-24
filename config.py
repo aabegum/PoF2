@@ -68,6 +68,7 @@ INPUT_FILE = DATA_DIR / 'combined_data_son.xlsx'
 EQUIPMENT_LEVEL_FILE = DATA_DIR / 'equipment_level_data.csv'
 FEATURES_ENGINEERED_FILE = DATA_DIR / 'features_engineered.csv'
 FEATURES_REDUCED_FILE = DATA_DIR / 'features_reduced.csv'
+FEATURES_WITH_TARGETS_FILE = OUTPUT_DIR / 'features_with_targets.csv'
 
 # Output files
 FEATURE_DOCS_FILE = DATA_DIR / 'feature_documentation.csv'

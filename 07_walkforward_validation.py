@@ -27,64 +27,21 @@ from pathlib import Path
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_fscore_support
 from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
-from config import CUTOFF_DATE, XGBOOST_PARAMS
+from config import (
+    CUTOFF_DATE,
+    XGBOOST_PARAMS,
+    FEATURES_REDUCED_FILE,
+    FEATURES_WITH_TARGETS_FILE,
+    EQUIPMENT_LEVEL_FILE,
+    INPUT_FILE,
+    OUTPUT_DIR
+)
+from utils.date_parser import parse_date_flexible
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-def parse_date_flexible(value):
-    """
-    Parse date with multiple format support - handles mixed format data
-    Supports: ISO, Turkish (DD-MM-YYYY), European (DD/MM/YYYY), Excel serial dates
-    """
-    # Already a timestamp/datetime
-    if isinstance(value, (pd.Timestamp, datetime)):
-        return pd.Timestamp(value)
-
-    # Handle NaN/None
-    if pd.isna(value):
-        return pd.NaT
-
-    # Excel serial date (numeric)
-    if isinstance(value, (int, float)):
-        if 1 <= value <= 100000:
-            try:
-                return pd.Timestamp('1899-12-30') + pd.Timedelta(days=value)
-            except:
-                return pd.NaT
-        else:
-            return pd.NaT
-
-    # String parsing with multiple format attempts
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return pd.NaT
-
-        formats = [
-            '%Y-%m-%d %H:%M:%S',
-            '%d-%m-%Y %H:%M:%S',
-            '%d/%m/%Y %H:%M:%S',
-            '%Y-%m-%d',
-            '%d-%m-%Y',
-            '%d/%m/%Y',
-            '%d.%m.%Y %H:%M:%S',
-            '%d.%m.%Y',
-        ]
-
-        for fmt in formats:
-            try:
-                return pd.to_datetime(value, format=fmt)
-            except:
-                continue
-
-        # Last resort: let pandas infer
-        try:
-            return pd.to_datetime(value, dayfirst=True)
-        except:
-            return pd.NaT
-
-    return pd.NaT
+# NOTE: parse_date_flexible() is now imported from utils.date_parser
 
 print("="*100)
 print("WALK-FORWARD TEMPORAL VALIDATION")
@@ -98,7 +55,7 @@ print("STEP 1: LOADING DATA WITH TEMPORAL FEATURES")
 print("="*100)
 
 # Load reduced features
-df = pd.read_csv('data/features_reduced.csv')
+df = pd.read_csv(FEATURES_REDUCED_FILE)
 print(f"\n✓ Loaded features: {len(df)} equipment × {len(df.columns)} columns")
 
 # Check if targets exist
@@ -111,7 +68,7 @@ if not has_targets:
 
     # Try loading from features_with_targets.csv (created by 06_temporal_pof_model.py)
     try:
-        df_with_targets = pd.read_csv('outputs/features_with_targets.csv')
+        df_with_targets = pd.read_csv(FEATURES_WITH_TARGETS_FILE)
         target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_with_targets.columns]
 
         if len(target_cols) > 0:
@@ -127,7 +84,7 @@ if not has_targets:
     if not has_targets:
         print("   Attempting fallback: equipment_level_data.csv...")
         try:
-            df_with_targets = pd.read_csv('data/equipment_level_data.csv')
+            df_with_targets = pd.read_csv(EQUIPMENT_LEVEL_FILE)
             target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_with_targets.columns]
 
             if len(target_cols) > 0:
@@ -146,7 +103,7 @@ if not has_targets:
     exit(1)
 
 # Load original data to get installation dates for temporal splitting
-df_full = pd.read_csv('data/equipment_level_data.csv')
+df_full = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 
 # Merge to get installation date
 df = df.merge(df_full[['Ekipman_ID', 'Ekipman_Kurulum_Tarihi']], on='Ekipman_ID', how='left')
@@ -171,7 +128,7 @@ print("STEP 2: TEMPORAL DATA QUALITY CHECKS")
 print("="*100)
 
 # Load fault data to check temporal consistency
-faults = pd.read_excel('data/combined_data.xlsx')
+faults = pd.read_excel(INPUT_FILE)
 faults['started at'] = faults['started at'].apply(parse_date_flexible)
 
 # Check 1: Faults before installation
