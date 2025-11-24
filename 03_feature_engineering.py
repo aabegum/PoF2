@@ -378,16 +378,16 @@ def calculate_mtbf_stddev_proxy(row):
         return None
 
     # Proxy: Equipment with recurring faults in short windows have high variability
-    # Use ratio of lifetime MTBF vs active life MTBF as variability indicator
-    if pd.notna(row['MTBF_Lifetime_Gün']) and pd.notna(row['MTBF_ActiveLife_Gün']):
-        if row['MTBF_ActiveLife_Gün'] > 0:
-            # Higher ratio = more variable (active life MTBF differs from lifetime MTBF)
-            variability_ratio = abs(row['MTBF_Lifetime_Gün'] - row['MTBF_ActiveLife_Gün']) / row['MTBF_ActiveLife_Gün']
+    # Use ratio of lifetime MTBF vs observable MTBF as variability indicator
+    if pd.notna(row['MTBF_Lifetime_Gün']) and pd.notna(row['MTBF_Observable_Gün']):
+        if row['MTBF_Observable_Gün'] > 0:
+            # Higher ratio = more variable (observable MTBF differs from lifetime MTBF)
+            variability_ratio = abs(row['MTBF_Lifetime_Gün'] - row['MTBF_Observable_Gün']) / row['MTBF_Observable_Gün']
             return variability_ratio
 
     return 0.0  # Default to low variability
 
-if 'MTBF_Lifetime_Gün' in df.columns and 'MTBF_ActiveLife_Gün' in df.columns:
+if 'MTBF_Lifetime_Gün' in df.columns and 'MTBF_Observable_Gün' in df.columns:
     df['MTBF_InterFault_StdDev'] = df.apply(calculate_mtbf_stddev_proxy, axis=1)
 
     stddev_available = df['MTBF_InterFault_StdDev'].notna().sum()
