@@ -421,11 +421,174 @@ FEATURE_CATEGORIES = {
 
 
 def categorize_feature(column_name):
-    """Get the category for a feature"""
+    """Get the category for a feature (supports both EN and TR names)"""
+    # Try Turkish name first
     for category, features in FEATURE_CATEGORIES.items():
         if column_name in features:
             return category
+
+    # Try converting to Turkish and checking
+    tr_name = get_turkish_name(column_name)
+    for category, features in FEATURE_CATEGORIES.items():
+        if tr_name in features:
+            return category
+
     return 'Diğer'
+
+
+# ============================================================================
+# PROTECTED FEATURES (English Names - for model compatibility)
+# ============================================================================
+
+PROTECTED_FEATURES_EN = [
+    # Essential ID
+    'Ekipman_ID',
+
+    # TIER 1: Equipment Characteristics
+    'Equipment_Class_Primary',
+    'component_voltage',
+    'Voltage_Class',
+
+    # TIER 2: Age & Lifecycle
+    'Ekipman_Yaşı_Yıl',
+    'Yas_Beklenen_Omur_Orani',
+    'Beklenen_Ömür_Yıl',
+
+    # TIER 3: Failure History - Temporal
+    'Son_Arıza_Gun_Sayisi',
+    'Time_To_Repair_Hours_mean',
+    'Time_To_Repair_Hours_max',
+
+    # TIER 4: MTBF & Reliability
+    'MTBF_Gün',
+    'MTBF_Degradation_Ratio',
+    'MTBF_InterFault_Trend',
+
+    # TIER 5: Failure Cause Patterns
+    'Arıza_Nedeni_Çeşitlilik',
+    'Arıza_Nedeni_Tutarlılık',
+    'Neden_Değişim_Flag',
+
+    # TIER 6: Customer Impact
+    'Urban_Customer_Ratio_mean',
+    'urban_lv_Avg',
+    'urban_mv_Avg',
+    'MV_Customer_Ratio_mean',
+    'total_customer_count_Avg',
+
+    # TIER 7: Geographic
+    'İlçe',
+    'Bölge_Tipi',
+    'Summer_Peak_Flag_sum',
+
+    # TIER 8: Interactions
+    'Overdue_Factor',
+    'AgeRatio_Recurrence_Interaction',
+
+    # Target
+    'Tekrarlayan_Arıza_90gün_Flag',
+]
+
+
+# ============================================================================
+# DISPLAY UTILITIES (Turkish output for reports/UI)
+# ============================================================================
+
+def create_turkish_display_df(df, columns_only=False):
+    """
+    Create a copy of DataFrame with Turkish column names for display.
+
+    Use this for:
+    - Generating reports
+    - Displaying to users
+    - Exporting human-readable files
+
+    Args:
+        df: DataFrame with English column names
+        columns_only: If True, only return column mapping dict
+
+    Returns:
+        DataFrame with Turkish column names (copy, not modified in place)
+    """
+    if columns_only:
+        return {col: get_turkish_name(col) for col in df.columns}
+
+    return rename_columns_to_turkish(df, inplace=False)
+
+
+def print_feature_summary_turkish(df, title="Feature Summary"):
+    """
+    Print a summary of features with Turkish names.
+    Models use English internally, this is for display only.
+    """
+    print(f"\n{'='*80}")
+    print(f"{title}")
+    print(f"{'='*80}")
+
+    print(f"\n📊 Features: {len(df.columns)}")
+    print(f"\n{'English Name':<40} {'Turkish Name':<40}")
+    print("-" * 80)
+
+    for col in df.columns:
+        tr_name = get_turkish_name(col)
+        category = categorize_feature(col)
+        print(f"{col:<40} {tr_name:<40}")
+
+
+def get_display_name(english_name):
+    """
+    Get display name (Turkish) for a feature.
+    Use this in print statements and reports.
+    """
+    return get_turkish_name(english_name)
+
+
+def format_feature_importance_turkish(importance_df, feature_col='Feature', importance_col='Importance'):
+    """
+    Format feature importance DataFrame with Turkish names for display.
+
+    Args:
+        importance_df: DataFrame with feature importance
+        feature_col: Column name containing feature names
+        importance_col: Column name containing importance values
+
+    Returns:
+        DataFrame with added Turkish names column
+    """
+    df = importance_df.copy()
+    df['Özellik_Adı'] = df[feature_col].apply(get_turkish_name)
+    df['Kategori'] = df[feature_col].apply(categorize_feature)
+    return df
+
+
+def create_bilingual_report(df, output_path=None):
+    """
+    Create a bilingual (EN/TR) column reference report.
+
+    Args:
+        df: DataFrame to document
+        output_path: Optional path to save CSV
+
+    Returns:
+        DataFrame with bilingual column documentation
+    """
+    report_data = []
+    for col in df.columns:
+        report_data.append({
+            'Column_EN': col,
+            'Column_TR': get_turkish_name(col),
+            'Category': categorize_feature(col),
+            'Data_Type': str(df[col].dtype),
+            'Non_Null': df[col].notna().sum(),
+            'Coverage_%': round(df[col].notna().mean() * 100, 1),
+        })
+
+    report_df = pd.DataFrame(report_data)
+
+    if output_path:
+        report_df.to_csv(output_path, index=False, encoding='utf-8-sig')
+
+    return report_df
 
 
 # ============================================================================

@@ -24,10 +24,13 @@ import warnings
 # Import smart feature selection
 from smart_feature_selection import SmartFeatureSelector, SelectionConfig, run_smart_selection
 
-# Import column mapping for Turkish standardization
+# Import column mapping for EN/TR compatibility
 from column_mapping import (
+    PROTECTED_FEATURES_EN,
     PROTECTED_FEATURES_TR,
     rename_columns_to_turkish,
+    get_turkish_name,
+    create_bilingual_report,
     COLUMN_MAP_EN_TO_TR
 )
 
@@ -62,6 +65,8 @@ output_dir = OUTPUT_DIR / 'feature_selection'
 output_dir.mkdir(parents=True, exist_ok=True)
 
 # Configure smart selection
+# NOTE: Models use ENGLISH column names internally for compatibility
+#       Turkish names are available via display utilities for reports/UI
 selection_config = SelectionConfig(
     # Thresholds (from config.py)
     constant_threshold=0.001,
@@ -77,10 +82,10 @@ selection_config = SelectionConfig(
     remove_leaky=True,
     remove_high_correlation=True,
     apply_vif=True,
-    standardize_names=True,  # Convert to Turkish
+    standardize_names=False,  # Keep English for model compatibility
 
-    # Protected features
-    protected_features=PROTECTED_FEATURES_TR.copy()
+    # Protected features (English names for model compatibility)
+    protected_features=PROTECTED_FEATURES_EN.copy()
 )
 
 # ============================================================================
@@ -98,8 +103,8 @@ if __name__ == '__main__':
     print(f"   Output: {FEATURES_REDUCED_FILE}")
     print(f"   VIF Target: {VIF_TARGET}")
     print(f"   Correlation Threshold: {CORRELATION_THRESHOLD}")
-    print(f"   Protected Features: {len(PROTECTED_FEATURES_TR)}")
-    print(f"   Standardize Names: Turkish")
+    print(f"   Protected Features: {len(PROTECTED_FEATURES_EN)}")
+    print(f"   Column Names: English (internal) + Turkish (display)")
 
     # ========================================================================
     # STEP 0: LOAD DATA
@@ -159,18 +164,15 @@ if __name__ == '__main__':
     # Save comprehensive report
     report_path = output_dir / 'smart_selection_report.csv'
     report_df = selector.get_report()
+    # Add Turkish names to report
+    report_df['Turkish_Name'] = report_df['Feature'].apply(get_turkish_name)
     report_df.to_csv(report_path, index=False, encoding='utf-8-sig')
     print(f"\n📋 Selection report saved: {report_path}")
 
-    # Save column mapping reference
-    mapping_ref = pd.DataFrame([
-        {'English_Name': k, 'Turkish_Name': v}
-        for k, v in COLUMN_MAP_EN_TO_TR.items()
-        if v in df_selected.columns
-    ])
-    mapping_path = output_dir / 'column_name_mapping.csv'
-    mapping_ref.to_csv(mapping_path, index=False, encoding='utf-8-sig')
-    print(f"📋 Column mapping saved: {mapping_path}")
+    # Save bilingual column reference (EN ↔ TR)
+    bilingual_path = output_dir / 'bilingual_column_reference.csv'
+    bilingual_df = create_bilingual_report(df_selected, bilingual_path)
+    print(f"📋 Bilingual reference saved: {bilingual_path}")
 
     # ========================================================================
     # STEP 3: FINAL SUMMARY
@@ -186,33 +188,42 @@ if __name__ == '__main__':
         icon = "✓" if status == 'RETAINED' else "❌"
         print(f"   {icon} {status}: {count}")
 
-    # List retained features by category
+    # List retained features by category (show both EN and TR names)
     retained = report_df[report_df['Status'] == 'RETAINED']
     print(f"\n✅ RETAINED FEATURES ({len(retained)}):")
+    print(f"\n   {'English Name':<40} {'Turkish Name':<40}")
+    print(f"   {'-'*40} {'-'*40}")
 
     # Group by category
     for category in retained['Category'].unique():
-        cat_features = retained[retained['Category'] == category]['Feature'].tolist()
-        print(f"\n   {category}:")
-        for feat in cat_features:
-            print(f"      • {feat}")
+        cat_features = retained[retained['Category'] == category]
+        print(f"\n   📁 {category}:")
+        for _, row in cat_features.iterrows():
+            en_name = row['Feature']
+            tr_name = row['Turkish_Name']
+            print(f"      {en_name:<38} {tr_name:<38}")
 
     print(f"\n📂 OUTPUT FILES:")
-    print(f"   • {FEATURES_REDUCED_FILE}")
+    print(f"   • {FEATURES_REDUCED_FILE} (English column names)")
     print(f"   • {report_path}")
-    print(f"   • {mapping_path}")
+    print(f"   • {bilingual_path}")
 
     print(f"\n💡 BENEFITS OF SMART SELECTION:")
     print(f"   ✓ Adaptive - handles dataset changes automatically")
     print(f"   ✓ No hardcoded lists - rule-based detection")
-    print(f"   ✓ Turkish naming - standardized column names")
+    print(f"   ✓ Bilingual support - EN internal, TR for display")
     print(f"   ✓ Audit trail - comprehensive selection report")
     print(f"   ✓ Domain protection - critical features preserved")
 
     print(f"\n🚀 NEXT STEPS:")
     print(f"   1. Run model training: python 06_temporal_pof_model.py")
     print(f"   2. Review selection report for audit")
-    print(f"   3. Check column_name_mapping.csv for EN↔TR reference")
+    print(f"   3. Check bilingual_column_reference.csv for EN↔TR mapping")
+
+    print(f"\n📝 USAGE NOTE:")
+    print(f"   Models use English column names internally.")
+    print(f"   For Turkish display in reports, use:")
+    print(f"     from column_mapping import get_turkish_name, create_turkish_display_df")
 
     print("\n" + "="*100)
     print(f"{'FEATURE SELECTION PIPELINE COMPLETE':^100}")

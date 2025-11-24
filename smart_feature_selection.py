@@ -33,11 +33,14 @@ import sys
 
 # Import column mapping
 from column_mapping import (
+    PROTECTED_FEATURES_EN,
     PROTECTED_FEATURES_TR,
     detect_leakage_pattern,
     is_protected_feature,
     rename_columns_to_turkish,
     categorize_feature,
+    get_turkish_name,
+    create_bilingual_report,
     COLUMN_MAP_EN_TO_TR
 )
 
@@ -75,10 +78,10 @@ class SelectionConfig:
     remove_leaky: bool = True
     remove_high_correlation: bool = True
     apply_vif: bool = True
-    standardize_names: bool = True  # Convert to Turkish names
+    standardize_names: bool = False  # Keep English names for model compatibility
 
-    # Protected features (never remove)
-    protected_features: List[str] = field(default_factory=lambda: PROTECTED_FEATURES_TR.copy())
+    # Protected features (never remove) - use English for model compatibility
+    protected_features: List[str] = field(default_factory=lambda: PROTECTED_FEATURES_EN.copy())
 
 
 @dataclass
@@ -183,11 +186,24 @@ class SmartFeatureSelector:
         return df
 
     def _phase0_standardize_names(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Phase 0: Standardize column names to Turkish"""
+        """Phase 0: Optionally standardize column names to Turkish"""
         print("\n" + "="*100)
-        print("PHASE 0: COLUMN NAME STANDARDIZATION")
+        print("PHASE 0: COLUMN NAME HANDLING")
         print("="*100)
 
+        if not self.config.standardize_names:
+            print("\n✓ Keeping English column names (model compatibility mode)")
+            print("  → Turkish names available via display utilities")
+            print("  → Use get_turkish_name() or create_bilingual_report() for Turkish output")
+
+            # Show sample mappings for reference
+            print(f"\n📋 Sample EN→TR mappings:")
+            sample_cols = [col for col in df.columns if col in COLUMN_MAP_EN_TO_TR][:5]
+            for col in sample_cols:
+                print(f"  {col} → {get_turkish_name(col)}")
+            return df
+
+        # Original Turkish renaming logic (if enabled)
         renamed_count = 0
         rename_dict = {}
 
@@ -636,11 +652,16 @@ def run_smart_selection(
     df_selected.to_csv(output_file, index=False, encoding='utf-8-sig')
     print(f"\n💾 Saved selected features: {output_file}")
 
-    # Save report
+    # Save selection report
     Path(report_file).parent.mkdir(parents=True, exist_ok=True)
     report_df = selector.get_report()
     report_df.to_csv(report_file, index=False, encoding='utf-8-sig')
     print(f"💾 Saved selection report: {report_file}")
+
+    # Save bilingual column reference (EN/TR)
+    bilingual_path = Path(report_file).parent / 'bilingual_column_reference.csv'
+    bilingual_df = create_bilingual_report(df_selected, bilingual_path)
+    print(f"💾 Saved bilingual reference: {bilingual_path}")
 
     return df_selected
 
