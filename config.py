@@ -146,11 +146,11 @@ PROTECTED_FEATURES = [
     'MTBF_Degradation_Ratio',      # Method3/Method1 - detects failure acceleration
     'MTBF_InterFault_Trend',       # Degradation detector (low VIF=1.25)
 
-    # TIER 5: Failure Cause Patterns (4 features)
+    # TIER 5: Failure Cause Patterns (3 features)
+    # NOTE: Tek_Neden_Flag REMOVED - VIF=89, correlated with Arıza_Nedeni_Tutarlılık
     'Arıza_Nedeni_Çeşitlilik',     # Number of different fault causes
     'Arıza_Nedeni_Tutarlılık',     # Consistency of fault causes
     'Neden_Değişim_Flag',          # Whether fault causes changed
-    'Tek_Neden_Flag',              # Single dominant cause flag
 
     # TIER 6: Customer Impact & Loading (5 features)
     'Urban_Customer_Ratio_mean',   # Urban customer density
