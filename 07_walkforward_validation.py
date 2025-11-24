@@ -28,8 +28,63 @@ from sklearn.metrics import roc_auc_score, average_precision_score, precision_re
 from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
 from config import CUTOFF_DATE, XGBOOST_PARAMS
+from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
+
+def parse_date_flexible(value):
+    """
+    Parse date with multiple format support - handles mixed format data
+    Supports: ISO, Turkish (DD-MM-YYYY), European (DD/MM/YYYY), Excel serial dates
+    """
+    # Already a timestamp/datetime
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return pd.Timestamp(value)
+
+    # Handle NaN/None
+    if pd.isna(value):
+        return pd.NaT
+
+    # Excel serial date (numeric)
+    if isinstance(value, (int, float)):
+        if 1 <= value <= 100000:
+            try:
+                return pd.Timestamp('1899-12-30') + pd.Timedelta(days=value)
+            except:
+                return pd.NaT
+        else:
+            return pd.NaT
+
+    # String parsing with multiple format attempts
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return pd.NaT
+
+        formats = [
+            '%Y-%m-%d %H:%M:%S',
+            '%d-%m-%Y %H:%M:%S',
+            '%d/%m/%Y %H:%M:%S',
+            '%Y-%m-%d',
+            '%d-%m-%Y',
+            '%d/%m/%Y',
+            '%d.%m.%Y %H:%M:%S',
+            '%d.%m.%Y',
+        ]
+
+        for fmt in formats:
+            try:
+                return pd.to_datetime(value, format=fmt)
+            except:
+                continue
+
+        # Last resort: let pandas infer
+        try:
+            return pd.to_datetime(value, dayfirst=True)
+        except:
+            return pd.NaT
+
+    return pd.NaT
 
 print("="*100)
 print("WALK-FORWARD TEMPORAL VALIDATION")
@@ -117,7 +172,7 @@ print("="*100)
 
 # Load fault data to check temporal consistency
 faults = pd.read_excel('data/combined_data.xlsx')
-faults['started at'] = pd.to_datetime(faults['started at'], dayfirst=True, errors='coerce')
+faults['started at'] = faults['started at'].apply(parse_date_flexible)
 
 # Check 1: Faults before installation
 print("\n🔍 CHECK 1: Faults Before Installation Date")
