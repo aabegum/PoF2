@@ -984,13 +984,13 @@ for horizon in HORIZONS.keys():
     pred_df = pd.DataFrame({
         'Ekipman_ID': df['Ekipman_ID'],
         'Equipment_Class': df['Equipment_Class_Primary'],
-        f'Failure_Probability_{horizon}': predictions,
+        'PoF_Probability': predictions,  # Standardized column name for validation
         f'Actual_Target_{horizon}': df[f'Target_{horizon}'],
         'Risk_Score': predictions * 100  # Convert to 0-100 score
     })
-    
-    # Add risk category
-    pred_df['Risk_Level'] = pd.cut(
+
+    # Add risk category (Risk_Class for validation compatibility)
+    pred_df['Risk_Class'] = pd.cut(
         pred_df['Risk_Score'],
         bins=[0, 25, 50, 75, 100],
         labels=['Low', 'Medium', 'High', 'Critical']
@@ -1008,7 +1008,7 @@ for horizon in HORIZONS.keys():
     print(f"  Total equipment: {len(pred_df):,}")
     
     # Risk distribution
-    risk_dist = pred_df['Risk_Level'].value_counts()
+    risk_dist = pred_df['Risk_Class'].value_counts()
     for risk_level in ['Critical', 'High', 'Medium', 'Low']:
         count = risk_dist.get(risk_level, 0)
         pct = count / len(pred_df) * 100
@@ -1030,7 +1030,7 @@ high_risk_data = df[['Ekipman_ID', 'Equipment_Class_Primary']].copy()
 for horizon in HORIZONS.keys():
     pred_df = pd.read_csv(PREDICTION_DIR / f'predictions_{horizon.lower()}.csv')
     high_risk_data[f'Risk_Score_{horizon}'] = pred_df['Risk_Score'].values
-    high_risk_data[f'Risk_Level_{horizon}'] = pred_df['Risk_Level'].values
+    high_risk_data[f'Risk_Class_{horizon}'] = pred_df['Risk_Class'].values
 
 # Calculate average risk score across all horizons
 risk_cols = [f'Risk_Score_{h}' for h in HORIZONS.keys()]
