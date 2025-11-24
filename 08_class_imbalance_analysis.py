@@ -44,14 +44,26 @@ has_targets = all(f'Target_{h}' in df.columns for h in horizons)
 target_cols = []
 
 if not has_targets:
-    # Try to load targets from equipment_level_data
-    target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_full.columns]
-    if len(target_cols) > 0:
-        print(f"✓ Loading {len(target_cols)} targets from equipment_level_data.csv")
-        has_targets = True
-    else:
-        print("⚠️  WARNING: Targets not found - some analyses will be skipped")
-        target_cols = []
+    # Try to load targets from features_with_targets.csv (created by 06_temporal_pof_model.py)
+    try:
+        df_targets = pd.read_csv('outputs/features_with_targets.csv')
+        target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_targets.columns]
+        if len(target_cols) > 0:
+            df = df.merge(df_targets[['Ekipman_ID'] + target_cols], on='Ekipman_ID', how='left')
+            print(f"✓ Loading {len(target_cols)} targets from features_with_targets.csv")
+            has_targets = True
+    except FileNotFoundError:
+        pass
+
+    # Fallback: Try equipment_level_data
+    if not has_targets:
+        target_cols = [f'Target_{h}' for h in horizons if f'Target_{h}' in df_full.columns]
+        if len(target_cols) > 0:
+            print(f"✓ Loading {len(target_cols)} targets from equipment_level_data.csv")
+            has_targets = True
+        else:
+            print("⚠️  WARNING: Targets not found - some analyses will be skipped")
+            target_cols = []
 
 # Merge to get full equipment class info and targets
 merge_cols = ['Ekipman_ID', 'Ekipman_Sınıfı', 'Equipment_Type']

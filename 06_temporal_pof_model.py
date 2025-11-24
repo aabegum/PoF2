@@ -328,6 +328,12 @@ for horizon_name, horizon_days in HORIZONS.items():
         print(f"   ⚠️  Status: CHECK (expected ~{expected_train} for training set, got {actual})")
         print(f"       Full dataset expected: {expected_all}")
 
+# Save targets to CSV for walk-forward validation and other scripts
+print("\n💾 Saving targets to features_with_targets.csv...")
+target_cols = ['Ekipman_ID'] + [f'Target_{h}' for h in HORIZONS.keys()]
+df[target_cols].to_csv(OUTPUT_DIR / 'features_with_targets.csv', index=False, encoding='utf-8-sig')
+print(f"   ✓ Saved: {OUTPUT_DIR / 'features_with_targets.csv'}")
+
 # ============================================================================
 # STEP 3: PREPARE FEATURES
 # ============================================================================
