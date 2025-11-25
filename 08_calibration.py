@@ -245,7 +245,7 @@ print("="*100)
 uncalibrated_models = {}
 
 for horizon in CALIBRATION_HORIZONS:
-    model_path = MODEL_DIR / f'monotonic_xgboost_{horizon.lower()}.pkl'
+    model_path = MODEL_DIR / f'xgboost_{horizon.lower()}.pkl'
 
     if Path(model_path).exists():
         with open(model_path, 'rb') as f:
@@ -253,7 +253,7 @@ for horizon in CALIBRATION_HORIZONS:
         print(f"✓ Loaded XGBoost model: {horizon}")
     else:
         print(f"⚠️  Model not found: {model_path}")
-        print(f"   Run 06c_monotonic_models.py first!")
+        print(f"   Run 06_temporal_pof_model.py first!")
         exit(1)
 
 # ============================================================================
