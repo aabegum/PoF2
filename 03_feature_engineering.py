@@ -30,7 +30,10 @@ from config import (
     RANDOM_STATE,
     ENABLE_GEOGRAPHIC_CLUSTERING,
     MIN_EQUIPMENT_FOR_CLUSTERING,
-    EQUIPMENT_PER_CLUSTER
+    EQUIPMENT_PER_CLUSTER,
+    EXPECTED_LIFE_STANDARDS,
+    VOLTAGE_BASED_LIFE,
+    DEFAULT_LIFE
 )
 
 # Fix Unicode encoding for Windows console (Turkish cp1254 issue)
@@ -55,36 +58,15 @@ print(" "*35 + "PoF Prediction")
 print("="*100)
 
 # ============================================================================
-# CONFIGURATION: EXPECTED LIFE STANDARDS
+# CONFIGURATION: EXPECTED LIFE STANDARDS (Imported from config.py)
 # ============================================================================
 
-# Tier 1: Industry Standards (Most Common Equipment)
-# Based on Turkish EDAŞ standards and international IEEE/IEC guidelines
-EXPECTED_LIFE_STANDARDS = {
-    'Ayırıcı': 25,           # Disconnectors
-    'Kesici': 30,            # Circuit breakers
-    'OG/AG Trafo': 30,       # Transformers (Medium/Low voltage)
-    'AG Anahtar': 20,        # LV Switches
-    'AG Pano Box': 25,       # LV Panel Boxes
-    'Bina': 40,              # Buildings/Substations
-    'Rekortman': 20,         # Reclosers
-    'OG Hat': 35,            # MV Lines
-    'AG Hat': 30,            # LV Lines
-    'AG Pano': 25,           # LV Panels
-    'Trafo Bina Tip': 30,    # Building-type transformers
-}
+# Expected life standards now imported from config.py
+# - EXPECTED_LIFE_STANDARDS: Tier 1 (specific equipment types)
+# - VOLTAGE_BASED_LIFE: Tier 2 (voltage-based defaults)
+# - DEFAULT_LIFE: Tier 3 (conservative default)
 
-# Tier 2: Voltage-Based Defaults (If exact class not found)
-VOLTAGE_BASED_LIFE = {
-    'OG': 30,  # Medium voltage equipment
-    'AG': 25,  # Low voltage equipment  
-    'YG': 35,  # High voltage equipment
-}
-
-# Tier 3: Overall Conservative Default
-DEFAULT_LIFE = 25
-
-print("\n📋 Expected Life Standards Loaded:")
+print("\n📋 Expected Life Standards Loaded from config.py:")
 print(f"   Tier 1: {len(EXPECTED_LIFE_STANDARDS)} specific equipment types")
 print(f"   Tier 2: {len(VOLTAGE_BASED_LIFE)} voltage-based defaults")
 print(f"   Tier 3: Default = {DEFAULT_LIFE} years")
@@ -115,6 +97,62 @@ if 'Equipment_Class_Primary' not in df.columns:
 print("✓ Equipment_Class_Primary column verified (from transformation script)")
 
 original_feature_count = df.shape[1]
+
+# ============================================================================
+# STEP 1B: IDENTIFY HEALTHY VS FAILED EQUIPMENT (NEW - Mixed Dataset Support)
+# ============================================================================
+print("\n" + "="*100)
+print("STEP 1B: IDENTIFYING HEALTHY VS FAILED EQUIPMENT")
+print("="*100)
+
+# Check if dataset includes healthy equipment (mixed dataset)
+has_mixed_data = 'Has_Failure_History' in df.columns or 'Data_Source' in df.columns
+
+if has_mixed_data:
+    # Identify healthy equipment
+    if 'Has_Failure_History' in df.columns:
+        healthy_mask = df['Has_Failure_History'] == 0
+    elif 'Data_Source' in df.columns:
+        healthy_mask = df['Data_Source'] == 'Healthy_Equipment'
+    else:
+        # Fallback: check if Total_Faults exists and is 0
+        healthy_mask = (df.get('Total_Faults', pd.Series([1]*len(df))) == 0)
+
+    healthy_count = healthy_mask.sum()
+    failed_count = (~healthy_mask).sum()
+
+    print(f"\n✓ MIXED DATASET DETECTED:")
+    print(f"  • Failed equipment: {failed_count:,} ({failed_count/len(df)*100:.1f}%)")
+    print(f"  • Healthy equipment: {healthy_count:,} ({healthy_count/len(df)*100:.1f}%)")
+    print(f"  • Total equipment: {len(df):,}")
+    print(f"  • Class balance (failed:healthy): {failed_count/max(healthy_count,1):.2f}:1")
+
+    # Verify healthy equipment have zero faults
+    if healthy_count > 0:
+        print(f"\n  Verifying healthy equipment data quality...")
+        fault_cols = [col for col in df.columns if 'Fault_Count' in col or 'Total_Faults' in col]
+        for col in fault_cols[:3]:  # Check first 3 fault count columns
+            if col in df.columns:
+                non_zero = (df.loc[healthy_mask, col] > 0).sum()
+                if non_zero > 0:
+                    print(f"    ⚠️  {non_zero} healthy equipment have non-zero {col}")
+                else:
+                    print(f"    ✓ {col} = 0 for all healthy equipment")
+
+        print(f"\n  ✓ Healthy equipment validated - all have zero failure history")
+else:
+    print(f"\n✓ SINGLE DATASET (Failed Equipment Only):")
+    print(f"  • All equipment have failure history")
+    print(f"  • Total equipment: {len(df):,}")
+    print(f"  • Note: For better model performance, consider adding healthy equipment data")
+    print(f"    → Run 02a_healthy_equipment_loader.py with healthy_equipment.xlsx")
+
+    healthy_mask = pd.Series([False]*len(df), index=df.index)
+    healthy_count = 0
+    failed_count = len(df)
+
+# Store masks for later use
+df['Is_Healthy'] = healthy_mask
 
 # ============================================================================
 # STEP 2: EXPECTED LIFE RATIO CALCULATION
