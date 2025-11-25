@@ -634,7 +634,7 @@ print(f"   1. Review high-risk chronic repeater list")
 print(f"   2. Run Temporal PoF (python 06_model_training.py)")
 print(f"   3. Combine both predictions for integrated risk assessment")
 print(f"   4. Run Survival Analysis (python 09_survival_analysis.py)")
-print(f"   5. Integrate with CoF (python 10_consequence_of_failure.py)")
+print(f"   5. Integrate with CoF (python 11_consequence_of_failure.py)")
 
 print("\n" + "="*100)
 print(f"{'CHRONIC REPEATER CLASSIFICATION PIPELINE COMPLETE':^100}")

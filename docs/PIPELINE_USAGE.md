@@ -28,14 +28,14 @@ The production pipeline consists of **11 steps** (10 main + 1 optional diagnosti
 | **1** | `01_data_profiling.py` | Validate data quality and temporal coverage | ~30s |
 | **2** | `02_data_transformation.py` | Transform fault-level to equipment-level | ~1min |
 | **3** | `03_feature_engineering.py` | Create optimal feature set (TIER 1-8) | ~2min |
-| **4** | `05_feature_selection.py` | Leakage removal + VIF reduction | ~1min |
-| **4b** | `10_equipment_id_audit.py` | Verify ID consolidation (optional) | ~30s |
+| **4** | `04_feature_selection.py` | Leakage removal + VIF reduction | ~1min |
+| **4b** | `05_equipment_id_audit.py` | Verify ID consolidation (optional) | ~30s |
 | **5** | `06_temporal_pof_model.py` | Train XGBoost/CatBoost temporal models | ~2min |
-| **6** | `06_chronic_classifier.py` | Train chronic repeater classifier | ~1min |
-| **7** | `07_explainability.py` | SHAP feature importance analysis | ~2min |
-| **8** | `08_calibration.py` | Calibrate probability predictions | ~3min |
-| **9** | `06_survival_model.py` | Cox proportional hazards model | ~2min |
-| **10** | `10_consequence_of_failure.py` | Calculate Risk = PoF × CoF | ~1min |
+| **6** | `07_chronic_classifier.py` | Train chronic repeater classifier | ~1min |
+| **7** | `08_explainability.py` | SHAP feature importance analysis | ~2min |
+| **8** | `09_calibration.py` | Calibrate probability predictions | ~3min |
+| **9** | `10_survival_model.py` | Cox proportional hazards model | ~2min |
+| **10** | `11_consequence_of_failure.py` | Calculate Risk = PoF × CoF | ~1min |
 
 **Total Execution Time**: ~15-20 minutes
 
@@ -118,9 +118,9 @@ logs/
     ├── step_03_feature_engineering.log
     ├── step_04_feature_selection.log
     ├── step_05_temporal_pof_model.log
-    ├── step_06_chronic_classifier.log
-    ├── step_07_explainability.log
-    ├── step_08_calibration.log
+    ├── step_07_chronic_classifier.log
+    ├── step_08_explainability.log
+    ├── step_09_calibration.log
     ├── step_09_survival_model.log
     └── step_10_risk_assessment.log
 ```
@@ -201,24 +201,24 @@ If you need to run specific steps individually:
 python 01_data_profiling.py
 python 02_data_transformation.py
 python 03_feature_engineering.py
-python 05_feature_selection.py
+python 04_feature_selection.py
 
 # Optional: ID audit
-python 10_equipment_id_audit.py
+python 05_equipment_id_audit.py
 
 # Model training
 python 06_temporal_pof_model.py
-python 06_chronic_classifier.py
+python 07_chronic_classifier.py
 
 # Model analysis
-python 07_explainability.py
-python 08_calibration.py
+python 08_explainability.py
+python 09_calibration.py
 
 # Survival analysis
-python 06_survival_model.py
+python 10_survival_model.py
 
 # Risk assessment
-python 10_consequence_of_failure.py
+python 11_consequence_of_failure.py
 ```
 
 **Important**: Steps must be run in order - each step depends on outputs from previous steps.

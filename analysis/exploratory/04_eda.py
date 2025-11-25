@@ -843,7 +843,7 @@ if not found_any_predictions:
     log_print("Run one of the following to generate predictions:")
     log_print("  • 06_model_training.py (Model 2: Chronic repeater classifier)")
     log_print("  • 09_survival_analysis.py (Model 1: Temporal PoF predictor)")
-    log_print("  • 10_consequence_of_failure.py (Risk = PoF × CoF)")
+    log_print("  • 11_consequence_of_failure.py (Risk = PoF × CoF)")
 
 # ============================================================================
 # STEP 11: VOLTAGE-LEVEL ANALYSIS (NEW - From Step 9B)

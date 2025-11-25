@@ -162,7 +162,7 @@ print("="*100)
 # Load reduced features (comprehensive feature selection with leakage removal)
 if not FEATURES_REDUCED_FILE.exists():
     print(f"\n❌ ERROR: File not found at {FEATURES_REDUCED_FILE}")
-    print("Please run: python 05_feature_selection.py")
+    print("Please run: python 04_feature_selection.py")
     exit(1)
 
 print(f"\n✓ Loading from: {FEATURES_REDUCED_FILE}")

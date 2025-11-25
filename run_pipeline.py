@@ -4,17 +4,18 @@ Turkish EDAŞ Equipment Failure Prediction Pipeline
 
 This script runs the entire production-ready PoF2 pipeline and captures all outputs.
 
-PIPELINE FLOW (10 STEPS):
+PIPELINE FLOW (11 STEPS):
     1. Data Profiling         → Validate data quality and temporal coverage
     2. Data Transformation    → Transform fault-level to equipment-level
     3. Feature Engineering    → Create optimal feature set
     4. Feature Selection      → Leakage removal + VIF reduction
-    5. Temporal PoF Model     → XGBoost/CatBoost multi-horizon predictions
-    6. Chronic Classifier     → Identify failure-prone equipment
-    7. Model Explainability   → SHAP feature importance
-    8. Probability Calibration → Calibrate risk estimates
-    9. Cox Survival Model     → Multi-horizon survival analysis
-   10. Risk Assessment        → PoF × CoF → CAPEX priority list
+    5. Equipment ID Audit     → Verify ID consolidation (optional)
+    6. Temporal PoF Model     → XGBoost/CatBoost multi-horizon predictions
+    7. Chronic Classifier     → Identify failure-prone equipment
+    8. Model Explainability   → SHAP feature importance
+    9. Probability Calibration → Calibrate risk estimates
+   10. Cox Survival Model     → Multi-horizon survival analysis
+   11. Risk Assessment        → PoF × CoF → CAPEX priority list
 
 OPTIONAL SCRIPTS (in analysis/ folder):
     • analysis/exploratory/04_eda.py - 16 exploratory analyses
@@ -65,50 +66,50 @@ PIPELINE_STEPS = [
     {
         'step': 4,
         'name': 'Feature Selection',
-        'script': '05_feature_selection.py',
+        'script': '04_feature_selection.py',
         'description': 'Leakage removal + VIF analysis'
     },
     {
-        'step': '4b',
+        'step': 5,
         'name': 'Equipment ID Audit',
-        'script': '10_equipment_id_audit.py',
+        'script': '05_equipment_id_audit.py',
         'description': 'Verify cbs_id ↔ Ekipman_ID consistency (CRITICAL)',
         'optional': True  # Optional diagnostic - will warn but not fail pipeline
     },
     {
-        'step': 5,
+        'step': 6,
         'name': 'Temporal PoF Model',
         'script': '06_temporal_pof_model.py',
         'description': 'Train temporal PoF predictor (3M/6M/12M windows)'
     },
     {
-        'step': 6,
+        'step': 7,
         'name': 'Chronic Classifier',
-        'script': '06_chronic_classifier.py',
+        'script': '07_chronic_classifier.py',
         'description': 'Train chronic repeater classifier (90-day recurrence)'
     },
     {
-        'step': 7,
+        'step': 8,
         'name': 'Model Explainability',
-        'script': '07_explainability.py',
+        'script': '08_explainability.py',
         'description': 'SHAP analysis and feature importance'
     },
     {
-        'step': 8,
+        'step': 9,
         'name': 'Probability Calibration',
-        'script': '08_calibration.py',
+        'script': '09_calibration.py',
         'description': 'Calibrate model probabilities for better risk estimates'
     },
     {
-        'step': 9,
+        'step': 10,
         'name': 'Cox Survival Model',
-        'script': '06_survival_model.py',
+        'script': '10_survival_model.py',
         'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/6M/12M/24M)'
     },
     {
-        'step': 10,
+        'step': 11,
         'name': 'Risk Assessment',
-        'script': '10_consequence_of_failure.py',
+        'script': '11_consequence_of_failure.py',
         'description': 'Calculate PoF × CoF = Risk, generate CAPEX priority list'
     }
 ]

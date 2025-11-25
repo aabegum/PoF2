@@ -22,7 +22,7 @@ python 01_data_profiling.py
 python 02_data_transformation.py
 python 03_feature_engineering.py
 python 04_eda.py
-python 05_feature_selection.py
+python 04_feature_selection.py
 python 05b_remove_leaky_features.py
 ```
 
@@ -44,10 +44,10 @@ python 06b_logistic_baseline.py
 python 06c_monotonic_models.py
 
 # Step 3: Generate explanations (4 hours effort)
-python 07_explainability.py
+python 08_explainability.py
 
 # Step 4: Calibrate probabilities (3 hours effort)
-python 08_calibration.py
+python 09_calibration.py
 ```
 
 **Total runtime: ~10-15 minutes**
@@ -132,7 +132,7 @@ Top Risk Factors (12M Horizon):
 
 ---
 
-### 3. **07_explainability.py** (Trust & Adoption)
+### 3. **08_explainability.py** (Trust & Adoption)
 
 **Purpose:** Generate SHAP explanations for every prediction
 
@@ -172,7 +172,7 @@ Risk Drivers:
 
 ---
 
-### 4. **08_calibration.py** (Accurate Probabilities)
+### 4. **09_calibration.py** (Accurate Probabilities)
 
 **Purpose:** Ensure predicted probabilities match actual failure rates
 

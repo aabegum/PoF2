@@ -73,7 +73,7 @@ python 02_data_transformation.py
 ---
 
 #### **STEP 4: Feature Selection**
-**Script:** `05_feature_selection.py`
+**Script:** `04_feature_selection.py`
 **Purpose:** Remove leaky/redundant features (VIF analysis)
 **Input:** `data/features_engineered.csv` (30 features)
 **Output:** `data/features_reduced.csv` (25-30 features)
@@ -109,7 +109,7 @@ python 02_data_transformation.py
 ---
 
 #### **STEP 6: Chronic Classifier**
-**Script:** `06_chronic_classifier.py`
+**Script:** `07_chronic_classifier.py`
 **Purpose:** Identify chronically failing equipment
 **Input:** `data/features_reduced.csv`
 **Output:** `predictions/chronic_repeaters.csv`
@@ -124,7 +124,7 @@ python 02_data_transformation.py
 ### **Model Analysis Phase (Steps 7-8)**
 
 #### **STEP 7: Model Explainability**
-**Script:** `07_explainability.py`
+**Script:** `08_explainability.py`
 **Purpose:** SHAP analysis for feature importance
 **Input:**
 - `data/features_reduced.csv`
@@ -142,7 +142,7 @@ python 02_data_transformation.py
 ---
 
 #### **STEP 8: Probability Calibration**
-**Script:** `08_calibration.py`
+**Script:** `09_calibration.py`
 **Purpose:** Calibrate model probabilities for accurate risk estimates
 **Input:**
 - `data/features_reduced.csv`
@@ -162,7 +162,7 @@ python 02_data_transformation.py
 ### **Alternative Model Phase (Step 9)**
 
 #### **STEP 9: Cox Survival Model**
-**Script:** `06_survival_model.py`
+**Script:** `10_survival_model.py`
 **Purpose:** Alternative time-to-event predictions using Cox PH
 **Input:**
 - `data/features_reduced.csv`
@@ -190,7 +190,7 @@ python 02_data_transformation.py
 ### **Risk Assessment Phase (Step 10)**
 
 #### **STEP 10: Risk Assessment**
-**Script:** `10_consequence_of_failure.py`
+**Script:** `11_consequence_of_failure.py`
 **Purpose:** Calculate PoF × CoF = Risk, generate CAPEX priorities
 **Input:**
 - `predictions/pof_multi_horizon_predictions.csv` (from Step 9)
