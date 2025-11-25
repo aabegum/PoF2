@@ -88,9 +88,6 @@ TEST_SIZE = 0.30
 # Cross-validation
 N_FOLDS = 3
 
-# Class imbalance handling
-USE_CLASS_WEIGHTS = True
-
 # ============================================================================
 # FEATURE ENGINEERING CONFIGURATION
 # ============================================================================
@@ -113,9 +110,6 @@ VIF_TARGET = 10     # Target VIF after iterative removal
 
 # Correlation threshold
 CORRELATION_THRESHOLD = 0.85  # Remove features with correlation > 0.85
-
-# Feature importance threshold
-IMPORTANCE_THRESHOLD = 0.001  # Keep features contributing > 0.1%
 
 # Protected features (OPTIMAL 30-FEATURE SET - never remove)
 # These features form the core of the optimized PoF prediction model
@@ -218,24 +212,6 @@ CATBOOST_GRID = {
     'l2_leaf_reg': [1, 3],
     'border_count': [64]
 }
-
-# ============================================================================
-# LOGGING CONFIGURATION
-# ============================================================================
-
-# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-LOG_LEVEL = 'INFO'
-
-# Log file location
-LOG_DIR = Path('logs')
-LOG_FILE = LOG_DIR / 'pipeline.log'
-
-# Log format
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-
-# Console logging
-CONSOLE_LOG_LEVEL = 'INFO'
 
 # ============================================================================
 # VISUALIZATION CONFIGURATION

@@ -118,7 +118,7 @@ print("="*100)
 # Try to load survival analysis predictions first (Model 1)
 pof_paths = [
     PREDICTION_DIR / 'pof_multi_horizon_predictions.csv',
-    PREDICTION_DIR / 'failure_predictions_12m.csv'  # Fallback to Model 2
+    PREDICTION_DIR / 'predictions_12m.csv'  # Fallback to temporal model (Model 2)
 ]
 
 df_pof = None
