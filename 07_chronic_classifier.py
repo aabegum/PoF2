@@ -1,6 +1,6 @@
 """
 CHRONIC REPEATER CLASSIFICATION
-Turkish EDAŞ PoF Prediction Project (v4.0)
+Turkish EDAŞ PoF Prediction Project (v5.0 - Mixed Dataset Support)
 
 Purpose:
 - Identify chronic repeater equipment (failure-prone assets)
@@ -8,27 +8,34 @@ Purpose:
 - Complement temporal PoF predictions (script 06_model_training.py)
 - Support Replace vs Repair decisions
 
+Changes in v5.0 (MIXED DATASET SUPPORT):
+- NEW: Automatically filters to FAILED EQUIPMENT ONLY
+- REASON: Chronic classification requires failure history
+- BEHAVIOR: Healthy equipment excluded (cannot be chronic without failures)
+- COMPATIBLE: Works with both mixed and failed-only datasets
+
 Target Definition:
 - Chronic Repeater = Equipment with multiple recurring failures
 - Criteria: Tekrarlayan_Arıza_90gün_Flag = 1 (94 equipment, 12%)
 - OR: >= 2 lifetime failures AND high failure rate
 
 Difference from Temporal PoF:
-- Temporal PoF (script 06): "WHEN will equipment fail?" (prospective)
-- Chronic Repeater: "WHICH equipment are failure-prone?" (classification)
+- Temporal PoF (script 06): "WHEN will equipment fail?" (prospective, includes healthy)
+- Chronic Repeater: "WHICH equipment are failure-prone?" (classification, failed only)
 
 Strategy:
+- Filtered dataset: Only equipment with failure history
 - Balanced class weights (handle 12% positive class)
 - 70/30 train/test split with stratification
 - GridSearchCV for hyperparameter optimization
 - Feature importance to understand chronic repeater patterns
 
-Input:  data/features_selected_clean.csv (26 features)
+Input:  data/features_selected_clean.csv (may include healthy equipment)
 Output: models/chronic_repeater_*.pkl, predictions/chronic_repeaters.csv
 
 Author: Data Analytics Team
 Date: 2025
-Version: 4.0
+Version: 5.0
 """
 
 import pandas as pd
@@ -183,6 +190,53 @@ if not data_path.exists():
 print(f"\n✓ Loading from: {data_path}")
 df = pd.read_csv(data_path)
 print(f"✓ Loaded: {df.shape[0]:,} equipment × {df.shape[1]} features")
+
+# ============================================================================
+# STEP 1B: FILTER TO FAILED EQUIPMENT ONLY (NEW - Mixed Dataset Support)
+# ============================================================================
+print("\n--- Filtering to Failed Equipment ---")
+
+# Chronic classifier is ONLY relevant for equipment with failure history
+# Healthy equipment (no failures) cannot be classified as chronic repeaters
+
+# Check if dataset includes healthy equipment
+has_mixed_data = 'Has_Failure_History' in df.columns or 'Is_Healthy' in df.columns or 'Data_Source' in df.columns
+
+if has_mixed_data:
+    # Identify and exclude healthy equipment
+    if 'Is_Healthy' in df.columns:
+        failed_mask = df['Is_Healthy'] == False
+    elif 'Has_Failure_History' in df.columns:
+        failed_mask = df['Has_Failure_History'] == 1
+    elif 'Data_Source' in df.columns:
+        failed_mask = df['Data_Source'] != 'Healthy_Equipment'
+    else:
+        # Fallback: check if Total_Faults exists and > 0
+        failed_mask = (df.get('Total_Faults', pd.Series([1]*len(df))) > 0)
+
+    healthy_count = (~failed_mask).sum()
+    failed_count = failed_mask.sum()
+
+    if healthy_count > 0:
+        print(f"\n⚠️  MIXED DATASET DETECTED:")
+        print(f"  • Total equipment: {len(df):,}")
+        print(f"  • Failed equipment: {failed_count:,} ({failed_count/len(df)*100:.1f}%)")
+        print(f"  • Healthy equipment: {healthy_count:,} ({healthy_count/len(df)*100:.1f}%)")
+
+        print(f"\n  ✓ Excluding {healthy_count:,} healthy equipment from chronic classification")
+        print(f"    Reason: Chronic classification requires failure history")
+        print(f"    → Healthy equipment cannot be chronic repeaters (no failures)")
+
+        # Filter to failed equipment only
+        df = df[failed_mask].copy()
+
+        print(f"\n  ✓ Equipment for chronic classification: {len(df):,}")
+    else:
+        print(f"\n✓ All equipment have failure history - no filtering needed")
+else:
+    print(f"\n✓ SINGLE DATASET (Failed Equipment Only):")
+    print(f"  • All {len(df):,} equipment have failure history")
+    print(f"  • No filtering needed for chronic classification")
 
 # ============================================================================
 # STEP 2: CREATE CHRONIC REPEATER TARGET
