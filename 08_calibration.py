@@ -97,6 +97,9 @@ TARGET_THRESHOLDS = {
     '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
 }
 
+# Filter horizons to only those with thresholds (exclude 3M due to 100% positive class)
+CALIBRATION_HORIZONS = [h for h in HORIZONS.keys() if h in TARGET_THRESHOLDS]
+
 # Calibration methods
 CALIBRATION_METHODS = ['isotonic', 'sigmoid']  # isotonic = Isotonic, sigmoid = Platt
 
@@ -113,7 +116,8 @@ print(f"   Calibration Bins: {N_BINS}")
 print(f"   Calibration Methods: Isotonic + Platt (Sigmoid)")
 print(f"   Horizons: {HORIZONS}")
 print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
-print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
+print(f"   Calibration Horizons: {CALIBRATION_HORIZONS}")
+print(f"\n⚠️  NOTE: 3M horizon excluded (100% positive class - all equipment has >= 1 lifetime failure)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -154,7 +158,7 @@ if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
 print("\n--- Creating Binary Targets (Lifetime-Based) ---")
 print("Strategy: Equipment with X+ lifetime failures → high risk")
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     threshold = TARGET_THRESHOLDS[horizon]
 
     # Target = 1 if equipment has threshold or more lifetime failures
@@ -240,7 +244,7 @@ print("="*100)
 
 uncalibrated_models = {}
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     model_path = MODEL_DIR / f'monotonic_xgboost_{horizon.lower()}.pkl'
 
     if Path(model_path).exists():
@@ -261,7 +265,7 @@ print("="*100)
 
 uncalibrated_metrics = []
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     print(f"\n--- {horizon} Horizon ---")
 
     model = uncalibrated_models[horizon]
@@ -308,7 +312,7 @@ print("="*100)
 calibrated_models = {}
 calibrated_metrics = []
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     print(f"\n{'='*100}")
     print(f"CALIBRATING MODEL FOR {horizon} HORIZON")
     print(f"{'='*100}")
@@ -460,7 +464,7 @@ print("✓ Saved: outputs/calibration/calibration_metrics_comparison.png")
 plt.close()
 
 # 3. Reliability Diagrams (Detailed)
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     y_test = df_encoded.loc[test_idx, f'Target_{horizon}'].values
@@ -509,7 +513,7 @@ print("\n" + "="*100)
 print("STEP 8: GENERATING CALIBRATED PREDICTIONS")
 print("="*100)
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     print(f"\n--- {horizon} Horizon ---")
 
     # Use Isotonic calibration (typically best for tree models)
@@ -561,7 +565,7 @@ print("✓ Saved: results/calibration_metrics.csv")
 # Calculate improvements
 improvements = []
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     uncal = metrics_df[(metrics_df['Horizon'] == horizon) & (metrics_df['Model'] == 'Uncalibrated')].iloc[0]
     iso = metrics_df[(metrics_df['Horizon'] == horizon) & (metrics_df['Model'] == 'Isotonic Calibrated')].iloc[0]
     platt = metrics_df[(metrics_df['Horizon'] == horizon) & (metrics_df['Model'] == 'Platt Calibrated')].iloc[0]
@@ -593,7 +597,7 @@ print("\n\n📈 Calibration Improvements:")
 print(improvements_df.to_string(index=False))
 
 print("\n\n🎯 Recommended Calibrated Models:")
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     horizon_metrics = metrics_df[metrics_df['Horizon'] == horizon]
     best_model = horizon_metrics.loc[horizon_metrics['Calibration_Error'].idxmin()]
     print(f"\n{horizon} Horizon:")
