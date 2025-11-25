@@ -592,7 +592,7 @@ high_risk_full = high_risk_full.sort_values('Chronic_Probability', ascending=Fal
 
 print(f"\n--- Top 10 Highest Risk Chronic Repeaters ---")
 for idx, (i, row) in enumerate(high_risk_full.head(10).iterrows(), 1):
-    print(f"  {idx:2d}. ID: {row['Ekipman_ID']} | Class: {row.get('Equipment_Class_Primary', 'N/A')} | "
+    print(f"  {idx:2d}. ID: {int(row['Ekipman_ID'])} | Class: {row.get('Equipment_Class_Primary', 'N/A')} | "
           f"Probability: {row['Chronic_Probability']*100:.1f}%")
 
 # Save high-risk report

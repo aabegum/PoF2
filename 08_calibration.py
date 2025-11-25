@@ -543,7 +543,9 @@ for horizon in HORIZONS:
 
     # Show top 10 high-risk
     print(f"\nTop 10 High-Risk Equipment ({horizon}):")
-    print(pred_df.head(10)[['Ekipman_ID', 'Equipment_Class', 'Risk_Score', 'Risk_Level']].to_string(index=False))
+    display_df = pred_df.head(10)[['Ekipman_ID', 'Equipment_Class', 'Risk_Score', 'Risk_Level']].copy()
+    display_df['Ekipman_ID'] = display_df['Ekipman_ID'].astype(int)
+    print(display_df.to_string(index=False))
 
 # ============================================================================
 # STEP 9: SAVE CALIBRATION RESULTS

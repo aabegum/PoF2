@@ -543,7 +543,7 @@ if '12M' in risk_results:
     print(f"\n🔥 TOP 10 HIGHEST RISK EQUIPMENT:")
     print("-" * 100)
     for idx, row in df_capex_top100.head(10).iterrows():
-        print(f"  #{row['Priority_Rank']:3.0f} | {str(row['Ekipman_ID']):>10s} | "
+        print(f"  #{row['Priority_Rank']:3.0f} | {int(row['Ekipman_ID']):>10d} | "
               f"{str(row['Ekipman_Sınıfı']):15s} | Risk={row['Risk_Score']:5.1f} | "
               f"PoF={row['PoF_Probability_12M']:.2f} | CoF={row['CoF_Score']:.1f} | "
               f"{row['Risk_Category']}")

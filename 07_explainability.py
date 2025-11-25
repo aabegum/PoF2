@@ -518,7 +518,7 @@ print("─" * 100)
 print("\n\n📋 Example Risk Explanation (Top High-Risk Equipment):")
 print("─" * 100)
 example = explanation_df[explanation_df['Horizon'] == '12M'].iloc[0]
-print(f"Equipment ID: {example['Ekipman_ID']}")
+print(f"Equipment ID: {int(example['Ekipman_ID'])}")
 print(f"Equipment Class: {example['Equipment_Class']}")
 print(f"Risk Score: {example['Risk_Score']}/100 ({example['Risk_Level']})")
 print(f"\nTop Risk Factor: {example['Top_Risk_Factor']}")
