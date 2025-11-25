@@ -1,21 +1,27 @@
 """
-POF2 PIPELINE RUNNER WITH LOGGING v2.0
+POF2 PIPELINE RUNNER WITH LOGGING v3.0
 Turkish EDAŞ Equipment Failure Prediction Pipeline
 
 This script runs the entire production-ready PoF2 pipeline and captures all outputs.
 
-PIPELINE FLOW (11 STEPS):
-    1. Data Profiling         → Validate data quality and temporal coverage
-    2. Data Transformation    → Transform fault-level to equipment-level
-    3. Feature Engineering    → Create optimal feature set
-    4. Feature Selection      → Leakage removal + VIF reduction
-    5. Equipment ID Audit     → Verify ID consolidation (optional)
-    6. Temporal PoF Model     → XGBoost/CatBoost multi-horizon predictions
-    7. Chronic Classifier     → Identify failure-prone equipment
-    8. Model Explainability   → SHAP feature importance
+PIPELINE FLOW (12 STEPS):
+    1. Data Profiling          → Validate data quality and temporal coverage
+   2a. Healthy Equipment Loader → Load healthy equipment data (OPTIONAL - for balanced training)
+    2. Data Transformation     → Transform fault-level to equipment-level + merge healthy
+    3. Feature Engineering     → Create optimal feature set
+    4. Feature Selection       → Leakage removal + VIF reduction
+    5. Equipment ID Audit      → Verify ID consolidation (optional)
+    6. Temporal PoF Model      → XGBoost/CatBoost multi-horizon predictions (mixed dataset)
+    7. Chronic Classifier      → Identify failure-prone equipment (failed only)
+    8. Model Explainability    → SHAP feature importance
     9. Probability Calibration → Calibrate risk estimates
-   10. Cox Survival Model     → Multi-horizon survival analysis
-   11. Risk Assessment        → PoF × CoF → CAPEX priority list
+   10. Cox Survival Model      → Multi-horizon survival analysis (censored observations)
+   11. Risk Assessment         → PoF × CoF → CAPEX priority list
+
+NEW in v3.0 (MIXED DATASET SUPPORT):
+    • Step 2a: Load healthy equipment (optional - enables balanced training)
+    • Steps 2, 6-11: Support mixed dataset (failed + healthy equipment)
+    • Benefits: Better calibration, reduced false positives, realistic risk scores
 
 OPTIONAL SCRIPTS (in analysis/ folder):
     • analysis/exploratory/04_eda.py - 16 exploratory analyses
@@ -52,10 +58,17 @@ PIPELINE_STEPS = [
         'description': 'Validate data quality and temporal coverage'
     },
     {
+        'step': '2a',
+        'name': 'Healthy Equipment Loader',
+        'script': '02a_healthy_equipment_loader.py',
+        'description': 'Load and validate healthy equipment data (OPTIONAL - enables mixed dataset)',
+        'optional': True  # Optional - only run if healthy_equipment.xlsx exists
+    },
+    {
         'step': 2,
         'name': 'Data Transformation',
         'script': '02_data_transformation.py',
-        'description': 'Transform fault-level to equipment-level'
+        'description': 'Transform fault-level to equipment-level + merge with healthy data'
     },
     {
         'step': 3,
@@ -80,13 +93,13 @@ PIPELINE_STEPS = [
         'step': 6,
         'name': 'Temporal PoF Model',
         'script': '06_temporal_pof_model.py',
-        'description': 'Train temporal PoF predictor (3M/6M/12M windows)'
+        'description': 'Train temporal PoF predictor (3M/6M/12M) - supports mixed dataset'
     },
     {
         'step': 7,
         'name': 'Chronic Classifier',
         'script': '07_chronic_classifier.py',
-        'description': 'Train chronic repeater classifier (90-day recurrence)'
+        'description': 'Train chronic repeater classifier (90-day recurrence) - failed equipment only'
     },
     {
         'step': 8,
@@ -98,13 +111,13 @@ PIPELINE_STEPS = [
         'step': 9,
         'name': 'Probability Calibration',
         'script': '09_calibration.py',
-        'description': 'Calibrate model probabilities for better risk estimates'
+        'description': 'Calibrate model probabilities - improved from mixed dataset'
     },
     {
         'step': 10,
         'name': 'Cox Survival Model',
         'script': '10_survival_model.py',
-        'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/6M/12M/24M)'
+        'description': 'Cox PH + Kaplan-Meier (multi-horizon) - adds censored observations'
     },
     {
         'step': 11,

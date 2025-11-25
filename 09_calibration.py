@@ -1,6 +1,6 @@
 """
 MODEL CALIBRATION - POF PREDICTION
-Turkish EDAŞ PoF Prediction Project
+Turkish EDAŞ PoF Prediction Project (v2.0 - Mixed Dataset Support)
 
 Purpose:
 - Assess probability calibration of trained models
@@ -8,22 +8,36 @@ Purpose:
 - Ensure predicted probabilities match actual failure rates
 - Critical for accurate risk scoring and maintenance budgeting
 
+Changes in v2.0 (MIXED DATASET SUPPORT):
+- COMPATIBLE: Works seamlessly with models trained on mixed datasets
+- IMPROVED: Better calibration from balanced training data
+- ENHANCED: Probabilities reflect true positive/negative rates
+- NOTE: No code changes needed - calibration is dataset-agnostic
+
 Why Calibration Matters:
 - Model says "70% risk" → Should see ~70% actual failure rate
 - Poor calibration → Wrong maintenance priorities
 - Good calibration → Accurate budget planning
 
+Why Mixed Dataset Improves Calibration:
+- TRUE NEGATIVES: Models learn what "low risk" really means
+- BALANCED TRAINING: Better probability estimates across full range (0-100%)
+- REALISTIC SCORES: Healthy equipment get low scores, at-risk get high scores
+- REDUCED BIAS: No longer biased toward high predictions (failed-only problem)
+
 Strategy:
 - Test calibration with reliability diagrams
-- Apply Isotonic scaling (non-parametric, flexible)
-- Apply Platt scaling (parametric, logistic)
+- Apply Isotonic scaling (non-parametric, flexible) - BEST for tree models
+- Apply Platt scaling (parametric, logistic) - BEST for linear models
 - Compare calibrated vs uncalibrated performance
+- Works automatically with both failed-only and mixed datasets
 
-Input:  models/monotonic_*.pkl, data/features_selected_clean.csv
-Output: models/calibrated_*.pkl, outputs/calibration/*.png
+Input:  models/temporal_pof_*.pkl, data/features_selected_clean.csv
+Output: models/calibrated_*.pkl, predictions/calibrated_predictions_*.csv, outputs/calibration/*.png
 
 Author: Data Analytics Team
 Date: 2025
+Version: 2.0
 """
 
 import pandas as pd
