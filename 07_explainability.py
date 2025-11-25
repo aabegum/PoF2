@@ -33,7 +33,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
 import warnings
+import sys
 warnings.filterwarnings('ignore')
+
+# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+if sys.platform == 'win32':
+    try:
+        # Set console to UTF-8 mode for Unicode symbols
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        # Reconfigure stdout with UTF-8
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        # If encoding setup fails, continue anyway
+        pass
 
 # Import centralized configuration
 from config import (
@@ -504,7 +518,7 @@ print("─" * 100)
 print("\n\n📋 Example Risk Explanation (Top High-Risk Equipment):")
 print("─" * 100)
 example = explanation_df[explanation_df['Horizon'] == '12M'].iloc[0]
-print(f"Equipment ID: {example['Ekipman_ID']}")
+print(f"Equipment ID: {int(example['Ekipman_ID'])}")
 print(f"Equipment Class: {example['Equipment_Class']}")
 print(f"Risk Score: {example['Risk_Score']}/100 ({example['Risk_Level']})")
 print(f"\nTop Risk Factor: {example['Top_Risk_Factor']}")

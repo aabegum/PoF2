@@ -33,7 +33,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
 import warnings
+import sys
 warnings.filterwarnings('ignore')
+
+# Fix Unicode encoding for Windows console (Turkish cp1254 issue)
+if sys.platform == 'win32':
+    try:
+        # Set console to UTF-8 mode for Unicode symbols
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        # Reconfigure stdout with UTF-8
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        # If encoding setup fails, continue anyway
+        pass
 
 # Import centralized configuration
 from config import (
@@ -83,6 +97,9 @@ TARGET_THRESHOLDS = {
     '12M': 2   # At least 2 lifetime failures → 245/1148 = 21.3% positive
 }
 
+# Filter horizons to only those with thresholds (exclude 3M due to 100% positive class)
+CALIBRATION_HORIZONS = [h for h in HORIZONS.keys() if h in TARGET_THRESHOLDS]
+
 # Calibration methods
 CALIBRATION_METHODS = ['isotonic', 'sigmoid']  # isotonic = Isotonic, sigmoid = Platt
 
@@ -99,7 +116,8 @@ print(f"   Calibration Bins: {N_BINS}")
 print(f"   Calibration Methods: Isotonic + Platt (Sigmoid)")
 print(f"   Horizons: {HORIZONS}")
 print(f"   Target Thresholds: {TARGET_THRESHOLDS}")
-print(f"\n⚠️  NOTE: 3M horizon removed (100% positive class - all equipment has >= 1 lifetime failure)")
+print(f"   Calibration Horizons: {CALIBRATION_HORIZONS}")
+print(f"\n⚠️  NOTE: 3M horizon excluded (100% positive class - all equipment has >= 1 lifetime failure)")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -140,7 +158,7 @@ if 'Toplam_Arıza_Sayisi_Lifetime' not in df_full.columns:
 print("\n--- Creating Binary Targets (Lifetime-Based) ---")
 print("Strategy: Equipment with X+ lifetime failures → high risk")
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     threshold = TARGET_THRESHOLDS[horizon]
 
     # Target = 1 if equipment has threshold or more lifetime failures
@@ -226,8 +244,8 @@ print("="*100)
 
 uncalibrated_models = {}
 
-for horizon in HORIZONS:
-    model_path = MODEL_DIR / f'monotonic_xgboost_{horizon.lower()}.pkl'
+for horizon in CALIBRATION_HORIZONS:
+    model_path = MODEL_DIR / f'xgboost_{horizon.lower()}.pkl'
 
     if Path(model_path).exists():
         with open(model_path, 'rb') as f:
@@ -235,7 +253,7 @@ for horizon in HORIZONS:
         print(f"✓ Loaded XGBoost model: {horizon}")
     else:
         print(f"⚠️  Model not found: {model_path}")
-        print(f"   Run 06c_monotonic_models.py first!")
+        print(f"   Run 06_temporal_pof_model.py first!")
         exit(1)
 
 # ============================================================================
@@ -247,7 +265,7 @@ print("="*100)
 
 uncalibrated_metrics = []
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     print(f"\n--- {horizon} Horizon ---")
 
     model = uncalibrated_models[horizon]
@@ -294,7 +312,7 @@ print("="*100)
 calibrated_models = {}
 calibrated_metrics = []
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     print(f"\n{'='*100}")
     print(f"CALIBRATING MODEL FOR {horizon} HORIZON")
     print(f"{'='*100}")
@@ -446,7 +464,7 @@ print("✓ Saved: outputs/calibration/calibration_metrics_comparison.png")
 plt.close()
 
 # 3. Reliability Diagrams (Detailed)
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     y_test = df_encoded.loc[test_idx, f'Target_{horizon}'].values
@@ -495,7 +513,7 @@ print("\n" + "="*100)
 print("STEP 8: GENERATING CALIBRATED PREDICTIONS")
 print("="*100)
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     print(f"\n--- {horizon} Horizon ---")
 
     # Use Isotonic calibration (typically best for tree models)
@@ -529,7 +547,9 @@ for horizon in HORIZONS:
 
     # Show top 10 high-risk
     print(f"\nTop 10 High-Risk Equipment ({horizon}):")
-    print(pred_df.head(10)[['Ekipman_ID', 'Equipment_Class', 'Risk_Score', 'Risk_Level']].to_string(index=False))
+    display_df = pred_df.head(10)[['Ekipman_ID', 'Equipment_Class', 'Risk_Score', 'Risk_Level']].copy()
+    display_df['Ekipman_ID'] = display_df['Ekipman_ID'].astype(int)
+    print(display_df.to_string(index=False))
 
 # ============================================================================
 # STEP 9: SAVE CALIBRATION RESULTS
@@ -545,7 +565,7 @@ print("✓ Saved: results/calibration_metrics.csv")
 # Calculate improvements
 improvements = []
 
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     uncal = metrics_df[(metrics_df['Horizon'] == horizon) & (metrics_df['Model'] == 'Uncalibrated')].iloc[0]
     iso = metrics_df[(metrics_df['Horizon'] == horizon) & (metrics_df['Model'] == 'Isotonic Calibrated')].iloc[0]
     platt = metrics_df[(metrics_df['Horizon'] == horizon) & (metrics_df['Model'] == 'Platt Calibrated')].iloc[0]
@@ -577,7 +597,7 @@ print("\n\n📈 Calibration Improvements:")
 print(improvements_df.to_string(index=False))
 
 print("\n\n🎯 Recommended Calibrated Models:")
-for horizon in HORIZONS:
+for horizon in CALIBRATION_HORIZONS:
     horizon_metrics = metrics_df[metrics_df['Horizon'] == horizon]
     best_model = horizon_metrics.loc[horizon_metrics['Calibration_Error'].idxmin()]
     print(f"\n{horizon} Horizon:")

@@ -1053,7 +1053,7 @@ print(f"   Percentage of total: {len(high_risk)/len(df)*100:.1f}%")
 if len(high_risk) > 0:
     print(f"\n--- Top 10 Highest Risk Equipment ---")
     for i, row in enumerate(high_risk.head(10).itertuples(), 1):
-        print(f"  {i:2d}. ID: {row.Ekipman_ID} | Class: {row.Equipment_Class_Primary} | Risk: {row.Avg_Risk_Score:.1f}")
+        print(f"  {i:2d}. ID: {int(row.Ekipman_ID)} | Class: {row.Equipment_Class_Primary} | Risk: {row.Avg_Risk_Score:.1f}")
     
     # Save high-risk report
     high_risk_path = RESULTS_DIR / 'high_risk_equipment_report.csv'
