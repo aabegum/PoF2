@@ -24,7 +24,9 @@ Methodology:
   • Risk_Category: Low (0-40), Medium (40-70), High (70-90), Critical (90-100)
 
 Input:
-- predictions/pof_multi_horizon_predictions.csv (PoF from Model 1 - Survival Analysis)
+- predictions/calibrated_predictions_12m.csv (PRIMARY: Calibrated temporal PoF)
+- predictions/pof_multi_horizon_predictions.csv (FALLBACK: Survival model PoF)
+- predictions/predictions_12m.csv (FALLBACK: Uncalibrated temporal PoF)
 - data/equipment_level_data.csv (customer impact metrics)
 - data/combined_data.xlsx (outage durations from fault records)
 
@@ -109,16 +111,20 @@ print(f"   CoF Analysis Horizons: {COF_HORIZONS}")
 print(f"   Risk Categories: DÜŞÜK/ORTA/YÜKSEK/KRİTİK")
 
 # ============================================================================
-# STEP 1: LOAD POF PREDICTIONS (MODEL 1 - SURVIVAL ANALYSIS)
+# STEP 1: LOAD POF PREDICTIONS
 # ============================================================================
 print("\n" + "="*100)
 print("STEP 1: LOADING POF PREDICTIONS")
 print("="*100)
 
-# Try to load survival analysis predictions first (Model 1)
+# Try to load predictions in priority order:
+# 1. Calibrated temporal predictions (best probability reliability)
+# 2. Survival analysis predictions (multi-horizon)
+# 3. Uncalibrated temporal predictions (fallback)
 pof_paths = [
-    PREDICTION_DIR / 'pof_multi_horizon_predictions.csv',
-    PREDICTION_DIR / 'predictions_12m.csv'  # Fallback to temporal model (Model 2)
+    PREDICTION_DIR / 'calibrated_predictions_12m.csv',  # Primary: Calibrated temporal
+    PREDICTION_DIR / 'pof_multi_horizon_predictions.csv',  # Secondary: Survival model
+    PREDICTION_DIR / 'predictions_12m.csv'  # Tertiary: Uncalibrated temporal
 ]
 
 df_pof = None
@@ -128,19 +134,21 @@ for pof_path in pof_paths:
     if Path(pof_path).exists():
         print(f"\n✓ Loading PoF predictions from: {pof_path}")
         df_pof = pd.read_csv(pof_path)
-        model_source = pof_path
+        model_source = pof_path.name
         print(f"✓ Loaded: {len(df_pof):,} equipment predictions")
+        print(f"✓ Source: {model_source}")
         break
 
 if df_pof is None:
     print("\n❌ ERROR: PoF predictions not found!")
-    print("Please run either:")
-    print("  - 09_survival_analysis.py (recommended) OR")
-    print("  - 06_model_training.py")
+    print("Please run:")
+    print("  1. 09_calibration.py (for calibrated predictions) OR")
+    print("  2. 10_survival_model.py (for survival predictions) OR")
+    print("  3. 06_temporal_pof_model.py (for uncalibrated predictions)")
     exit(1)
 
 # Identify PoF columns
-pof_cols = [col for col in df_pof.columns if 'PoF_Probability' in col or 'Failure_Probability' in col]
+pof_cols = [col for col in df_pof.columns if 'PoF_Probability' in col or 'Failure_Probability' in col or 'Calibrated_Failure_Probability' in col]
 print(f"\n✓ Found PoF columns: {pof_cols}")
 
 # Standardize column names
@@ -148,6 +156,14 @@ if 'Ekipman_Kodu' in df_pof.columns:
     df_pof.rename(columns={'Ekipman_Kodu': 'Ekipman_ID'}, inplace=True)
 elif 'Equipment_ID' in df_pof.columns:
     df_pof.rename(columns={'Equipment_ID': 'Ekipman_ID'}, inplace=True)
+
+# Handle calibrated predictions (single horizon)
+if 'Calibrated_Failure_Probability' in df_pof.columns:
+    print("\n→ Using calibrated temporal model predictions (12M horizon)")
+    # Rename to standard format for downstream processing
+    df_pof.rename(columns={'Calibrated_Failure_Probability': 'PoF_Probability_12M'}, inplace=True)
+    # Update pof_cols after rename
+    pof_cols = ['PoF_Probability_12M']
 
 # ============================================================================
 # STEP 2: LOAD EQUIPMENT DATA (CUSTOMER IMPACT METRICS)

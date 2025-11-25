@@ -1,10 +1,34 @@
 # DUAL MODELING APPROACH ANALYSIS
 **Date**: 2025-11-25
-**Status**: ✅ INVESTIGATION COMPLETE
+**Status**: ✅ INVESTIGATION COMPLETE → ✅ **ISSUE RESOLVED**
+
+> **UPDATE (2025-11-25)**: Calibration issue FIXED! Step 9 (09_calibration.py) now generates
+> predictions that are used by Step 11 (11_consequence_of_failure.py) as the PRIMARY source
+> for risk assessment. Calibrated predictions provide better probability reliability.
 
 ---
 
 ## Executive Summary
+
+The PoF2 pipeline uses TWO modeling approaches:
+1. **Temporal Models** (XGBoost/CatBoost) - Steps 6, 8, 9
+2. **Survival Model** (Cox Proportional Hazards) - Step 10
+
+**Key Finding** (ORIGINAL ANALYSIS - NOW FIXED):
+- ✅ **Temporal models ARE used** for SHAP explainability analysis (Step 8)
+- ~~❌ **Calibrated models are NEVER used** (Step 9 outputs unused)~~ → ✅ **NOW USED**
+- ~~❌ **Temporal predictions are NEVER used** for risk assessment~~ → ✅ **NOW PRIMARY SOURCE**
+- ✅ **Survival predictions** available as fallback if calibration not run
+
+**Current Status After Fix** (2025-11-25):
+- ✅ Calibrated predictions are PRIMARY source for risk assessment
+- ✅ Survival predictions are SECONDARY fallback
+- ✅ Uncalibrated temporal predictions are TERTIARY fallback
+- ✅ Better probability reliability from calibration
+
+---
+
+## Detailed Analysis
 
 The PoF2 pipeline uses TWO modeling approaches:
 1. **Temporal Models** (XGBoost/CatBoost) - Steps 5, 7, 8

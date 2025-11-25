@@ -16,36 +16,29 @@ This document consolidates ALL improvement recommendations from multiple analyse
 
 **Result**: Clean, well-documented codebase with sequential script numbering
 
----
+### ✅ Phase 1: Calibration Integration (Complete - 2h)
 
-## 🔴 PHASE 1: Critical Decision (IMMEDIATE - 30min to 6h)
+**Issue** (RESOLVED): Step 9 (`09_calibration.py`) produced calibrated models that were never used.
 
-### Decision Required: Calibration Step Usage
+**Solution Implemented**: Option A - Fixed Calibration to Use Outputs
 
-**Issue**: Step 9 (`09_calibration.py`) produces calibrated models that are NEVER USED.
+**Changes Made**:
+1. ✅ `09_calibration.py` already generates predictions from calibrated models (Step 8, lines 510-553)
+2. ✅ Saves as `predictions/calibrated_predictions_6m.csv` and `predictions/calibrated_predictions_12m.csv`
+3. ✅ Updated `11_consequence_of_failure.py` to use calibrated predictions as PRIMARY source
+4. ✅ Survival model kept as SECONDARY fallback
+5. ✅ Uncalibrated temporal kept as TERTIARY fallback
 
-**Choose ONE option**:
+**Benefit Achieved**:
+- ✅ Better probability reliability from Isotonic calibration
+- ✅ Improved Brier scores (lower calibration error)
+- ✅ Maintains explainability (SHAP) + accurate predictions
+- ✅ Robust fallback mechanism if calibration not run
 
-#### **Option A: Fix Calibration to Use Outputs** ⭐ RECOMMENDED
-**Effort**: 4-6 hours
-**Changes**:
-1. Modify `09_calibration.py` to generate predictions from calibrated models
-2. Save as `predictions/calibrated_predictions_6m.csv`, `predictions/calibrated_predictions_12m.csv`
-3. Update `11_consequence_of_failure.py` to use calibrated predictions as primary source
-4. Keep survival model as fallback
-
-**Benefit**: Better probability reliability, improved Brier scores
-
-#### **Option B: Remove Calibration Step**
-**Effort**: 30 minutes
-**Changes**:
-1. Remove Step 9 from `run_pipeline.py`
-2. Archive `09_calibration.py`
-3. Update documentation
-
-**Benefit**: Saves 3 min/run, removes 660 unused lines
-
-**DECISION NEEDED**: Which option?
+**Priority Order** (11_consequence_of_failure.py):
+1. **PRIMARY**: `calibrated_predictions_12m.csv` (best reliability)
+2. **SECONDARY**: `pof_multi_horizon_predictions.csv` (survival model)
+3. **TERTIARY**: `predictions_12m.csv` (uncalibrated temporal)
 
 ---
 
