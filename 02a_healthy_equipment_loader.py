@@ -121,6 +121,32 @@ original_count = len(df_healthy)
 print(f"✓ Loaded: {original_count:,} healthy equipment × {df_healthy.shape[1]} columns")
 
 # ============================================================================
+# STEP 1.5: MAP COLUMN NAMES (USER DATA → STANDARD NAMES)
+# ============================================================================
+print("\n[Step 1.5/7] Mapping Column Names...")
+
+# Define column mapping from user's data structure to expected structure
+COLUMN_MAPPING = {
+    'ID': 'cbs_id',                    # Equipment ID
+    'Şebeke Unsuru': 'Equipment_Class_Primary',  # Equipment type/class
+    # Keep these as-is (already correct):
+    # 'Sebekeye_Baglanma_Tarihi', 'component_voltage', 'voltage_level', etc.
+}
+
+# Apply column renaming
+columns_renamed = []
+for old_name, new_name in COLUMN_MAPPING.items():
+    if old_name in df_healthy.columns:
+        df_healthy.rename(columns={old_name: new_name}, inplace=True)
+        columns_renamed.append(f"{old_name} → {new_name}")
+        print(f"  ✓ Renamed: {old_name} → {new_name}")
+
+if columns_renamed:
+    print(f"\n✓ Renamed {len(columns_renamed)} columns to standard format")
+else:
+    print(f"  No column renaming needed (already in standard format)")
+
+# ============================================================================
 # STEP 2: VALIDATE REQUIRED COLUMNS
 # ============================================================================
 print("\n[Step 2/7] Validating Required Columns...")
