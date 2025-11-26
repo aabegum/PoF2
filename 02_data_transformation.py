@@ -1,15 +1,16 @@
 """
 ================================================================================
-SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v5.0
+SCRIPT 02: DATA TRANSFORMATION (Fault-Level → Equipment-Level) v6.0
 ================================================================================
 Turkish EDAS PoF (Probability of Failure) Prediction Pipeline
 
-PIPELINE STRATEGY: Temporal Multi-Horizon Predictions
+PIPELINE STRATEGY: Temporal Multi-Horizon Predictions + Mixed Dataset Support
 - Cutoff Date: 2024-06-25 (configurable in config.py)
 - Historical Window: All data up to cutoff date (for feature calculation)
 - Prediction Windows: 3M, 6M, 12M multi-horizon failure risk
 - Features Created: Temporal fault counts, age, MTBF (3 methods), reliability metrics
 - DATA LEAKAGE PREVENTION: All features calculated using data BEFORE cutoff date only
+- MIXED DATASET: Supports failed + healthy equipment for balanced training
 
 WHAT THIS SCRIPT DOES:
 Transforms fault-level records to equipment-level records with engineered features.
@@ -20,6 +21,16 @@ Creates comprehensive features for temporal PoF modeling including:
 - Degradation indicators - Failure acceleration detection
 - Geographic features - Spatial risk patterns (if available)
 - Customer impact ratios - Criticality scoring (if available)
+- Healthy equipment support - True negative samples for improved calibration
+
+ENHANCEMENTS in v6.0:
++ NEW: Mixed Dataset Support (failed + healthy equipment)
+  - Merges healthy equipment data if available (data/healthy_equipment_prepared.csv)
+  - Adds zero-fault features for healthy equipment
+  - Enables balanced training with true positive + negative samples
+  - Backward compatible: works without healthy data (current behavior)
++ IMPROVED: Better probability calibration from true negative learning
++ ENHANCED: Reduced false positives through balanced training
 
 ENHANCEMENTS in v5.0:
 + UPDATED: Equipment Age Calculation
@@ -101,10 +112,11 @@ pd.set_option('display.max_columns', None)
 # CUTOFF_DATE, REFERENCE_DATE, MIN_VALID_YEAR, MAX_VALID_YEAR, etc.
 
 print("\n" + "="*80)
-print("SCRIPT 02: DATA TRANSFORMATION v5.0 (Multi-Horizon PoF)")
+print("SCRIPT 02: DATA TRANSFORMATION v6.0 (Multi-Horizon PoF + Mixed Dataset)")
 print("="*80)
 print(f"Reference Date: {REFERENCE_DATE.strftime('%Y-%m-%d')} | Valid Years: {MIN_VALID_YEAR}-{MAX_VALID_YEAR}")
 print(f"Age Source: Sebekeye_Baglanma_Tarihi (Grid Connection Date)")
+print(f"Mixed Dataset: Supports failed + healthy equipment for balanced training")
 
 # ============================================================================
 # STEP 1: LOAD DATA
@@ -1255,9 +1267,111 @@ else:
     print(f"   → Consider fixing data quality issues or investigating root cause")
 
 # ============================================================================
-# STEP 12: SAVE RESULTS
+# STEP 12: MERGE WITH HEALTHY EQUIPMENT (NEW - Mixed Dataset Support)
 # ============================================================================
-print(f"\n[Step 12/12] Saving Equipment-Level Dataset...")
+print(f"\n[Step 12/13] Merging with Healthy Equipment Data...")
+
+healthy_prepared_file = DATA_DIR / 'healthy_equipment_prepared.csv'
+
+if healthy_prepared_file.exists():
+    print(f"\n✓ Loading healthy equipment from: {healthy_prepared_file}")
+    df_healthy = pd.read_csv(healthy_prepared_file)
+    print(f"✓ Loaded: {len(df_healthy):,} healthy equipment")
+
+    # Store original failed equipment count
+    failed_count = len(equipment_df)
+
+    # Ensure column compatibility
+    failed_cols = set(equipment_df.columns)
+    healthy_cols = set(df_healthy.columns)
+
+    # Add missing columns to healthy equipment (with safe defaults)
+    missing_in_healthy = failed_cols - healthy_cols
+    if missing_in_healthy:
+        print(f"\n  Adding {len(missing_in_healthy)} missing columns to healthy equipment...")
+        for col in missing_in_healthy:
+            # Set safe defaults based on column type
+            if 'Fault_Count' in col or '_Sayisi' in col:
+                df_healthy[col] = 0  # Zero faults
+            elif 'MTBF' in col or 'Hazard' in col:
+                df_healthy[col] = np.nan  # Cannot calculate without failures
+            elif 'Flag' in col or 'Is_' in col:
+                df_healthy[col] = 0  # No flags for healthy equipment
+            elif col in ['Has_Failure_History', 'Total_Faults']:
+                df_healthy[col] = 0  # Explicitly zero
+            elif col == 'Data_Source':
+                df_healthy[col] = 'Healthy_Equipment'
+            else:
+                df_healthy[col] = np.nan  # Default to NaN for unknown columns
+        print(f"  ✓ Defaults applied")
+
+    # Add missing columns to failed equipment (unlikely but handle gracefully)
+    missing_in_failed = healthy_cols - failed_cols
+    if missing_in_failed:
+        print(f"\n  Adding {len(missing_in_failed)} new columns from healthy equipment...")
+        for col in missing_in_failed:
+            equipment_df[col] = np.nan
+        print(f"  ✓ Columns aligned")
+
+    # Reorder columns to match (use failed equipment order as primary)
+    column_order = list(equipment_df.columns)
+    df_healthy = df_healthy[column_order]
+
+    # Mark failed equipment source if not already marked
+    if 'Data_Source' not in equipment_df.columns:
+        equipment_df['Data_Source'] = 'Failed_Equipment'
+    elif equipment_df['Data_Source'].isna().any():
+        equipment_df.loc[equipment_df['Data_Source'].isna(), 'Data_Source'] = 'Failed_Equipment'
+
+    # Add Has_Failure_History flag if missing
+    if 'Has_Failure_History' not in equipment_df.columns:
+        equipment_df['Has_Failure_History'] = 1  # All failed equipment have history
+
+    # Merge datasets (vertical concatenation)
+    print(f"\n  Merging failed + healthy equipment...")
+    equipment_df_combined = pd.concat([equipment_df, df_healthy], ignore_index=True)
+
+    print(f"\n✅ MERGED DATASET CREATED:")
+    print(f"  • Failed equipment: {failed_count:,} ({failed_count/len(equipment_df_combined)*100:.1f}%)")
+    print(f"  • Healthy equipment: {len(df_healthy):,} ({len(df_healthy)/len(equipment_df_combined)*100:.1f}%)")
+    print(f"  • Total equipment: {len(equipment_df_combined):,}")
+    print(f"  • Class balance (failed:healthy): {failed_count/len(df_healthy):.2f}:1")
+
+    # Show equipment type distribution comparison
+    print(f"\n  Equipment Type Distribution:")
+    failed_types = equipment_df['Equipment_Class_Primary'].value_counts().head(5)
+    healthy_types = df_healthy['Equipment_Class_Primary'].value_counts().head(5)
+
+    print(f"\n  Top 5 Failed Equipment Types:")
+    for eq_type, count in failed_types.items():
+        print(f"    {eq_type:20s}: {count:4,}")
+
+    print(f"\n  Top 5 Healthy Equipment Types:")
+    for eq_type, count in healthy_types.items():
+        print(f"    {eq_type:20s}: {count:4,}")
+
+    # Use combined dataset for output
+    equipment_df = equipment_df_combined
+
+    print(f"\n✓ Pipeline will now train on MIXED dataset (failed + healthy equipment)")
+    print(f"  Expected benefits:")
+    print(f"    • Better probability calibration (true negatives learned)")
+    print(f"    • Reduced false positives (fewer unnecessary inspections)")
+    print(f"    • More realistic risk scores (wider distribution)")
+    print(f"    • Improved model generalization")
+
+else:
+    print(f"\n⚠️  Healthy equipment file not found at {healthy_prepared_file}")
+    print(f"  Pipeline will continue with ONLY failed equipment (current behavior)")
+    print(f"  To enable mixed dataset training:")
+    print(f"    1. Provide healthy equipment data: data/healthy_equipment.xlsx")
+    print(f"    2. Run: python 02a_healthy_equipment_loader.py")
+    print(f"    3. Re-run this script")
+
+# ============================================================================
+# STEP 13: SAVE RESULTS
+# ============================================================================
+print(f"\n[Step 13/13] Saving Equipment-Level Dataset...")
 
 equipment_df.to_csv(EQUIPMENT_LEVEL_FILE, index=False, encoding='utf-8-sig')
 

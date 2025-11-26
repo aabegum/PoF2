@@ -51,6 +51,36 @@ MIN_FEATURES = 20  # After feature selection/VIF removal (flexible for varying i
 MAX_FEATURES = 40  # Should have ~30 optimal features (flexible range)
 
 # ============================================================================
+# EXPECTED LIFE STANDARDS
+# ============================================================================
+
+# Tier 1: Industry Standards (Most Common Equipment)
+# Based on Turkish EDAŞ standards and international IEEE/IEC guidelines
+EXPECTED_LIFE_STANDARDS = {
+    'Ayırıcı': 25,           # Disconnectors
+    'Kesici': 30,            # Circuit breakers
+    'OG/AG Trafo': 30,       # Transformers (Medium/Low voltage)
+    'AG Anahtar': 20,        # LV Switches
+    'AG Pano Box': 25,       # LV Panel Boxes
+    'Bina': 40,              # Buildings/Substations
+    'Rekortman': 20,         # Reclosers
+    'OG Hat': 35,            # MV Lines
+    'AG Hat': 30,            # LV Lines
+    'AG Pano': 25,           # LV Panels
+    'Trafo Bina Tip': 30,    # Building-type transformers
+}
+
+# Tier 2: Voltage-Based Defaults (If exact class not found)
+VOLTAGE_BASED_LIFE = {
+    'OG': 30,  # Medium voltage equipment
+    'AG': 25,  # Low voltage equipment
+    'YG': 35,  # High voltage equipment
+}
+
+# Tier 3: Overall Conservative Default
+DEFAULT_LIFE = 25
+
+# ============================================================================
 # FILE PATHS
 # ============================================================================
 
@@ -60,9 +90,11 @@ OUTPUT_DIR = Path('outputs')
 MODEL_DIR = Path('models')
 PREDICTION_DIR = Path('predictions')
 RESULTS_DIR = Path('results')
+LOG_DIR = Path('logs')
 
 # Input files
 INPUT_FILE = DATA_DIR / 'combined_data_son.xlsx'
+HEALTHY_EQUIPMENT_FILE = DATA_DIR / 'healthy_equipment.xlsx'  # NEW: Healthy equipment data
 
 # Intermediate files
 EQUIPMENT_LEVEL_FILE = DATA_DIR / 'equipment_level_data.csv'

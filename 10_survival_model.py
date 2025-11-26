@@ -1,29 +1,44 @@
 """
 SURVIVAL ANALYSIS - TEMPORAL POF PREDICTION
-Turkish EDAŞ PoF Prediction Project
+Turkish EDAŞ PoF Prediction Project (v2.0 - Mixed Dataset Support)
 
 Purpose:
-- Train survival models (Cox PH + Random Survival Forest)
-- Predict TEMPORAL failure probabilities (3/12/24 months)
+- Train survival models (Cox PH + Kaplan-Meier)
+- Predict TEMPORAL failure probabilities (3/6/12/24 months)
+- Support MIXED DATASET (failed + healthy equipment)
 - Generate multi-horizon predictions with DIFFERENT probabilities per horizon
 - Create category-level aggregations and outlier detection
 - Output Turkish risk categories (DÜŞÜK/ORTA/YÜKSEK)
+
+Changes in v2.0 (MIXED DATASET SUPPORT):
+- NEW: Adds healthy equipment as RIGHT-CENSORED observations
+- IMPROVED: Better hazard rate estimation from true negative samples
+- ENHANCED: Realistic survival curves that account for non-failing equipment
+- COMPATIBLE: Backward compatible with failed-only datasets
+- BENEFIT: More accurate failure probability estimates
+
+Survival Analysis Approach:
+- Failed equipment: Time-to-event = days between consecutive failures
+- Healthy equipment: Right-censored at cutoff date (event_occurred = 0)
+- Cox PH model learns hazard rates for both failing and non-failing equipment
+- Kaplan-Meier curves show realistic survival patterns by equipment class
 
 This solves the "identical 6M/12M predictions" problem by using survival analysis
 which naturally outputs different probabilities for different time horizons.
 
 Input:
-- data/features_selected_clean.csv (non-leaky features)
+- data/features_selected_clean.csv (non-leaky features, may include healthy)
 - data/combined_data.xlsx (fault-level data with timestamps)
 
 Output:
-- predictions/pof_multi_horizon_predictions.csv (3/12/24 month predictions)
+- predictions/pof_multi_horizon_predictions.csv (3/6/12/24 month predictions)
 - results/pof_category_aggregation.csv (category-level statistics)
 - results/pof_outlier_analysis.csv (outlier detection)
 - outputs/survival_analysis/survival_curves_by_class.png (Kaplan-Meier curves)
 
 Author: Data Analytics Team
 Date: 2025
+Version: 2.0
 """
 
 import pandas as pd
@@ -237,15 +252,101 @@ for equipment_id in df_faults[equip_id_col].unique():
 
 df_survival = pd.DataFrame(survival_records)
 
-print(f"✓ Created {len(df_survival):,} survival observations")
+print(f"✓ Created {len(df_survival):,} survival observations from fault data")
 print(f"  Events (failures observed): {df_survival['Event_Occurred'].sum():,} ({df_survival['Event_Occurred'].sum()/len(df_survival)*100:.1f}%)")
 print(f"  Censored (no failure observed): {(df_survival['Event_Occurred'] == 0).sum():,} ({(df_survival['Event_Occurred'] == 0).sum()/len(df_survival)*100:.1f}%)")
+
+# ============================================================================
+# ADD HEALTHY EQUIPMENT AS RIGHT-CENSORED OBSERVATIONS (NEW - Mixed Dataset)
+# ============================================================================
+print("\n--- Adding Healthy Equipment as Right-Censored Observations ---")
+
+# Identify healthy equipment (equipment not in fault data)
+equipment_with_faults = set(df_faults[equip_id_col].unique())
+all_equipment_in_features = set(df_features['Ekipman_ID'].unique())
+healthy_equipment_ids = all_equipment_in_features - equipment_with_faults
+
+print(f"\n  Equipment in fault data: {len(equipment_with_faults):,}")
+print(f"  Equipment in feature data: {len(all_equipment_in_features):,}")
+print(f"  Healthy equipment (no faults): {len(healthy_equipment_ids):,}")
+
+if len(healthy_equipment_ids) > 0:
+    print(f"\n  ✓ Adding {len(healthy_equipment_ids):,} healthy equipment as censored observations...")
+
+    # Add censored observations for healthy equipment
+    healthy_records = []
+
+    for equip_id in healthy_equipment_ids:
+        # Get equipment data
+        equip_data = df_features[df_features['Ekipman_ID'] == equip_id]
+
+        if len(equip_data) == 0:
+            continue
+
+        equip_data = equip_data.iloc[0]
+
+        # Calculate time-to-event as equipment age (from installation to cutoff date)
+        # Use equipment age if available, otherwise use a default observation period
+        if 'Ekipman_Yaşı_Gün' in equip_data and pd.notna(equip_data['Ekipman_Yaşı_Gün']):
+            time_to_event = int(equip_data['Ekipman_Yaşı_Gün'])
+            observation_date = REFERENCE_DATE - pd.Timedelta(days=time_to_event)
+        elif 'Ekipman_Yaşı_Yıl' in equip_data and pd.notna(equip_data['Ekipman_Yaşı_Yıl']):
+            time_to_event = int(equip_data['Ekipman_Yaşı_Yıl'] * 365.25)
+            observation_date = REFERENCE_DATE - pd.Timedelta(days=time_to_event)
+        else:
+            # Default: assume 5 years of observation
+            time_to_event = 1825  # 5 years
+            observation_date = REFERENCE_DATE - pd.Timedelta(days=time_to_event)
+
+        # Ensure time_to_event is positive
+        if time_to_event > 0:
+            healthy_records.append({
+                'Ekipman_ID': equip_id,
+                'Observation_Date': observation_date,
+                'Time_To_Event': time_to_event,
+                'Event_Occurred': 0,  # Censored (no failure observed)
+                'Failure_Number': 0   # Healthy equipment
+            })
+
+    # Add healthy equipment to survival data
+    if healthy_records:
+        df_healthy_survival = pd.DataFrame(healthy_records)
+        df_survival = pd.concat([df_survival, df_healthy_survival], ignore_index=True)
+
+        print(f"  ✓ Added {len(healthy_records):,} healthy equipment observations")
+    else:
+        print(f"  ⚠️  No valid healthy equipment observations created (missing age data)")
+else:
+    print(f"\n  ⚠️  No healthy equipment detected in dataset")
+    print(f"     All equipment in feature data have fault records")
+
+# Final statistics after adding healthy equipment
+print(f"\n✓ FINAL SURVIVAL DATASET:")
+print(f"  Total observations: {len(df_survival):,}")
+print(f"  Events (failures observed): {df_survival['Event_Occurred'].sum():,} ({df_survival['Event_Occurred'].sum()/len(df_survival)*100:.1f}%)")
+print(f"  Censored (no failure yet): {(df_survival['Event_Occurred'] == 0).sum():,} ({(df_survival['Event_Occurred'] == 0).sum()/len(df_survival)*100:.1f}%)")
+print(f"  Censored rate: {(df_survival['Event_Occurred'] == 0).sum()/len(df_survival)*100:.1f}%")
 
 print(f"\n  Time-to-event statistics:")
 print(f"    Mean: {df_survival['Time_To_Event'].mean():.0f} days")
 print(f"    Median: {df_survival['Time_To_Event'].median():.0f} days")
 print(f"    Min: {df_survival['Time_To_Event'].min():.0f} days")
 print(f"    Max: {df_survival['Time_To_Event'].max():.0f} days")
+
+# Show breakdown by failure vs healthy
+if len(healthy_equipment_ids) > 0:
+    failed_obs = df_survival[df_survival['Failure_Number'] > 0]
+    healthy_obs = df_survival[df_survival['Failure_Number'] == 0]
+
+    print(f"\n  Observation breakdown:")
+    print(f"    Failed equipment observations: {len(failed_obs):,} ({len(failed_obs)/len(df_survival)*100:.1f}%)")
+    print(f"    Healthy equipment observations: {len(healthy_obs):,} ({len(healthy_obs)/len(df_survival)*100:.1f}%)")
+
+    print(f"\n  ✅ MIXED DATASET BENEFITS:")
+    print(f"    • TRUE NEGATIVE LEARNING: Healthy equipment provide censored observations")
+    print(f"    • BETTER HAZARD ESTIMATION: Baseline hazard includes non-failing equipment")
+    print(f"    • REALISTIC SURVIVAL CURVES: Accounts for equipment that never fail")
+    print(f"    • IMPROVED PREDICTIONS: More accurate failure probability estimates")
 
 # ============================================================================
 # STEP 3: MERGE WITH FEATURES

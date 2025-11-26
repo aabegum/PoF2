@@ -67,9 +67,23 @@ try:
         # Equipment with 0 faults
         zero_faults = (fault_counts == 0).sum()
         if zero_faults > 0:
-            print(f"\n  [!] PROBLEM: {zero_faults:,} equipment have ZERO faults!")
-            print(f"     This explains the high equipment count (4,290)")
-            print(f"     Equipment file should only contain equipment WITH faults")
+            # Check if this is a mixed dataset (healthy + failed equipment)
+            if 'Is_Healthy' in equip.columns:
+                healthy_count = equip['Is_Healthy'].sum() if 'Is_Healthy' in equip.columns else 0
+                zero_and_healthy = ((fault_counts == 0) & (equip['Is_Healthy'] == 1)).sum()
+                zero_not_healthy = ((fault_counts == 0) & (equip['Is_Healthy'] == 0)).sum()
+
+                print(f"\n  ✓ MIXED DATASET DETECTED:")
+                print(f"     Equipment with 0 faults: {zero_faults:,}")
+                print(f"       - Healthy equipment (expected): {zero_and_healthy:,}")
+                if zero_not_healthy > 0:
+                    print(f"       - [!] Non-healthy with 0 faults (issue): {zero_not_healthy:,}")
+                print(f"     Dataset includes both failed and healthy equipment for balanced training")
+            else:
+                print(f"\n  [!] POTENTIAL ISSUE: {zero_faults:,} equipment have ZERO faults!")
+                print(f"     This may indicate:")
+                print(f"       - Mixed dataset (healthy equipment included) - check if Is_Healthy flag exists")
+                print(f"       - Data quality issue (equipment without fault history)")
     else:
         print("  [X] Column 'Toplam_Arıza_Sayisi_Lifetime' not found!")
 

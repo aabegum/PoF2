@@ -1,20 +1,27 @@
 """
-POF2 PIPELINE RUNNER WITH LOGGING v2.0
+POF2 PIPELINE RUNNER WITH LOGGING v3.0
 Turkish EDAŞ Equipment Failure Prediction Pipeline
 
 This script runs the entire production-ready PoF2 pipeline and captures all outputs.
 
-PIPELINE FLOW (10 STEPS):
-    1. Data Profiling         → Validate data quality and temporal coverage
-    2. Data Transformation    → Transform fault-level to equipment-level
-    3. Feature Engineering    → Create optimal feature set
-    4. Feature Selection      → Leakage removal + VIF reduction
-    5. Temporal PoF Model     → XGBoost/CatBoost multi-horizon predictions
-    6. Chronic Classifier     → Identify failure-prone equipment
-    7. Model Explainability   → SHAP feature importance
-    8. Probability Calibration → Calibrate risk estimates
-    9. Cox Survival Model     → Multi-horizon survival analysis
-   10. Risk Assessment        → PoF × CoF → CAPEX priority list
+PIPELINE FLOW (12 STEPS):
+    1. Data Profiling          → Validate data quality and temporal coverage
+   2a. Healthy Equipment Loader → Load healthy equipment data (OPTIONAL - for balanced training)
+    2. Data Transformation     → Transform fault-level to equipment-level + merge healthy
+    3. Feature Engineering     → Create optimal feature set
+    4. Feature Selection       → Leakage removal + VIF reduction
+    5. Equipment ID Audit      → Verify ID consolidation (optional)
+    6. Temporal PoF Model      → XGBoost/CatBoost multi-horizon predictions (mixed dataset)
+    7. Chronic Classifier      → Identify failure-prone equipment (failed only)
+    8. Model Explainability    → SHAP feature importance
+    9. Probability Calibration → Calibrate risk estimates
+   10. Cox Survival Model      → Multi-horizon survival analysis (censored observations)
+   11. Risk Assessment         → PoF × CoF → CAPEX priority list
+
+NEW in v3.0 (MIXED DATASET SUPPORT):
+    • Step 2a: Load healthy equipment (optional - enables balanced training)
+    • Steps 2, 6-11: Support mixed dataset (failed + healthy equipment)
+    • Benefits: Better calibration, reduced false positives, realistic risk scores
 
 OPTIONAL SCRIPTS (in analysis/ folder):
     • analysis/exploratory/04_eda.py - 16 exploratory analyses
@@ -51,10 +58,17 @@ PIPELINE_STEPS = [
         'description': 'Validate data quality and temporal coverage'
     },
     {
+        'step': '2a',
+        'name': 'Healthy Equipment Loader',
+        'script': '02a_healthy_equipment_loader.py',
+        'description': 'Load and validate healthy equipment data (OPTIONAL - enables mixed dataset)',
+        'optional': True  # Optional - only run if healthy_equipment.xlsx exists
+    },
+    {
         'step': 2,
         'name': 'Data Transformation',
         'script': '02_data_transformation.py',
-        'description': 'Transform fault-level to equipment-level'
+        'description': 'Transform fault-level to equipment-level + merge with healthy data'
     },
     {
         'step': 3,
@@ -65,50 +79,50 @@ PIPELINE_STEPS = [
     {
         'step': 4,
         'name': 'Feature Selection',
-        'script': '05_feature_selection.py',
+        'script': '04_feature_selection.py',
         'description': 'Leakage removal + VIF analysis'
     },
     {
-        'step': '4b',
+        'step': 5,
         'name': 'Equipment ID Audit',
-        'script': '10_equipment_id_audit.py',
+        'script': '05_equipment_id_audit.py',
         'description': 'Verify cbs_id ↔ Ekipman_ID consistency (CRITICAL)',
         'optional': True  # Optional diagnostic - will warn but not fail pipeline
     },
     {
-        'step': 5,
+        'step': 6,
         'name': 'Temporal PoF Model',
         'script': '06_temporal_pof_model.py',
-        'description': 'Train temporal PoF predictor (3M/6M/12M windows)'
-    },
-    {
-        'step': 6,
-        'name': 'Chronic Classifier',
-        'script': '06_chronic_classifier.py',
-        'description': 'Train chronic repeater classifier (90-day recurrence)'
+        'description': 'Train temporal PoF predictor (3M/6M/12M) - supports mixed dataset'
     },
     {
         'step': 7,
-        'name': 'Model Explainability',
-        'script': '07_explainability.py',
-        'description': 'SHAP analysis and feature importance'
+        'name': 'Chronic Classifier',
+        'script': '07_chronic_classifier.py',
+        'description': 'Train chronic repeater classifier (90-day recurrence) - failed equipment only'
     },
     {
         'step': 8,
-        'name': 'Probability Calibration',
-        'script': '08_calibration.py',
-        'description': 'Calibrate model probabilities for better risk estimates'
+        'name': 'Model Explainability',
+        'script': '08_explainability.py',
+        'description': 'SHAP analysis and feature importance'
     },
     {
         'step': 9,
-        'name': 'Cox Survival Model',
-        'script': '06_survival_model.py',
-        'description': 'Cox PH + Kaplan-Meier (multi-horizon: 3M/6M/12M/24M)'
+        'name': 'Probability Calibration',
+        'script': '09_calibration.py',
+        'description': 'Calibrate model probabilities - improved from mixed dataset'
     },
     {
         'step': 10,
+        'name': 'Cox Survival Model',
+        'script': '10_survival_model.py',
+        'description': 'Cox PH + Kaplan-Meier (multi-horizon) - adds censored observations'
+    },
+    {
+        'step': 11,
         'name': 'Risk Assessment',
-        'script': '10_consequence_of_failure.py',
+        'script': '11_consequence_of_failure.py',
         'description': 'Calculate PoF × CoF = Risk, generate CAPEX priority list'
     }
 ]

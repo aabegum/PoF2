@@ -49,9 +49,11 @@ for horizon in horizons:
     print(f"{'='*80}")
 
     # Load model
-    model_path = f'models/xgboost_{horizon.lower()}.pkl'
+    model_path = f'models/temporal_pof_{horizon}.pkl'
     if not Path(model_path).exists():
         print(f"⚠️  Model not found: {model_path}")
+        print(f"   Expected at: {model_path}")
+        print(f"   Run 06_temporal_pof_model.py to train models first")
         continue
 
     with open(model_path, 'rb') as f:
