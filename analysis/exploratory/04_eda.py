@@ -125,6 +125,54 @@ log_print(f"  Numeric features: {len(numeric_cols)}")
 log_print(f"  Categorical features: {len(categorical_cols)}")
 log_print(f"  Date features: {len(date_cols)}")
 
+# Check for healthy equipment flag (mixed dataset)
+if 'Is_Healthy' in df.columns:
+    healthy_count = df['Is_Healthy'].sum()
+    failed_count = len(df) - healthy_count
+    healthy_pct = healthy_count / len(df) * 100
+    failed_pct = 100 - healthy_pct
+
+    log_print(f"\n--- Mixed Dataset Composition (Healthy + Failed Equipment) ---")
+    log_print(f"  ✓ Mixed dataset detected (Is_Healthy flag found)")
+    log_print(f"  Failed equipment: {failed_count:,} ({failed_pct:.1f}%)")
+    log_print(f"  Healthy equipment: {healthy_count:,} ({healthy_pct:.1f}%)")
+    log_print(f"  Ratio (Failed:Healthy): 1:{healthy_count/failed_count:.2f}")
+    log_print(f"  Benefits: Balanced training, better calibration, reduced false positives")
+
+    # Visualize mixed dataset composition
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Pie chart
+    ax = axes[0]
+    colors_health = ['#e74c3c', '#2ecc71']
+    labels_health = ['Failed Equipment', 'Healthy Equipment']
+    sizes = [failed_count, healthy_count]
+    explode = (0.05, 0)
+    ax.pie(sizes, explode=explode, labels=labels_health, colors=colors_health,
+           autopct='%1.1f%%', startangle=90, textprops={'fontsize': 11, 'fontweight': 'bold'})
+    ax.set_title('Mixed Dataset Composition', fontsize=13, fontweight='bold')
+
+    # Bar chart
+    ax = axes[1]
+    ax.bar(['Failed', 'Healthy'], sizes, color=colors_health, alpha=0.7, edgecolor='black', width=0.6)
+    ax.set_ylabel('Equipment Count', fontsize=11)
+    ax.set_title('Equipment Type Distribution', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    for i, val in enumerate(sizes):
+        pct = val / len(df) * 100
+        ax.text(i, val + max(sizes)*0.02, f'{val:,}\n({pct:.1f}%)',
+               ha='center', va='bottom', fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig('outputs/eda/00_mixed_dataset_composition.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    log_print("\n✓ Saved: outputs/eda/00_mixed_dataset_composition.png")
+
+else:
+    log_print(f"\n--- Single Dataset (Failed Equipment Only) ---")
+    log_print(f"  Dataset contains only equipment with failure history")
+    log_print(f"  To enable mixed dataset training, run: 02a_healthy_equipment_loader.py")
+
 # Missing values analysis
 log_print(f"\n--- Missing Values Analysis ---")
 missing = df.isnull().sum()
@@ -841,9 +889,10 @@ if found_any_predictions:
 if not found_any_predictions:
     log_print("\n⚠️  No prediction files found.")
     log_print("Run one of the following to generate predictions:")
-    log_print("  • 06_model_training.py (Model 2: Chronic repeater classifier)")
-    log_print("  • 09_survival_analysis.py (Model 1: Temporal PoF predictor)")
-    log_print("  • 11_consequence_of_failure.py (Risk = PoF × CoF)")
+    log_print("  • 06_temporal_pof_model.py (Temporal PoF predictor - 3M/6M/12M)")
+    log_print("  • 07_chronic_classifier.py (Chronic repeater classifier - 90-day recurrence)")
+    log_print("  • 10_survival_model.py (Cox PH survival analysis - multi-horizon)")
+    log_print("  • 11_consequence_of_failure.py (Risk assessment = PoF × CoF)")
 
 # ============================================================================
 # STEP 11: VOLTAGE-LEVEL ANALYSIS (NEW - From Step 9B)

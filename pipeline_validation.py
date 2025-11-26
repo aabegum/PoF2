@@ -56,6 +56,15 @@ STEP_VALIDATIONS = {
         'outputs': [],  # Profiling doesn't create files, just validates
         'checks': []
     },
+    '2a': {
+        'name': 'Healthy Equipment Loader',
+        'outputs': [Path('data/healthy_equipment_prepared.csv')],
+        'checks': [
+            {'file': Path('data/healthy_equipment_prepared.csv'), 'min_rows': 100,  # At least 100 healthy equipment
+             'required_columns': ['Ekipman_ID', 'Equipment_Class_Primary', 'Ekipman_Yaşı_Yıl', 'Beklenen_Ömür_Yıl']}
+        ],
+        'optional': True  # Optional - only validates if file exists
+    },
     2: {
         'name': 'Data Transformation',
         'outputs': [EQUIPMENT_LEVEL_FILE],
@@ -83,6 +92,12 @@ STEP_VALIDATIONS = {
         ]
     },
     5: {
+        'name': 'Equipment ID Audit',
+        'outputs': [],  # Optional diagnostic - creates reports but no required outputs
+        'checks': [],
+        'optional': True  # Optional diagnostic step
+    },
+    6: {
         'name': 'Temporal PoF Model',
         'outputs': [
             PREDICTION_DIR / 'predictions_3m.csv',
@@ -98,33 +113,33 @@ STEP_VALIDATIONS = {
              'required_columns': ['Ekipman_ID', 'PoF_Probability', 'Risk_Class']}
         ]
     },
-    6: {
+    7: {
         'name': 'Chronic Classifier',
         'outputs': [PREDICTION_DIR / 'chronic_repeaters.csv'],
         'checks': [
-            {'file': PREDICTION_DIR / 'chronic_repeaters.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
+            {'file': PREDICTION_DIR / 'chronic_repeaters.csv', 'min_rows': 100,  # Expects fewer than total (failed only)
              'required_columns': ['Ekipman_ID', 'Chronic_Probability', 'Chronic_Class']}
         ]
     },
-    7: {
+    8: {
         'name': 'Model Explainability',
         'outputs': [],  # Creates visualizations, not CSV files
         'checks': []
     },
-    8: {
+    9: {
         'name': 'Probability Calibration',
         'outputs': [],  # Updates models in place
         'checks': []
     },
-    9: {
-        'name': 'Survival Analysis',
+    10: {
+        'name': 'Cox Survival Model',
         'outputs': [PREDICTION_DIR / 'pof_multi_horizon_predictions.csv'],
         'checks': [
             {'file': PREDICTION_DIR / 'pof_multi_horizon_predictions.csv', 'min_rows': MIN_EQUIPMENT_RECORDS,
              'required_columns': ['Ekipman_ID'] + [f'PoF_Probability_{h}' for h in HORIZONS.keys()]}
         ]
     },
-    10: {
+    11: {
         'name': 'Risk Assessment',
         'outputs': [
             RESULTS_DIR / 'risk_assessment_3M.csv',
@@ -236,7 +251,7 @@ def validate_step_output(step: int, check_files: bool = True, verbose: bool = Tr
         ValidationError: If validation fails
     """
     if step not in STEP_VALIDATIONS:
-        raise ValueError(f"Invalid step number: {step}. Must be 1-10.")
+        raise ValueError(f"Invalid step number: {step}. Must be 1, '2a', 2-11.")
 
     validation = STEP_VALIDATIONS[step]
     results = {
@@ -250,6 +265,9 @@ def validate_step_output(step: int, check_files: bool = True, verbose: bool = Tr
     if verbose:
         print(f"\n🔍 Validating Step {step}: {validation['name']}...")
 
+    # Check if step is optional
+    is_optional = validation.get('optional', False)
+
     # Validate output files exist
     for output_file in validation['outputs']:
         try:
@@ -258,7 +276,12 @@ def validate_step_output(step: int, check_files: bool = True, verbose: bool = Tr
             if verbose:
                 print(f"  ✓ File exists: {output_file.name}")
         except ValidationError as e:
-            raise ValidationError(f"Step {step} validation failed: {e}")
+            if is_optional:
+                results['warnings'].append(f"Optional step - file not found: {output_file.name}")
+                if verbose:
+                    print(f"  ⚠️  Optional file not found: {output_file.name} (skipping)")
+            else:
+                raise ValidationError(f"Step {step} validation failed: {e}")
 
     # Perform data checks if requested
     if check_files:
@@ -309,18 +332,22 @@ def validate_step_output(step: int, check_files: bool = True, verbose: bool = Tr
     return results
 
 
-def validate_pipeline_integrity(steps: List[int] = list(range(1, 11)),
+def validate_pipeline_integrity(steps: List = None,
                                 verbose: bool = True) -> Dict:
     """
     Validate integrity of entire pipeline or specific steps.
 
     Args:
-        steps: List of step numbers to validate (default: all steps)
+        steps: List of step numbers to validate (default: all steps 1-11 + 2a)
         verbose: Print validation progress
 
     Returns:
         Dict with overall validation results
     """
+    # Default to all pipeline steps if not specified
+    if steps is None:
+        steps = [1, '2a', 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
     results = {
         'total_steps': len(steps),
         'passed': 0,
