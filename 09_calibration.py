@@ -414,10 +414,14 @@ print("\n" + "="*100)
 print("STEP 7: VISUALIZING CALIBRATION CURVES")
 print("="*100)
 
-# 1. Calibration curves for all horizons (Before vs After)
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+# 1. Calibration curves for calibrated horizons (Before vs After)
+fig, axes = plt.subplots(1, len(CALIBRATION_HORIZONS), figsize=(9*len(CALIBRATION_HORIZONS), 5))
 
-for idx, horizon in enumerate(HORIZONS):
+# Handle single subplot case
+if len(CALIBRATION_HORIZONS) == 1:
+    axes = [axes]
+
+for idx, horizon in enumerate(CALIBRATION_HORIZONS):
     y_test = df_encoded.loc[test_idx, f'Target_{horizon}'].values
 
     # Uncalibrated
