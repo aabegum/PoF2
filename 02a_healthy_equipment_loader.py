@@ -91,6 +91,11 @@ OPTIONAL_COLUMNS = [
     'total_customer_count',        # Affected customers
     'urban_mv',                    # Urban MV customers
     'urban_lv',                    # Urban LV customers
+    'MARKA',                       # Brand/Manufacturer
+    'MARKA_MODEL',                 # Brand Model
+    'FIRMA',                       # Company/Manufacturer
+    'Bakım Olanlar',              # Equipment with maintenance
+    'Son Bakımdan İtibaren Süre', # Time since last maintenance
 ]
 
 print("\n" + "="*100)
@@ -397,6 +402,26 @@ print(f"  Mean age: {df_healthy['Ekipman_Yaşı_Yıl'].mean():.1f} years")
 
 if 'Beklenen_Ömür_Yıl' in df_healthy.columns:
     print(f"  Expected life range: {df_healthy['Beklenen_Ömür_Yıl'].min():.0f} - {df_healthy['Beklenen_Ömür_Yıl'].max():.0f} years")
+
+# Additional column statistics
+if 'MARKA' in df_healthy.columns:
+    print(f"  Brands: {df_healthy['MARKA'].nunique()} unique brands")
+
+if 'MARKA_MODEL' in df_healthy.columns:
+    print(f"  Models: {df_healthy['MARKA_MODEL'].nunique()} unique models")
+
+if 'FIRMA' in df_healthy.columns:
+    print(f"  Companies: {df_healthy['FIRMA'].nunique()} unique companies")
+
+if 'Bakım Olanlar' in df_healthy.columns:
+    maintenance_count = df_healthy['Bakım Olanlar'].sum() if df_healthy['Bakım Olanlar'].dtype in ['int64', 'float64'] else df_healthy['Bakım Olanlar'].notna().sum()
+    maintenance_pct = maintenance_count / len(df_healthy) * 100
+    print(f"  With maintenance history: {maintenance_count:,} ({maintenance_pct:.1f}%)")
+
+if 'Son Bakımdan İtibaren Süre' in df_healthy.columns:
+    time_data = df_healthy['Son Bakımdan İtibaren Süre'].dropna()
+    if len(time_data) > 0:
+        print(f"  Time since last maintenance: {time_data.mean():.0f} days (avg), {time_data.min():.0f}-{time_data.max():.0f} days (range)")
 
 print(f"\n✓ Data Quality:")
 print(f"  • All equipment IDs unique: {df_healthy['Ekipman_ID'].is_unique}")
