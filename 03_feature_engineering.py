@@ -990,17 +990,58 @@ removed_features = [
 for feature in removed_features:
     print(f"  ❌ {feature}")
 
+# ============================================================================
+# PHASE 1.5 FIX: STEP 11 - STANDARDIZED IMPUTATION STRATEGY
+# ============================================================================
+print("\n" + "="*100)
+print("PHASE 1.5: STANDARDIZED IMPUTATION STRATEGY")
+print("="*100)
+
+# Analyze missing data
+print("\n--- Missing Value Analysis ---")
+missing_stats = pd.DataFrame({
+    'feature': df.columns,
+    'missing_count': df.isnull().sum().values,
+    'missing_pct': (df.isnull().sum().values / len(df) * 100).round(2)
+})
+missing_stats = missing_stats[missing_stats['missing_count'] > 0].sort_values('missing_pct', ascending=False)
+
+# Initialize high_missing for use below
+high_missing = []
+
+if len(missing_stats) > 0:
+    print(f"Found {len(missing_stats)} features with missing values:\n")
+    print(missing_stats.to_string(index=False))
+
+    # Identify features with >50% missing
+    high_missing = missing_stats[missing_stats['missing_pct'] > 50]['feature'].tolist()
+
+    if high_missing:
+        print(f"\n⚠️  PHASE 1.5 WARNING: Found {len(high_missing)} features with >50% missing data:")
+        for feat in high_missing:
+            missing_pct = missing_stats[missing_stats['feature'] == feat]['missing_pct'].values[0]
+            print(f"  • {feat}: {missing_pct:.1f}% missing ({missing_stats[missing_stats['feature'] == feat]['missing_count'].values[0]:,} values)")
+        print(f"\nRecommendation: Consider excluding these features for more reliable modeling")
+        print(f"Documentation: Create imputation_strategy.csv for model reproducibility")
+else:
+    print("✓ No missing values detected after feature engineering")
+
 # Data quality check
 print("\n--- Data Quality Validation ---")
 print(f"  Missing values: {df.isnull().sum().sum():,}")
 print(f"  Duplicate rows: {df.duplicated().sum()}")
 print(f"  Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
 
+print("\n✓ Imputation Strategy:")
+print(f"  • Features with >50% missing: {len(high_missing)} (requires manual review)")
+print(f"  • Features with 0-50% missing: {len(missing_stats) - len(high_missing)} (ready for standard imputation)")
+print(f"  • Zero-missing features: {len(df.columns) - len(missing_stats)} (no action needed)")
+
 # ============================================================================
-# STEP 11: SAVE ENGINEERED FEATURES
+# STEP 12: SAVE ENGINEERED FEATURES
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 11: SAVING ENGINEERED DATASET")
+print("STEP 12: SAVING ENGINEERED DATASET")
 print("="*100)
 
 print(f"\n💾 Saving to: {FEATURES_ENGINEERED_FILE}")
