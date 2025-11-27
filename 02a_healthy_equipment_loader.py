@@ -91,6 +91,11 @@ OPTIONAL_COLUMNS = [
     'total_customer_count',        # Affected customers
     'urban_mv',                    # Urban MV customers
     'urban_lv',                    # Urban LV customers
+    'MARKA',                       # Brand/Manufacturer
+    'MARKA_MODEL',                 # Brand Model
+    'FIRMA',                       # Company/Manufacturer
+    'Bakım Olanlar',              # Equipment with maintenance
+    'Son Bakımdan İtibaren Süre', # Time since last maintenance
 ]
 
 print("\n" + "="*100)
@@ -119,6 +124,32 @@ print(f"\n✓ Loading from: {HEALTHY_EQUIPMENT_FILE}")
 df_healthy = pd.read_excel(HEALTHY_EQUIPMENT_FILE)
 original_count = len(df_healthy)
 print(f"✓ Loaded: {original_count:,} healthy equipment × {df_healthy.shape[1]} columns")
+
+# ============================================================================
+# STEP 1.5: MAP COLUMN NAMES (USER DATA → STANDARD NAMES)
+# ============================================================================
+print("\n[Step 1.5/7] Mapping Column Names...")
+
+# Define column mapping from user's data structure to expected structure
+COLUMN_MAPPING = {
+    'ID': 'cbs_id',                    # Equipment ID
+    'Şebeke Unsuru': 'Equipment_Class_Primary',  # Equipment type/class
+    # Keep these as-is (already correct):
+    # 'Sebekeye_Baglanma_Tarihi', 'component_voltage', 'voltage_level', etc.
+}
+
+# Apply column renaming
+columns_renamed = []
+for old_name, new_name in COLUMN_MAPPING.items():
+    if old_name in df_healthy.columns:
+        df_healthy.rename(columns={old_name: new_name}, inplace=True)
+        columns_renamed.append(f"{old_name} → {new_name}")
+        print(f"  ✓ Renamed: {old_name} → {new_name}")
+
+if columns_renamed:
+    print(f"\n✓ Renamed {len(columns_renamed)} columns to standard format")
+else:
+    print(f"  No column renaming needed (already in standard format)")
 
 # ============================================================================
 # STEP 2: VALIDATE REQUIRED COLUMNS
@@ -371,6 +402,26 @@ print(f"  Mean age: {df_healthy['Ekipman_Yaşı_Yıl'].mean():.1f} years")
 
 if 'Beklenen_Ömür_Yıl' in df_healthy.columns:
     print(f"  Expected life range: {df_healthy['Beklenen_Ömür_Yıl'].min():.0f} - {df_healthy['Beklenen_Ömür_Yıl'].max():.0f} years")
+
+# Additional column statistics
+if 'MARKA' in df_healthy.columns:
+    print(f"  Brands: {df_healthy['MARKA'].nunique()} unique brands")
+
+if 'MARKA_MODEL' in df_healthy.columns:
+    print(f"  Models: {df_healthy['MARKA_MODEL'].nunique()} unique models")
+
+if 'FIRMA' in df_healthy.columns:
+    print(f"  Companies: {df_healthy['FIRMA'].nunique()} unique companies")
+
+if 'Bakım Olanlar' in df_healthy.columns:
+    maintenance_count = df_healthy['Bakım Olanlar'].sum() if df_healthy['Bakım Olanlar'].dtype in ['int64', 'float64'] else df_healthy['Bakım Olanlar'].notna().sum()
+    maintenance_pct = maintenance_count / len(df_healthy) * 100
+    print(f"  With maintenance history: {maintenance_count:,} ({maintenance_pct:.1f}%)")
+
+if 'Son Bakımdan İtibaren Süre' in df_healthy.columns:
+    time_data = df_healthy['Son Bakımdan İtibaren Süre'].dropna()
+    if len(time_data) > 0:
+        print(f"  Time since last maintenance: {time_data.mean():.0f} days (avg), {time_data.min():.0f}-{time_data.max():.0f} days (range)")
 
 print(f"\n✓ Data Quality:")
 print(f"  • All equipment IDs unique: {df_healthy['Ekipman_ID'].is_unique}")

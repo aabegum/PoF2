@@ -623,7 +623,7 @@ for horizon in HORIZONS.keys():
         print(f"   Check if features contain information from the target.")
 
     # Save model
-    model_path = MODEL_DIR / f'xgboost_{horizon.lower()}.pkl'
+    model_path = MODEL_DIR / f'temporal_pof_{horizon}.pkl'
     with open(model_path, 'wb') as f:
         pickle.dump(model, f)
     print(f"\n💾 Model saved: {model_path}")

@@ -147,6 +147,20 @@ feature_columns = [col for col in df.columns
                    if col != id_column
                    and col not in categorical_features]
 
+# Add _is_healthy_flag if not present (needed for models trained on mixed dataset)
+if '_is_healthy_flag' not in df.columns:
+    # Check if Is_Healthy column exists
+    if 'Is_Healthy' in df.columns:
+        df['_is_healthy_flag'] = df['Is_Healthy']
+        print(f"\n✓ Created _is_healthy_flag from Is_Healthy column")
+    else:
+        # Assume all failed equipment (no healthy data)
+        df['_is_healthy_flag'] = 0
+        print(f"\n✓ Created _is_healthy_flag (all equipment marked as failed - no mixed dataset)")
+
+    # Add to feature columns
+    feature_columns.append('_is_healthy_flag')
+
 # Encode categorical features
 df_encoded = df.copy()
 label_encoders = {}
@@ -174,12 +188,12 @@ models = {}
 predictions = {}
 
 for horizon in HORIZONS:
-    model_path = MODEL_DIR / f'xgboost_{horizon.lower()}.pkl'
+    model_path = MODEL_DIR / f'temporal_pof_{horizon}.pkl'
 
     if Path(model_path).exists():
         with open(model_path, 'rb') as f:
             models[horizon] = pickle.load(f)
-        print(f"✓ Loaded XGBoost model: {horizon}")
+        print(f"✓ Loaded temporal PoF model: {horizon}")
 
         # Generate predictions
         pred_proba = models[horizon].predict_proba(X)[:, 1]
@@ -187,6 +201,7 @@ for horizon in HORIZONS:
 
     else:
         print(f"⚠️  Model not found: {model_path}")
+        print(f"   Expected at: {model_path}")
         print(f"   Run 06_temporal_pof_model.py first!")
         exit(1)
 
