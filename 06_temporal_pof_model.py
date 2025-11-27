@@ -272,18 +272,23 @@ all_faults['started at'] = pd.to_datetime(all_faults['started at'],
 print("✓ Loading equipment ID mapping from equipment_level_data.csv...")
 equipment_mapping = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 
-# Create ID mapping: cbs_id → Ekipman_ID
-# In Step 2, Equipment_ID_Primary is created from cbs_id (or fallback)
-# Then renamed to Ekipman_ID in final output
-if 'Ekipman_ID' in equipment_mapping.columns:
-    # Map raw faults to processed Ekipman_IDs
-    # Since Ekipman_ID = cbs_id for most equipment, we can use direct mapping
-    # But we need to verify this mapping exists in our feature data
-    valid_equipment_ids = set(df['Ekipman_ID'].unique())
-    print(f"✓ Loaded {len(valid_equipment_ids):,} valid Ekipman_IDs from feature data")
+# PHASE 1.1 FIX: Use Equipment_ID consistently (renamed from Ekipman_ID)
+# In Step 2, Equipment_ID_Primary is created from cbs_id
+# Then renamed to Equipment_ID in final output
+if 'Equipment_ID' in equipment_mapping.columns:
+    # Map raw faults to processed Equipment_IDs
+    # Equipment_ID = cbs_id for all equipment
+    # Verify this mapping exists in our feature data
+    valid_equipment_ids = set(df['Equipment_ID'].unique())
+    print(f"✓ Loaded {len(valid_equipment_ids):,} valid Equipment_IDs from feature data")
 else:
-    print("⚠️  WARNING: Ekipman_ID not found in equipment mapping!")
-    valid_equipment_ids = set()
+    # Backward compatibility: try old Ekipman_ID name if Equipment_ID not found
+    if 'Ekipman_ID' in equipment_mapping.columns:
+        valid_equipment_ids = set(df['Ekipman_ID'].unique())
+        print(f"✓ Loaded {len(valid_equipment_ids):,} valid Equipment_IDs (using legacy Ekipman_ID) from feature data")
+    else:
+        print("⚠️  ERROR: Neither Equipment_ID nor Ekipman_ID found in equipment mapping!")
+        valid_equipment_ids = set()
 
 # Define future prediction windows for ALL horizons
 FUTURE_3M_END = CUTOFF_DATE + pd.DateOffset(months=3)   # 2024-09-25
@@ -348,8 +353,10 @@ for horizon_name, horizon_days in HORIZONS.items():
     # Get equipment IDs that will fail in THIS specific window
     failed_equipment = horizon_to_faults[horizon_name]
 
+    # PHASE 1.1 FIX: Use Equipment_ID consistently (renamed from Ekipman_ID)
     # Target = 1 if equipment WILL fail in future window
-    targets[horizon_name] = df['Ekipman_ID'].isin(failed_equipment).astype(int)
+    target_col_name = 'Equipment_ID' if 'Equipment_ID' in df.columns else 'Ekipman_ID'
+    targets[horizon_name] = df[target_col_name].isin(failed_equipment).astype(int)
 
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values

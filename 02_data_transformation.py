@@ -817,8 +817,9 @@ if equipment_lost > 0:
 print("\n[Step 8/12] Renaming Columns (English→Turkish Standards)...")
 
 # Base rename dictionary (ENHANCED - includes new age columns)
+# PHASE 1.1 FIX: Use 'Equipment_ID' consistently (not Ekipman_ID) for better clarity
 rename_dict = {
-    'Equipment_ID_Primary': 'Ekipman_ID',
+    'Equipment_ID_Primary': 'Equipment_ID',  # CHANGED: Equipment_ID_Primary → Equipment_ID (was Ekipman_ID)
     'Equipment_Class_Primary_first': 'Equipment_Class_Primary',
     'Ekipman Sınıfı_first': 'Ekipman_Sınıfı',
     'Equipment_Type_first': 'Equipment_Type',
