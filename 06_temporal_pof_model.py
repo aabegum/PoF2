@@ -226,22 +226,25 @@ else:
     print(f"    → Provide data/healthy_equipment.xlsx")
     print(f"    → Run 02a_healthy_equipment_loader.py → 02_data_transformation.py")
 
-    # Check if equipment with no pre-cutoff failures should be excluded
+    # PHASE 1.4 FIX: Include ALL equipment for training (both with and without pre-cutoff failures)
+    # Previously: Excluded equipment with NO pre-cutoff failures
+    # Now: Keep all equipment - they have predictive value even without failure history
     if 'Son_Arıza_Gun_Sayisi' in df.columns:
         no_history_mask = df['Son_Arıza_Gun_Sayisi'].isna()
         no_history_count = no_history_mask.sum()
 
         if no_history_count > 0:
-            print(f"\n  ⚠️  Found {no_history_count} equipment with NO pre-cutoff failures")
-            print(f"    These had their first failure AFTER {CUTOFF_DATE.date()}")
-            print(f"    Excluding them (cannot predict without failure history)...")
+            print(f"\n  ℹ️  Found {no_history_count:,} equipment with NO pre-cutoff failures")
+            print(f"    These are truly healthy equipment (no failures before/after cutoff)")
+            print(f"    ✓ Including them in training with Target=0 (right-censored at cutoff)")
+            print(f"    ✓ This improves model calibration and handles true negatives")
 
-            # Keep only equipment with failure history
-            df = df[~no_history_mask].copy()
-            healthy_mask = healthy_mask[~no_history_mask]
+            # KEEP all equipment - healthy equipment is valuable for training
+            # Mark them as healthy for proper target assignment
+            healthy_mask[no_history_mask] = True
 
-            print(f"    ✓ Equipment for temporal PoF: {len(df):,} (excluded {no_history_count:,})")
-            print(f"    ✓ Exclusion rate: {no_history_count/(len(df)+no_history_count)*100:.1f}%")
+            print(f"    ✓ Equipment for temporal PoF: {len(df):,} (including {no_history_count:,} healthy)")
+            print(f"    ✓ Healthy equipment rate: {no_history_count/len(df)*100:.1f}%")
 
 print(f"\n✓ Dataset ready for temporal PoF modeling: {len(df):,} equipment")
 
@@ -272,18 +275,23 @@ all_faults['started at'] = pd.to_datetime(all_faults['started at'],
 print("✓ Loading equipment ID mapping from equipment_level_data.csv...")
 equipment_mapping = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 
-# Create ID mapping: cbs_id → Ekipman_ID
-# In Step 2, Equipment_ID_Primary is created from cbs_id (or fallback)
-# Then renamed to Ekipman_ID in final output
-if 'Ekipman_ID' in equipment_mapping.columns:
-    # Map raw faults to processed Ekipman_IDs
-    # Since Ekipman_ID = cbs_id for most equipment, we can use direct mapping
-    # But we need to verify this mapping exists in our feature data
-    valid_equipment_ids = set(df['Ekipman_ID'].unique())
-    print(f"✓ Loaded {len(valid_equipment_ids):,} valid Ekipman_IDs from feature data")
+# PHASE 1.1 FIX: Use Equipment_ID consistently (renamed from Ekipman_ID)
+# In Step 2, Equipment_ID_Primary is created from cbs_id
+# Then renamed to Equipment_ID in final output
+if 'Equipment_ID' in equipment_mapping.columns:
+    # Map raw faults to processed Equipment_IDs
+    # Equipment_ID = cbs_id for all equipment
+    # Verify this mapping exists in our feature data
+    valid_equipment_ids = set(df['Equipment_ID'].unique())
+    print(f"✓ Loaded {len(valid_equipment_ids):,} valid Equipment_IDs from feature data")
 else:
-    print("⚠️  WARNING: Ekipman_ID not found in equipment mapping!")
-    valid_equipment_ids = set()
+    # Backward compatibility: try old Ekipman_ID name if Equipment_ID not found
+    if 'Ekipman_ID' in equipment_mapping.columns:
+        valid_equipment_ids = set(df['Ekipman_ID'].unique())
+        print(f"✓ Loaded {len(valid_equipment_ids):,} valid Equipment_IDs (using legacy Ekipman_ID) from feature data")
+    else:
+        print("⚠️  ERROR: Neither Equipment_ID nor Ekipman_ID found in equipment mapping!")
+        valid_equipment_ids = set()
 
 # Define future prediction windows for ALL horizons
 FUTURE_3M_END = CUTOFF_DATE + pd.DateOffset(months=3)   # 2024-09-25
@@ -348,8 +356,10 @@ for horizon_name, horizon_days in HORIZONS.items():
     # Get equipment IDs that will fail in THIS specific window
     failed_equipment = horizon_to_faults[horizon_name]
 
+    # PHASE 1.1 FIX: Use Equipment_ID consistently (renamed from Ekipman_ID)
     # Target = 1 if equipment WILL fail in future window
-    targets[horizon_name] = df['Ekipman_ID'].isin(failed_equipment).astype(int)
+    target_col_name = 'Equipment_ID' if 'Equipment_ID' in df.columns else 'Ekipman_ID'
+    targets[horizon_name] = df[target_col_name].isin(failed_equipment).astype(int)
 
     # Add to main dataframe
     df[f'Target_{horizon_name}'] = targets[horizon_name].values

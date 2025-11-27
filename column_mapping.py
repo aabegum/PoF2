@@ -199,11 +199,12 @@ PROTECTED_FEATURES_TR = [
 
     # TIER 8: Interactions
     'Gecikme_Faktörü',
-    'Yaş_Tekrar_Etkileşimi',
-
-    # Target
-    'Kronik_Arıza_Bayrağı',
+    # PHASE 1.2 FIX: Removed 'Yaş_Tekrar_Etkileşimi' - Derived from target (high leakage)
+    # Turkish equivalent of 'AgeRatio_Recurrence_Interaction'
 ]
+
+# PHASE 1.2 FIX: Removed 'Kronik_Arıza_Bayrağı' from PROTECTED_FEATURES
+# Turkish equivalent of 'Tekrarlayan_Arıza_90gün_Flag' - IS the target definition itself
 
 # ============================================================================
 # LEAKAGE PATTERNS (Auto-detection rules)
@@ -222,6 +223,14 @@ LEAKAGE_PATTERNS = {
         'Hedef_', 'Target_',
         'Arıza_Olasılığı', 'PoF_Probability',
         'Risk_Sınıfı', 'Risk_Class',
+    ],
+
+    # PHASE 1.3 FIX: Added domain-specific leakage patterns
+    'target_indicators': [
+        'Tekrarlayan_Arıza',  # IS the target for chronic classifier
+        'Recurrence',         # Derived from failure recurrence patterns
+        'AgeRatio_',         # Features mixing age with failure patterns
+        'Interaction',       # Most interaction features with targets are leakage
     ],
 
     # Aggregations that may include future data
@@ -376,6 +385,11 @@ def detect_leakage_pattern(column_name):
         if pattern.lower() in col_lower:
             return (True, 'target_derived', False)
 
+    # PHASE 1.3 FIX: Check target indicator patterns (domain-specific)
+    for pattern in LEAKAGE_PATTERNS['target_indicators']:
+        if pattern.lower() in col_lower:
+            return (True, 'target_indicator', False)
+
     # Check aggregation patterns
     for pattern in LEAKAGE_PATTERNS['aggregation_leakage']:
         if pattern.lower() in col_lower:
@@ -485,11 +499,15 @@ PROTECTED_FEATURES_EN = [
 
     # TIER 8: Interactions
     'Overdue_Factor',
-    'AgeRatio_Recurrence_Interaction',
-
-    # Target
-    'Tekrarlayan_Arıza_90gün_Flag',
+    # PHASE 1.2 FIX: Removed 'AgeRatio_Recurrence_Interaction' - Derived from target (high leakage)
+    # It shows 63% feature importance in chronic classifier despite being derived from target
+    # This must be removed for model to learn actual patterns instead of memorizing target
 ]
+
+# PHASE 1.2 FIX: Removed 'Tekrarlayan_Arıza_90gün_Flag' from PROTECTED_FEATURES
+# This column IS the target definition itself - it should never be a feature
+# It must be removed from all feature sets by the feature selection pipeline
+# Having it as a protected feature prevents feature selection from removing it
 
 
 # ============================================================================

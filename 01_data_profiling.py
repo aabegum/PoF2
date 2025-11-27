@@ -18,11 +18,15 @@ Comprehensive data quality profiling of fault-level data before transformation:
 
 ENHANCEMENTS in v5.0:
 + Updated for Sebekeye_Baglanma_Tarihi (Grid Connection Date) as age source
-+ ID Strategy: cbs_id only (no fallback, no UNKNOWN generation)
-+ Equipment Type: Şebeke Unsuru only (no fallback)
++ ID Strategy: cbs_id only (no fallback, accepts 20% data loss)
++ Equipment Type: Şebeke Unsuru ONLY (domain expert confirmed as only reliable source, 100% coverage expected)
 + Dynamic input file from config (combined_data_son.xlsx)
 + Progress Indicators: [Step X/Y] for pipeline visibility
 + Flexible Date Parser: Supports mixed date formats
+
+DATA QUALITY DECISIONS (Domain Expert Review):
++ cbs_id: 79.9% coverage - Accept 20% loss, no fallback available
++ Equipment_Type/Ekipman_Sınıfı: Unreliable - Use Şebeke Unsuru instead (only reliable source)
 
 CROSS-REFERENCES:
 - Script 02: Uses validated data for equipment-level transformation
@@ -110,32 +114,32 @@ report_lines.append(f"Total Columns: {df.shape[1]}")
 # ============================================================================
 print("\n[Step 2/7] Equipment Identification Strategy...")
 
-id_columns_priority = ['cbs_id', 'id', 'Ekipman ID', 'HEPSI_ID', 'Ekipman Kodu']
-available_id_cols = [col for col in id_columns_priority if col in df.columns]
+print(f"\nEquipment ID Strategy (Domain Expert Decision):")
+print(f"  ⚠️  ONLY using cbs_id - NO FALLBACK TO OTHER COLUMNS")
+print(f"  Rationale: Other columns are not reliable per domain expertise")
 
-print(f"\nEquipment ID Priority Order:")
-for i, col in enumerate(id_columns_priority, 1):
-    if col in df.columns:
-        coverage = df[col].notna().sum()
-        pct = coverage / len(df) * 100
-        unique = df[col].nunique()
-        print(f"  {i}. {col:20s} → {pct:5.1f}% coverage ({coverage:,} records, {unique:,} unique)")
-    else:
-        print(f"  {i}. {col:20s} → NOT FOUND")
-
-# Determine best ID column
-best_id_col = None
-for col in id_columns_priority:
-    if col in df.columns and df[col].notna().sum() / len(df) > 0.5:
-        best_id_col = col
-        break
+# Domain expert decision: Use ONLY cbs_id, NO fallbacks
+best_id_col = 'cbs_id' if 'cbs_id' in df.columns else None
 
 if best_id_col:
-    print(f"\n🎯 Selected Equipment ID: '{best_id_col}'")
-    report_lines.append(f"\nPrimary Equipment ID: {best_id_col}")
-    report_lines.append(f"Coverage: {df[best_id_col].notna().sum() / len(df) * 100:.1f}%")
+    coverage = df[best_id_col].notna().sum()
+    pct = coverage / len(df) * 100
+    unique = df[best_id_col].nunique()
+
+    print(f"\n  Selected: {best_id_col}")
+    print(f"    • Coverage: {pct:.1f}% ({coverage:,} records with valid ID)")
+    print(f"    • Unique Equipment: {unique:,}")
+    print(f"    • Records WITHOUT ID: {len(df) - coverage:,} ({100-pct:.1f}%) - WILL BE DROPPED")
+    print(f"\n  ℹ️  Data Loss Strategy: Accept {100-pct:.1f}% loss due to missing cbs_id")
+    print(f"      This is acceptable per domain expertise (other ID columns unreliable)")
+
+    print(f"\n🎯 Selected Equipment ID: '{best_id_col}' (cbs_id only, no fallback)")
+    report_lines.append(f"\nPrimary Equipment ID: {best_id_col} (ONLY - no fallback)")
+    report_lines.append(f"Coverage: {pct:.1f}%")
+    report_lines.append(f"Records to be dropped (missing cbs_id): {len(df) - coverage:,} ({100-pct:.1f}%)")
 else:
-    print(f"\n❌ WARNING: No reliable equipment ID column found!")
+    print(f"\n❌ ERROR: cbs_id column not found!")
+    best_id_col = None
 
 # ============================================================================
 # 3. EQUIPMENT CLASSIFICATION STRATEGY
@@ -144,28 +148,24 @@ print("\n" + "="*100)
 print("STEP 3: EQUIPMENT CLASSIFICATION STRATEGY")
 print("="*100)
 
-class_columns_priority = ['Equipment_Type', 'Ekipman Sınıfı', 'Kesinti Ekipman Sınıfı', 'Ekipman Sınıf']
-available_class_cols = [col for col in class_columns_priority if col in df.columns]
+print(f"\nEquipment Classification Strategy (Domain Expert Decision):")
+print(f"  ⚠️  ONLY using Şebeke Unsuru - NO FALLBACK TO OTHER COLUMNS")
+print(f"  Rationale: Equipment_Type and other columns are not reliable per domain expertise")
 
-print(f"\nEquipment Class Priority Order:")
-for i, col in enumerate(class_columns_priority, 1):
-    if col in df.columns:
-        coverage = df[col].notna().sum()
-        pct = coverage / len(df) * 100
-        unique = df[col].nunique()
-        print(f"  {i}. {col:25s} → {pct:5.1f}% coverage ({coverage:,} records, {unique:,} types)")
-    else:
-        print(f"  {i}. {col:25s} → NOT FOUND")
-
-# Determine best classification column
-best_class_col = None
-for col in class_columns_priority:
-    if col in df.columns and df[col].notna().sum() / len(df) > 0.5:
-        best_class_col = col
-        break
+# Domain expert decision: Use ONLY Şebeke Unsuru, NO fallbacks
+best_class_col = 'Şebeke Unsuru' if 'Şebeke Unsuru' in df.columns else None
 
 if best_class_col:
-    print(f"\n🎯 Selected Equipment Class: '{best_class_col}'")
+    coverage = df[best_class_col].notna().sum()
+    pct = coverage / len(df) * 100
+    unique = df[best_class_col].nunique()
+
+    print(f"\n  Selected: {best_class_col}")
+    print(f"    • Coverage: {pct:.1f}% ({coverage:,} records)")
+    print(f"    • Unique Equipment Types: {unique:,}")
+    print(f"    • Records WITHOUT Classification: {len(df) - coverage:,} ({100-pct:.1f}%) - WILL BE DROPPED")
+
+    print(f"\n🎯 Selected Equipment Class: '{best_class_col}' (ONLY - no fallback)")
 
     # Show top equipment types
     print(f"\nTOP EQUIPMENT TYPES:")
@@ -220,13 +220,17 @@ if best_class_col:
             print(f"    • {str(cls)[:40]}: {count:,} ({pct:.1f}%)")
         print(f"  → Model will be optimized for these classes")
 
-    report_lines.append(f"\nPrimary Equipment Class: {best_class_col}")
+    report_lines.append(f"\nPrimary Equipment Class: {best_class_col} (ONLY - no fallback)")
     report_lines.append(f"Unique Equipment Types: {len(value_counts)}")
     report_lines.append(f"Class Imbalance: Top 2 = {top_2_pct:.1f}%, Rare classes (<10) = {len(rare_classes)}")
-    report_lines.append(f"\nEQUIPMENT TYPE DISTRIBUTION (Consolidated):")
+    report_lines.append(f"\nEQUIPMENT TYPE DISTRIBUTION (from Şebeke Unsuru):")
     report_lines.append(str(best_class_col))
     for val, count in value_counts.head(15).items():
         report_lines.append(f"{str(val):<20} {count:>6,}")
+else:
+    print(f"\n❌ ERROR: Şebeke Unsuru column not found in input file!")
+    print(f"   This is the ONLY reliable equipment classification column.")
+    print(f"   Please ensure your input file contains 'Şebeke Unsuru' column.")
 
 # ============================================================================
 # 3b. EQUIPMENT SPECIFICATIONS (OPTIONAL - Future Enhancements)
@@ -716,10 +720,10 @@ print("\n" + "="*100)
 print("STEP 10: CRITICAL NEXT STEPS")
 print("="*100)
 
-print("\n🚀 TRANSFORMATION REQUIRED:")
+print("\n🚀 TRANSFORMATION REQUIRED (Domain Expert Configuration):")
 print("\n  1. DATA TRANSFORMATION (Fault-level → Equipment-level)")
-print(f"     • Primary ID: {best_id_col if best_id_col else 'TBD'}")
-print(f"     • Primary Class: {best_class_col if best_class_col else 'TBD'}")
+print(f"     • Primary ID: {best_id_col if best_id_col else 'ERROR: NOT FOUND'} (ONLY, no fallback)")
+print(f"     • Primary Class: {best_class_col if best_class_col else 'ERROR: NOT FOUND'} (ONLY, no fallback)")
 print("     • Group by equipment ID and aggregate:")
 print("       - Arıza_Sayısı_3ay/6ay/12ay (failure counts)")
 print("       - MTBF_Gün (mean time between failures)")
@@ -787,12 +791,16 @@ print(f"   • Records: {df.shape[0]:,} fault events")
 print(f"   • Features: {df.shape[1]} columns")
 print(f"   • Quality Score: {quality_score}/10 {rating}")
 
-print(f"\n🎯 KEY COLUMNS IDENTIFIED:")
+print(f"\n🎯 KEY COLUMNS IDENTIFIED (Domain Expert Configuration):")
 if best_id_col:
-    print(f"   • Equipment ID: {best_id_col} (cbs_id only, no fallback)")
+    id_coverage = df[best_id_col].notna().sum() / len(df) * 100
+    print(f"   • Equipment ID: {best_id_col} (ONLY, no fallback)")
+    print(f"     Coverage: {id_coverage:.1f}% ({len(df) - df[best_id_col].notna().sum():.0f} records will be dropped)")
 if best_class_col:
-    print(f"   • Equipment Class: {best_class_col}")
-    print(f"   • Equipment Types: {df[best_class_col].nunique()} unique")
+    class_coverage = df[best_class_col].notna().sum() / len(df) * 100
+    print(f"   • Equipment Class: {best_class_col} (ONLY, no fallback)")
+    print(f"     Equipment Types: {df[best_class_col].nunique()} unique")
+    print(f"     Coverage: {class_coverage:.1f}%")
 print(f"   • Installation Date: Sebekeye_Baglanma_Tarihi (Grid Connection)")
 print(f"   • Fault Timestamp: started at, ended at")
 

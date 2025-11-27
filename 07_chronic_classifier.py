@@ -290,8 +290,15 @@ print("="*100)
 id_col = 'Ekipman_ID'
 target_col = 'Target_Chronic_Repeater'
 
-# Get feature columns (exclude ID, target, and the flag itself to avoid leakage)
-exclude_cols = [id_col, target_col, 'Tekrarlayan_Arıza_90gün_Flag']
+# PHASE 1.2 FIX: Exclude leakage features that correlate with target
+# - Tekrarlayan_Arıza_90gün_Flag: IS the target definition (100% correlation)
+# - AgeRatio_Recurrence_Interaction: Derived from target (63% feature importance)
+exclude_cols = [
+    id_col,
+    target_col,
+    'Tekrarlayan_Arıza_90gün_Flag',           # IS the target itself
+    'AgeRatio_Recurrence_Interaction',        # Derived from failure patterns (target leakage)
+]
 feature_cols = [col for col in df.columns if col not in exclude_cols]
 
 # Identify categorical vs numeric features
