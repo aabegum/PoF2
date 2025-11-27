@@ -13,19 +13,20 @@ All 5 critical Phase 1 fixes have been successfully implemented and committed. T
 ---
 
 ## Phase 1.1: Equipment ID Consistency ✅ COMPLETE
-**Commit**: 644ef8f
-**Impact**: Fixes 36-38% target-feature misalignment
+**Commits**: 644ef8f + 4df804f (corrected implementation)
+**Impact**: Fixes 36-38% target-feature misalignment with backward compatibility
 
 ### Changes Made:
-- **File**: `02_data_transformation.py` (line 822)
-  - Changed: `'Equipment_ID_Primary': 'Ekipman_ID'`
-  - To: `'Equipment_ID_Primary': 'Equipment_ID'`
-  - Reason: Clearer naming convention, consistent with cbs_id mapping
+- **File**: `02_data_transformation.py` (line 823)
+  - Kept: `'Equipment_ID_Primary': 'Ekipman_ID'` (unchanged from original)
+  - Reason: Many internal script calculations depend on Ekipman_ID before rename point
+  - Avoids KeyError in calculations that happen before rename
 
 - **File**: `06_temporal_pof_model.py` (lines 275-291, 358-362)
-  - Added backward compatibility for both column names
-  - Equipment_ID preferred, falls back to Ekipman_ID
+  - Added robust backward compatibility for both column names
+  - Tries Equipment_ID first, falls back to Ekipman_ID if not found
   - Handles ID column detection gracefully
+  - Comment updated explaining the strategy
 
 ### Expected Outcomes:
 - ✅ 100% target-feature alignment (currently ~64%)
@@ -211,11 +212,11 @@ Common features with high missingness (examples):
 ## Summary of All Changes
 
 ### Files Modified: 6
-1. ✅ `02_data_transformation.py` - Phase 1.1
-2. ✅ `06_temporal_pof_model.py` - Phase 1.1, 1.4
-3. ✅ `column_mapping.py` - Phase 1.2, 1.3
-4. ✅ `07_chronic_classifier.py` - Phase 1.2
-5. ✅ `03_feature_engineering.py` - Phase 1.5
+1. ✅ `02_data_transformation.py` - Phase 1.1 (backward compatibility comments)
+2. ✅ `06_temporal_pof_model.py` - Phase 1.1 (compatibility checks), 1.4 (mixed dataset)
+3. ✅ `column_mapping.py` - Phase 1.2 (protected features), 1.3 (leakage patterns)
+4. ✅ `07_chronic_classifier.py` - Phase 1.2 (feature exclusion)
+5. ✅ `03_feature_engineering.py` - Phase 1.5 (imputation analysis)
 
 ### Total Changes:
 - **Lines added**: ~120
