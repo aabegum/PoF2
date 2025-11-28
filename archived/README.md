@@ -104,6 +104,50 @@ This folder contains scripts that are NOT part of the main production pipeline (
 
 ---
 
+### 5. **check_data_availability.py** (~100 lines) - **ARCHIVED 2025-11-28**
+**Purpose**: Check if required input data files exist
+
+**Why Archived**:
+- **NEVER IMPORTED** - Not used anywhere in the codebase
+- Functionality replaced by `00_input_data_source_analysis.py` (comprehensive validation)
+- Redundant with newer, more complete validation script
+
+**When to Use**:
+- Simple file existence check before running pipeline
+- Quick validation script for automation
+
+---
+
+### 6. **diagnose_data_issues.py** (~265 lines) - **ARCHIVED 2025-11-28**
+**Purpose**: Diagnostic tool for identifying data quality issues
+
+**Why Archived**:
+- **NEVER IMPORTED** - Not used anywhere in the codebase
+- Functionality overlaps with `01_data_profiling.py` and validation framework
+- Was likely an early diagnostic tool replaced by more comprehensive scripts
+
+**When to Use**:
+- Debugging specific data quality issues
+- One-off data diagnostics
+- Historical reference for data issue patterns
+
+---
+
+### 7. **diagnostic_model_audit.py** (~218 lines) - **ARCHIVED 2025-11-28**
+**Purpose**: Audit model training process and outputs
+
+**Why Archived**:
+- **NEVER IMPORTED** - Not used anywhere in the codebase
+- Functionality covered by `pipeline_validation.py` and individual model scripts
+- Redundant with current validation framework
+
+**When to Use**:
+- Detailed model output auditing
+- Debugging model training issues
+- Historical reference for validation patterns
+
+---
+
 ## Related Scripts (Already in Analysis Folders)
 
 These scripts are also optional/diagnostic but were already organized into subfolders:
