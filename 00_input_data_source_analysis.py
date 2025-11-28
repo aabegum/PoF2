@@ -295,10 +295,10 @@ for check_name, passed, details in quality_checks:
     print(f"   {status} {check_name}{detail_str}")
 
 # ============================================================================
-# STEP 12: CHECK FOR HEALTHY EQUIPMENT DATA (Mixed Dataset Support)
+# STEP 11: CHECK FOR HEALTHY EQUIPMENT DATA (Mixed Dataset Support)
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 12: HEALTHY EQUIPMENT DATA AVAILABILITY (Mixed Dataset Support)")
+print("STEP 11: HEALTHY EQUIPMENT DATA AVAILABILITY (Mixed Dataset Support)")
 print("="*100)
 
 # Check for healthy equipment file - use config path
@@ -311,6 +311,33 @@ if HEALTHY_EQUIPMENT_FILE.exists():
     healthy_equipment_available = True
     print(f"  Status: READY for mixed dataset training (Phase 1.4)")
     print(f"  Action: Run Step 2a (02a_healthy_equipment_loader.py) before Step 2")
+
+    # Load and sample healthy equipment data
+    try:
+        print(f"\n  Loading healthy equipment data for validation...")
+        df_healthy = pd.read_excel(HEALTHY_EQUIPMENT_FILE)
+        print(f"  ✓ Loaded: {len(df_healthy):,} rows × {df_healthy.shape[1]} columns")
+
+        # Show column names
+        print(f"\n  📋 Columns ({df_healthy.shape[1]}):")
+        for i, col in enumerate(df_healthy.columns[:10], 1):
+            print(f"     {i:2d}. {col}")
+        if df_healthy.shape[1] > 10:
+            print(f"     ... and {df_healthy.shape[1] - 10} more columns")
+
+        # Show sample rows
+        print(f"\n  📖 Sample Data (first 3 rows):")
+        sample_cols = ['ID', 'Şebeke Unsuru', 'Sebekeye_Baglanma_Tarihi'] if 'ID' in df_healthy.columns else df_healthy.columns[:3]
+        for col in sample_cols:
+            if col in df_healthy.columns:
+                print(f"     {col}:")
+                for i, val in enumerate(df_healthy[col].head(3), 1):
+                    val_str = str(val)[:50]
+                    print(f"        Row {i}: {val_str}")
+
+    except Exception as e:
+        print(f"  ⚠️  Warning: Could not load healthy equipment file: {e}")
+        print(f"  → File exists but may be corrupted or invalid format")
 else:
     print(f"\n✗ No healthy equipment data found")
     print(f"  Expected: {HEALTHY_EQUIPMENT_FILE}")

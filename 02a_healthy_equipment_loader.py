@@ -46,6 +46,7 @@ from config import (
     DATA_OUTPUTS_DIR,
     INPUT_FILE,
     HEALTHY_EQUIPMENT_FILE,
+    HEALTHY_PREPARED_FILE,
     EQUIPMENT_CLASS_MAPPING
 )
 
@@ -71,7 +72,7 @@ pd.set_option('display.max_columns', None)
 # ============================================================================
 
 # Input/output paths (from config.py)
-OUTPUT_FILE = DATA_OUTPUTS_DIR / 'health_equipment_prepared.csv'
+OUTPUT_FILE = HEALTHY_PREPARED_FILE  # Shared constant for consistency with 02_data_transformation.py
 
 # Required columns
 REQUIRED_COLUMNS = [

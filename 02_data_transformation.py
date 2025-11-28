@@ -85,6 +85,7 @@ from config import (
     INPUT_FILE,
     EQUIPMENT_LEVEL_FILE,
     FEATURE_DOCS_FILE,
+    HEALTHY_PREPARED_FILE,
     EQUIPMENT_CLASS_MAPPING
 )
 
@@ -1273,7 +1274,7 @@ else:
 # ============================================================================
 print(f"\n[Step 12/13] Merging with Healthy Equipment Data...")
 
-healthy_prepared_file = DATA_DIR / 'healthy_equipment_prepared.csv'
+healthy_prepared_file = HEALTHY_PREPARED_FILE  # Shared constant from config.py
 
 if healthy_prepared_file.exists():
     print(f"\n✓ Loading healthy equipment from: {healthy_prepared_file}")

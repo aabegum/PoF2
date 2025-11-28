@@ -48,6 +48,9 @@ import time
 # Import validation module for data integrity checks
 from pipeline_validation import validate_step_output, ValidationError
 
+# Import config for healthy equipment file detection
+from config import HEALTHY_EQUIPMENT_FILE
+
 # Pipeline configuration (PRODUCTION-READY - Phase 1 Optimized)
 # NOTE: 04_eda.py is OPTIONAL - run separately for research/analysis
 # NOTE: 06b_logistic_baseline.py is OPTIONAL - baseline comparison only
@@ -177,6 +180,23 @@ def run_pipeline():
 
         # Individual log file
         log_file = log_dir / f"{script.replace('.py', '.log')}"
+
+        # Auto-detection for optional steps
+        if step_num == '2a' and step_info.get('optional', False):
+            # Check if healthy equipment file exists
+            if not HEALTHY_EQUIPMENT_FILE.exists():
+                print(f"  ⓘ  SKIPPED - Healthy equipment file not found")
+                print(f"  → Expected: {HEALTHY_EQUIPMENT_FILE}")
+                print(f"  → Pipeline will run with failed equipment only (single dataset mode)")
+                print()
+                # Log the skip
+                with open(master_log_path, 'a', encoding='utf-8') as f:
+                    f.write(f"\n{'='*100}\n")
+                    f.write(f"STEP {step_num}: {step_name}\n")
+                    f.write(f"Status: SKIPPED (healthy equipment file not found)\n")
+                    f.write(f"Expected file: {HEALTHY_EQUIPMENT_FILE}\n")
+                    f.write('='*100 + "\n\n")
+                continue  # Skip to next step
 
         # Run the script
         step_start = time.time()

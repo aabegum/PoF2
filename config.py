@@ -104,6 +104,9 @@ FEATURES_ENGINEERED_FILE = DATA_OUTPUTS_DIR / 'features_engineered.csv'
 FEATURES_REDUCED_FILE = DATA_OUTPUTS_DIR / 'features_reduced.csv'
 FEATURES_WITH_TARGETS_FILE = DATA_OUTPUTS_DIR / 'features_with_targets.csv'
 
+# Healthy equipment prepared file (output from 02a, input to 02)
+HEALTHY_PREPARED_FILE = DATA_OUTPUTS_DIR / 'health_equipment_prepared.csv'
+
 # Output files (in data/outputs/ folder)
 FEATURE_DOCS_FILE = DATA_OUTPUTS_DIR / 'feature_documentation.csv'
 FEATURE_CATALOG_FILE = DATA_OUTPUTS_DIR / 'feature_catalog.csv'
