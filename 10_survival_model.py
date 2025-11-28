@@ -687,7 +687,7 @@ print("\n--- Identifying Equipment with Unusual PoF ---")
 outlier_records = []
 
 for _, row in df_predictions.iterrows():
-    equipment_id = row['Ekipman_Kodu']
+    equipment_id = row['Ekipman_ID']
     equipment_class = row['Ekipman_Sinifi']
     pof_value = row['PoF_Probability_12M']
 
@@ -706,7 +706,7 @@ for _, row in df_predictions.iterrows():
         is_outlier = abs(deviation) > (2 * category_std) if category_std > 0 else 0
 
         outlier_records.append({
-            'Ekipman_Kodu': equipment_id,
+            'Ekipman_ID': equipment_id,
             'Ekipman_Sinifi': equipment_class,
             'PoF_Probability': pof_value,
             'Expected_PoF': expected_pof,
@@ -725,11 +725,11 @@ negative_outliers = df_outliers[df_outliers['PoF_Deviation_Pct'] < 0].sort_value
 
 print(f"\nTop 5 Positive Outliers (Higher risk than expected):")
 for _, row in positive_outliers.iterrows():
-    print(f"  {row['Ekipman_Kodu']}: PoF={row['PoF_Probability']:.3f}, Expected={row['Expected_PoF']:.3f}, Deviation={row['PoF_Deviation_Pct']:+.1f}%")
+    print(f"  {row['Ekipman_ID']}: PoF={row['PoF_Probability']:.3f}, Expected={row['Expected_PoF']:.3f}, Deviation={row['PoF_Deviation_Pct']:+.1f}%")
 
 print(f"\nTop 5 Negative Outliers (Lower risk than expected):")
 for _, row in negative_outliers.iterrows():
-    print(f"  {row['Ekipman_Kodu']}: PoF={row['PoF_Probability']:.3f}, Expected={row['Expected_PoF']:.3f}, Deviation={row['PoF_Deviation_Pct']:+.1f}%")
+    print(f"  {row['Ekipman_ID']}: PoF={row['PoF_Probability']:.3f}, Expected={row['Expected_PoF']:.3f}, Deviation={row['PoF_Deviation_Pct']:+.1f}%")
 
 # Save
 output_path = RESULTS_DIR / 'pof_outlier_analysis.csv'
