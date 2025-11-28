@@ -580,15 +580,14 @@ if 'İlçe' in df_features.columns:
 else:
     df_predictions['İlçe'] = 'Unknown'
 
-# Rename for output
+# Rename for output (keep Ekipman_ID for validation consistency)
 df_predictions.rename(columns={
-    'Ekipman_ID': 'Ekipman_Kodu',
     'Equipment_Class_Primary': 'Ekipman_Sinifi',
     'İlçe': 'Ilce'
 }, inplace=True)
 
-# Reorder columns
-output_cols = ['Ekipman_Kodu', 'Ekipman_Sinifi', 'Ilce']
+# Reorder columns (keep Ekipman_ID for consistency across pipeline)
+output_cols = ['Ekipman_ID', 'Ekipman_Sinifi', 'Ilce']
 output_cols += [f'PoF_Probability_{h}' for h in HORIZONS.keys()]
 output_cols += [f'Risk_Class_{h}' for h in HORIZONS.keys()]
 output_cols += ['Risk_Category']
