@@ -30,7 +30,9 @@ COLUMN_MAP_EN_TO_TR = {
     'Equipment_Type': 'Ekipman_Tipi',
     'component_voltage': 'Gerilim_Seviyesi',
     'Voltage_Class': 'Gerilim_Sınıfı',
-    'voltage_level': 'Gerilim_Seviyesi',  # Duplicate - maps to same
+    # PHASE 1.6 FIX: Removed 'voltage_level' mapping
+    # voltage_level was redundant copy of component_voltage (VIF=∞)
+    # Keeping only: component_voltage (original equipment specification)
     'Is_MV': 'OG_Bayrağı',
     'Is_LV': 'AG_Bayrağı',
     'Is_HV': 'YG_Bayrağı',

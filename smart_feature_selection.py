@@ -340,7 +340,11 @@ class SmartFeatureSelector:
         for col in features_to_check:
             is_leaky, pattern_type, is_safe = detect_leakage_pattern(col)
 
-            if is_leaky and not is_protected_feature(col):
+            # PHASE 1.7 FIX (Hybrid Staged Selection - Stage 1: Strict Rules):
+            # Removed: and not is_protected_feature(col) condition
+            # Reason: PROTECTED_FEATURES override defeats purpose of statistical leakage detection
+            # New approach: Apply statistical rules strictly, let domain experts review afterwards
+            if is_leaky:
                 leaky_features.append((col, pattern_type))
                 self._mark_removed(col, 'LEAKAGE', 2,
                                    f'Leakage pattern detected: {pattern_type}')
@@ -393,19 +397,14 @@ class SmartFeatureSelector:
                 if corr_val > self.config.correlation_threshold:
                     high_corr_pairs.append((col_i, col_j, corr_val))
 
-                    # Decide which to remove (keep protected, otherwise remove second)
-                    if is_protected_feature(col_i) and not is_protected_feature(col_j):
-                        to_remove = col_j
-                    elif is_protected_feature(col_j) and not is_protected_feature(col_i):
-                        to_remove = col_i
-                    elif not is_protected_feature(col_i) and not is_protected_feature(col_j):
-                        # Remove the one with lower coverage
-                        coverage_i = df[col_i].notna().mean()
-                        coverage_j = df[col_j].notna().mean()
-                        to_remove = col_j if coverage_i >= coverage_j else col_i
-                    else:
-                        # Both protected - don't remove either
-                        continue
+                    # PHASE 1.7 FIX (Hybrid Staged Selection - Stage 1: Strict Rules):
+                    # Removed: is_protected_feature() checks in correlation removal
+                    # Reason: Statistical rules should not be overridden by protection list
+                    # New approach: Always remove based on data quality (coverage), not domain preferences
+                    # Decision rule: Remove the feature with lower coverage
+                    coverage_i = df[col_i].notna().mean()
+                    coverage_j = df[col_j].notna().mean()
+                    to_remove = col_j if coverage_i >= coverage_j else col_i
 
                     if to_remove not in features_to_remove:
                         features_to_remove.add(to_remove)
@@ -510,20 +509,15 @@ class SmartFeatureSelector:
                 print(f"\n✅ Iteration {iteration}: VIF={max_vif:.1f} acceptable with {len(vif_features)} features")
                 break
 
-            # Check if feature is protected
-            if is_protected_feature(max_vif_feature):
-                print(f"   Iter {iteration}: {max_vif_feature} (VIF={max_vif:.1f}) is PROTECTED")
-                # Find next highest non-protected
-                non_protected = vif_data[~vif_data['Feature'].apply(is_protected_feature)]
-                if len(non_protected) == 0:
-                    print("   All remaining features are protected - stopping")
-                    break
-                non_protected_sorted = non_protected.sort_values('VIF', ascending=False)
-                max_vif_feature = non_protected_sorted.iloc[0]['Feature']
-                max_vif = non_protected_sorted.iloc[0]['VIF']
+            # PHASE 1.7 FIX (Hybrid Staged Selection - Stage 1: Strict Rules):
+            # Removed: is_protected_feature() override logic in VIF removal
+            # OLD logic: Skip protected features with high VIF, remove OTHER features instead
+            # Problem: Algorithm fought mathematics (VIF=∞ features stayed, others removed)
+            # NEW logic: Remove the feature with highest VIF regardless of protection status
+            # Impact: Clean feature sets without mathematical fighting
 
-                if max_vif <= self.config.vif_target:
-                    break
+            # No longer checking protection - apply rule strictly
+            # (Stage 2 domain review will happen after selection)
 
             # Remove feature
             print(f"   Iter {iteration}: Removing {max_vif_feature} (VIF={max_vif:.1f})")
