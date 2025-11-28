@@ -1,10 +1,11 @@
 """
-POF2 PIPELINE RUNNER WITH LOGGING v3.0
+POF2 PIPELINE RUNNER WITH LOGGING v4.0
 Turkish EDAŞ Equipment Failure Prediction Pipeline
 
 This script runs the entire production-ready PoF2 pipeline and captures all outputs.
 
-PIPELINE FLOW (12 STEPS):
+PIPELINE FLOW (13 STEPS - Including new Step 0):
+    0. Input Data Source Analysis → Validate raw input data before processing (NEW - Phase 1)
     1. Data Profiling          → Validate data quality and temporal coverage
    2a. Healthy Equipment Loader → Load healthy equipment data (OPTIONAL - for balanced training)
     2. Data Transformation     → Transform fault-level to equipment-level + merge healthy
@@ -18,10 +19,10 @@ PIPELINE FLOW (12 STEPS):
    10. Cox Survival Model      → Multi-horizon survival analysis (censored observations)
    11. Risk Assessment         → PoF × CoF → CAPEX priority list
 
-NEW in v3.0 (MIXED DATASET SUPPORT):
-    • Step 2a: Load healthy equipment (optional - enables balanced training)
-    • Steps 2, 6-11: Support mixed dataset (failed + healthy equipment)
-    • Benefits: Better calibration, reduced false positives, realistic risk scores
+NEW in v4.0 (PHASE 1 ENHANCEMENTS):
+    • Step 0: Input data source analysis (validates raw data before processing)
+    • Phase 1 fixes integrated (Equipment ID, leakage removal, mixed dataset)
+    • Early validation catches issues before wasted computation
 
 OPTIONAL SCRIPTS (in analysis/ folder):
     • analysis/exploratory/04_eda.py - 16 exploratory analyses
@@ -51,6 +52,12 @@ from pipeline_validation import validate_step_output, ValidationError
 # NOTE: 04_eda.py is OPTIONAL - run separately for research/analysis
 # NOTE: 06b_logistic_baseline.py is OPTIONAL - baseline comparison only
 PIPELINE_STEPS = [
+    {
+        'step': 0,
+        'name': 'Input Data Source Analysis',
+        'script': '00_input_data_source_analysis.py',
+        'description': 'Validate raw input data structure and quality before processing (Phase 1 - NEW)'
+    },
     {
         'step': 1,
         'name': 'Data Profiling',

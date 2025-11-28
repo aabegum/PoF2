@@ -295,11 +295,28 @@ for check_name, passed, details in quality_checks:
     print(f"   {status} {check_name}{detail_str}")
 
 # ============================================================================
-# STEP 11: DATA DICTIONARY
+# STEP 12: CHECK FOR HEALTHY EQUIPMENT DATA (Mixed Dataset Support)
 # ============================================================================
 print("\n" + "="*100)
-print("STEP 11: DATA DICTIONARY (Sample Values)")
+print("STEP 12: HEALTHY EQUIPMENT DATA AVAILABILITY (Mixed Dataset Support)")
 print("="*100)
+
+# Check for healthy equipment file - use config path
+from config import HEALTHY_EQUIPMENT_FILE
+
+healthy_equipment_available = False
+if HEALTHY_EQUIPMENT_FILE.exists():
+    print(f"\n✓ Found: {HEALTHY_EQUIPMENT_FILE}")
+    print(f"  Size: {HEALTHY_EQUIPMENT_FILE.stat().st_size / 1024**2:.2f} MB")
+    healthy_equipment_available = True
+    print(f"  Status: READY for mixed dataset training (Phase 1.4)")
+    print(f"  Action: Run Step 2a (02a_healthy_equipment_loader.py) before Step 2")
+else:
+    print(f"\n✗ No healthy equipment data found")
+    print(f"  Expected: {HEALTHY_EQUIPMENT_FILE}")
+    print(f"  Pipeline will use SINGLE DATASET (failed equipment only)")
+    print(f"  Impact: Step 6 (PoF Model) will train on ~2,670 equipment instead of 5,567")
+    print(f"  Recommendation: If mixed dataset available, place at {HEALTHY_EQUIPMENT_FILE} and re-run")
 
 print("\n📖 Sample Data by Column:\n")
 

@@ -1,0 +1,106 @@
+﻿Feature_Name,Data_Type,Non_Null_Count,Null_Count,Completeness_%,Unique_Values,Category
+Ekipman_ID,float64,3845,0,100.0,3845,Equipment Metadata
+Ekipman_Kurulum_Tarihi,object,2670,1175,69.4,248,Equipment Metadata
+Ekipman_Yaşı_Gün,float64,3845,0,100.0,469,Age/Life
+Ekipman_Yaşı_Yıl,float64,3845,0,100.0,470,Age/Life
+Yaş_Kaynak,object,2670,1175,69.4,1,Age/Life
+Toplam_Arıza_Sayisi_Lifetime,int64,3845,0,100.0,27,Failure History
+İlk_Arıza_Tarihi,object,2670,1175,69.4,2670,Failure History
+Son_Arıza_Tarihi,object,2670,1175,69.4,2669,Failure History
+Arıza_Sayısı_3ay,float64,2670,1175,69.4,7,Failure History
+Arıza_Sayısı_6ay,float64,2670,1175,69.4,10,Failure History
+Arıza_Sayısı_12ay,float64,2670,1175,69.4,14,Failure History
+Summer_Peak_Flag_sum,int64,3845,0,100.0,14,Other
+Winter_Peak_Flag_sum,int64,3845,0,100.0,9,Other
+Time_To_Repair_Hours_mean,float64,2670,1175,69.4,2571,Other
+Time_To_Repair_Hours_max,float64,2670,1175,69.4,2528,Other
+Equipment_Class_Primary,object,3845,0,100.0,17,Equipment Metadata
+Ekipman_Sınıfı,object,2670,1175,69.4,16,Equipment Metadata
+Equipment_Type,object,2661,1184,69.2,9,Equipment Metadata
+Kesinti Ekipman Sınıfı,object,2670,1175,69.4,6,Equipment Metadata
+KOORDINAT_X,float64,2669,1176,69.4,2554,Geographic
+KOORDINAT_Y,float64,2669,1176,69.4,2544,Geographic
+İl,object,2670,1175,69.4,4,Other
+İlçe,object,2670,1175,69.4,3,Other
+Mahalle,object,2548,1297,66.3,235,Other
+Urban_Customer_Ratio_mean,float64,2670,1175,69.4,205,Customer Impact
+Rural_Customer_Ratio_mean,float64,2670,1175,69.4,852,Customer Impact
+MV_Customer_Ratio_mean,float64,2670,1175,69.4,419,Customer Impact
+Arıza_Nedeni_İlk,object,2670,1175,69.4,46,Failure History
+Arıza_Nedeni_Son,object,2670,1175,69.4,46,Failure History
+cause code_<lambda_0>,object,2670,1175,69.4,46,Other
+urban_mv+suburban_mv_Avg,float64,2670,1175,69.4,79,Other
+urban_mv+suburban_mv_Max,float64,2670,1175,69.4,37,Other
+urban_lv+suburban_lv_Avg,float64,2670,1175,69.4,410,Other
+urban_lv+suburban_lv_Max,float64,2670,1175,69.4,262,Other
+urban_mv_Avg,float64,569,3276,14.8,38,Other
+urban_mv_Max,float64,569,3276,14.8,33,Other
+urban_lv_Avg,float64,569,3276,14.8,127,Other
+urban_lv_Max,float64,569,3276,14.8,124,Other
+suburban_mv_Avg,float64,569,3276,14.8,8,Other
+suburban_mv_Max,float64,569,3276,14.8,7,Other
+suburban_lv_Avg,float64,569,3276,14.8,54,Other
+suburban_lv_Max,float64,569,3276,14.8,53,Other
+rural_mv_Avg,float64,2670,1175,69.4,200,Other
+rural_mv_Max,float64,2670,1175,69.4,66,Other
+rural_lv_Avg,float64,2670,1175,69.4,562,Other
+rural_lv_Max,float64,2670,1175,69.4,259,Other
+total_customer_count_Avg,float64,2670,1175,69.4,742,Other
+total_customer_count_Max,float64,2670,1175,69.4,360,Other
+component_voltage,float64,3842,3,99.9,4,Other
+MARKA,object,221,3624,5.7,38,Other
+MARKA_MODEL,object,107,3738,2.8,28,Other
+FIRMA,object,18,3827,0.5,4,Other
+Arıza_Nedeni_Çeşitlilik,float64,2670,1175,69.4,5,Failure History
+Arıza_Nedeni_Tutarlılık,float64,2670,1175,69.4,57,Failure History
+MTBF_Gün,float64,1216,2629,31.6,890,Reliability
+MTBF_Lifetime_Gün,float64,2670,1175,69.4,490,Reliability
+Baseline_Hazard_Rate,float64,3845,0,100.0,491,Other
+MTBF_Observable_Gün,float64,1232,2613,32.0,953,Reliability
+MTBF_Degradation_Ratio,float64,1216,2629,31.6,1210,Reliability
+Is_Degrading,int64,3845,0,100.0,2,Other
+Son_Arıza_Tarihi_Safe,object,2670,1175,69.4,2669,Failure History
+Son_Arıza_Gun_Sayisi,float64,2670,1175,69.4,984,Failure History
+İlk_Arıza_Tarihi_Safe,object,2670,1175,69.4,2670,Failure History
+Ilk_Arizaya_Kadar_Gun,float64,2670,1175,69.4,1572,Other
+Ilk_Arizaya_Kadar_Yil,float64,2670,1175,69.4,1572,Other
+Tekrarlayan_Arıza_30gün_Flag,int64,3845,0,100.0,2,Failure History
+Tekrarlayan_Arıza_90gün_Flag,int64,3845,0,100.0,2,Failure History
+EDBS_IDATE,object,1175,2670,30.6,334,Other
+EDBS_freq_pct,float64,1175,2670,30.6,165,Other
+Katman,object,1175,2670,30.6,10,Other
+Has_Failure_History,float64,1175,2670,30.6,1,Failure History
+Total_Faults,float64,1175,2670,30.6,1,Failure History
+Sebekeye_Baglanma_Tarihi,object,1175,2670,30.6,366,Other
+Güvenilirlik_Skoru,float64,1175,2670,30.6,1,Other
+voltage_level,float64,3842,3,99.9,4,Other
+Fault_Count_3M,float64,1175,2670,30.6,1,Failure History
+Fault_Count_12M,float64,1175,2670,30.6,1,Failure History
+Data_Source,object,3845,0,100.0,2,Other
+TESIS_TARIHI,object,635,3210,16.5,275,Other
+Fault_Count_6M,float64,1175,2670,30.6,1,Failure History
+Grid_Connection_Date,object,1175,2670,30.6,366,Other
+Is_Healthy,bool,3845,0,100.0,2,Other
+Beklenen_Ömür_Yıl,int64,3845,0,100.0,2,Age/Life
+Yas_Beklenen_Omur_Orani,float64,3845,0,100.0,494,Other
+Age_Risk_Category,category,3845,0,100.0,4,Age/Life
+Reliability_Score,float64,3845,0,100.0,683,Risk Metrics
+Time_Since_Last_Normalized,float64,1216,2629,31.6,1202,Other
+Failure_Free_3M,int64,3845,0,100.0,2,Failure History
+MTBF_InterFault_Trend,float64,505,3340,13.1,499,Failure History
+MTBF_InterFault_StdDev,float64,1232,2613,32.0,1067,Failure History
+AgeRatio_Recurrence_Interaction,float64,3845,0,100.0,108,Age/Life
+Overdue_Factor,float64,1216,2629,31.6,1202,Other
+Voltage_Class,object,3842,3,99.9,2,Other
+Is_MV,int64,3845,0,100.0,2,Other
+Is_LV,int64,3845,0,100.0,2,Other
+Is_HV,int64,3845,0,100.0,1,Other
+Bölge_Tipi,object,3845,0,100.0,2,Other
+Son_Arıza_Mevsim,object,2670,1175,69.4,4,Failure History
+Kentsel_Müşteri_Oranı,float64,2670,1175,69.4,205,Customer Impact
+Kırsal_Müşteri_Oranı,float64,2670,1175,69.4,852,Customer Impact
+OG_Müşteri_Oranı,float64,2670,1175,69.4,419,Customer Impact
+Ekipman_Yoğunluk_Skoru,float64,3845,0,100.0,984,Equipment Metadata
+Tek_Neden_Flag,int64,3845,0,100.0,2,Other
+Çok_Nedenli_Flag,int64,3845,0,100.0,2,Other
+Neden_Değişim_Flag,int64,3845,0,100.0,2,Other

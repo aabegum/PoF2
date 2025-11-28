@@ -166,10 +166,12 @@ pof_cols = [col for col in df_pof.columns if 'PoF_Probability' in col or 'Failur
 print(f"\n✓ Found PoF columns: {pof_cols}")
 
 # Standardize column names
+# Rename if using old names (for backward compatibility)
 if 'Ekipman_Kodu' in df_pof.columns:
     df_pof.rename(columns={'Ekipman_Kodu': 'Ekipman_ID'}, inplace=True)
 elif 'Equipment_ID' in df_pof.columns:
     df_pof.rename(columns={'Equipment_ID': 'Ekipman_ID'}, inplace=True)
+# Else: Ekipman_ID already exists (new format from Step 10)
 
 # Handle calibrated predictions (single horizon)
 if 'Calibrated_Failure_Probability' in df_pof.columns:

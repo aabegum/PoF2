@@ -583,16 +583,21 @@ print("="*100)
 print("\n--- Voltage Level Classification ---")
 
 if 'component_voltage' in df.columns:
-    # Rename for clarity
-    df['voltage_level'] = df['component_voltage']
+    # PHASE 1.6 FIX: Removed voltage_level (redundant copy of component_voltage)
+    # Both component_voltage and voltage_level had VIF=∞ (perfect multicollinearity)
+    # Decision: Keep component_voltage (original equipment specification)
+    # Removed: voltage_level (created as copy with no unique information)
+    # Impact: Enables smart feature selection without multicollinearity fighting
 
-    coverage = df['voltage_level'].notna().sum()
+    voltage_level = df['component_voltage']  # For classification use only, not stored as feature
+
+    coverage = voltage_level.notna().sum()
     print(f"✓ Voltage level data available: {coverage:,} equipment ({coverage/len(df)*100:.1f}%)")
-    print(f"  Unique voltage values: {df['voltage_level'].nunique()}")
+    print(f"  Unique voltage values: {voltage_level.nunique()}")
 
     # Show raw distribution
     print(f"\n  Raw voltage distribution:")
-    for voltage, count in df['voltage_level'].value_counts().sort_index(ascending=False).head(5).items():
+    for voltage, count in voltage_level.value_counts().sort_index(ascending=False).head(5).items():
         pct = count / len(df) * 100
         print(f"    {voltage:>10.1f} V: {count:>4,} equipment ({pct:>5.1f}%)")
 
@@ -618,7 +623,7 @@ if 'component_voltage' in df.columns:
         else:
             return 'Bilinmeyen'
 
-    df['Voltage_Class'] = df['voltage_level'].apply(classify_voltage)
+    df['Voltage_Class'] = voltage_level.apply(classify_voltage)
 
     # Show classification distribution
     print(f"\n  Voltage classification:")
@@ -662,7 +667,8 @@ if 'component_voltage' in df.columns:
 
 else:
     print("⚠ component_voltage column not found (should be from 02_data_transformation.py)")
-    df['voltage_level'] = None
+    # PHASE 1.6 FIX: No longer creating voltage_level (was redundant)
+    # Creating only Voltage_Class (derived categorical feature)
     df['Voltage_Class'] = None
     df['Is_MV'] = 0
     df['Is_LV'] = 0
@@ -838,7 +844,7 @@ if 'Bölge_Tipi' in df.columns and df['Bölge_Tipi'].notna().any() and 'Arıza_S
             print(f"  {btype}: Avg customers={avg_customers:.1f}, Avg faults(12M)={avg_faults:.2f}, Avg age={avg_age:.1f}y")
 
 print("\n✓ Additional domain-specific features complete!")
-print(f"  New features: voltage_level, Voltage_Class, Is_MV/LV/HV, Bölge_Tipi,")
+print(f"  New features: Voltage_Class, Is_MV/LV/HV, Bölge_Tipi,")
 print(f"                Son_Arıza_Mevsim, Kentsel/Kırsal/OG_Müşteri_Oranı,")
 print(f"                Ekipman_Yoğunluk_Skoru, Müşteri_Başına_Risk")
 

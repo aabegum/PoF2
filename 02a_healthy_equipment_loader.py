@@ -43,7 +43,9 @@ from config import (
     MIN_VALID_YEAR,
     MAX_VALID_YEAR,
     DATA_DIR,
+    DATA_OUTPUTS_DIR,
     INPUT_FILE,
+    HEALTHY_EQUIPMENT_FILE,
     EQUIPMENT_CLASS_MAPPING
 )
 
@@ -68,9 +70,8 @@ pd.set_option('display.max_columns', None)
 # CONFIGURATION
 # ============================================================================
 
-# Input/output paths
-HEALTHY_EQUIPMENT_FILE = DATA_DIR / 'healthy_equipment.xlsx'
-OUTPUT_FILE = DATA_DIR / 'healthy_equipment_prepared.csv'
+# Input/output paths (from config.py)
+OUTPUT_FILE = DATA_OUTPUTS_DIR / 'health_equipment_prepared.csv'
 
 # Required columns
 REQUIRED_COLUMNS = [

@@ -16,17 +16,20 @@ from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_
 from sklearn.calibration import calibration_curve
 import matplotlib.pyplot as plt
 
+# Import config for file paths
+from config import FEATURES_REDUCED_FILE, EQUIPMENT_LEVEL_FILE
+
 # Load data and models
 print("="*100)
 print("MODEL PERFORMANCE DIAGNOSTIC AUDIT")
 print("="*100)
 
 # Load reduced features (the features used for training)
-df = pd.read_csv('data/features_reduced.csv')
+df = pd.read_csv(FEATURES_REDUCED_FILE)
 print(f"\n✓ Loaded features: {len(df)} equipment × {len(df.columns)} columns")
 
 # Load original equipment-level data (with ALL features for leakage check)
-df_all = pd.read_csv('data/equipment_level_data.csv')
+df_all = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 print(f"✓ Loaded full data: {len(df_all)} equipment × {len(df_all.columns)} columns")
 
 # Merge to get removed features

@@ -340,6 +340,11 @@ class SmartFeatureSelector:
         for col in features_to_check:
             is_leaky, pattern_type, is_safe = detect_leakage_pattern(col)
 
+            # PHASE 1.8 FIX (Hybrid Staged Selection Refinement):
+            # Keep protection check for leakage detection ONLY
+            # Reason: Some features (Tekrarlayan_Arıza_90gün_Flag) are needed for target creation
+            # Workflow: Feature used to create target → Explicitly excluded before training
+            # Reference: 07_chronic_classifier.py lines 260 (target creation) and 298-300 (exclusion)
             if is_leaky and not is_protected_feature(col):
                 leaky_features.append((col, pattern_type))
                 self._mark_removed(col, 'LEAKAGE', 2,
@@ -393,19 +398,14 @@ class SmartFeatureSelector:
                 if corr_val > self.config.correlation_threshold:
                     high_corr_pairs.append((col_i, col_j, corr_val))
 
-                    # Decide which to remove (keep protected, otherwise remove second)
-                    if is_protected_feature(col_i) and not is_protected_feature(col_j):
-                        to_remove = col_j
-                    elif is_protected_feature(col_j) and not is_protected_feature(col_i):
-                        to_remove = col_i
-                    elif not is_protected_feature(col_i) and not is_protected_feature(col_j):
-                        # Remove the one with lower coverage
-                        coverage_i = df[col_i].notna().mean()
-                        coverage_j = df[col_j].notna().mean()
-                        to_remove = col_j if coverage_i >= coverage_j else col_i
-                    else:
-                        # Both protected - don't remove either
-                        continue
+                    # PHASE 1.7 FIX (Hybrid Staged Selection - Stage 1: Strict Rules):
+                    # Removed: is_protected_feature() checks in correlation removal
+                    # Reason: Statistical rules should not be overridden by protection list
+                    # New approach: Always remove based on data quality (coverage), not domain preferences
+                    # Decision rule: Remove the feature with lower coverage
+                    coverage_i = df[col_i].notna().mean()
+                    coverage_j = df[col_j].notna().mean()
+                    to_remove = col_j if coverage_i >= coverage_j else col_i
 
                     if to_remove not in features_to_remove:
                         features_to_remove.add(to_remove)
@@ -510,20 +510,15 @@ class SmartFeatureSelector:
                 print(f"\n✅ Iteration {iteration}: VIF={max_vif:.1f} acceptable with {len(vif_features)} features")
                 break
 
-            # Check if feature is protected
-            if is_protected_feature(max_vif_feature):
-                print(f"   Iter {iteration}: {max_vif_feature} (VIF={max_vif:.1f}) is PROTECTED")
-                # Find next highest non-protected
-                non_protected = vif_data[~vif_data['Feature'].apply(is_protected_feature)]
-                if len(non_protected) == 0:
-                    print("   All remaining features are protected - stopping")
-                    break
-                non_protected_sorted = non_protected.sort_values('VIF', ascending=False)
-                max_vif_feature = non_protected_sorted.iloc[0]['Feature']
-                max_vif = non_protected_sorted.iloc[0]['VIF']
+            # PHASE 1.7 FIX (Hybrid Staged Selection - Stage 1: Strict Rules):
+            # Removed: is_protected_feature() override logic in VIF removal
+            # OLD logic: Skip protected features with high VIF, remove OTHER features instead
+            # Problem: Algorithm fought mathematics (VIF=∞ features stayed, others removed)
+            # NEW logic: Remove the feature with highest VIF regardless of protection status
+            # Impact: Clean feature sets without mathematical fighting
 
-                if max_vif <= self.config.vif_target:
-                    break
+            # No longer checking protection - apply rule strictly
+            # (Stage 2 domain review will happen after selection)
 
             # Remove feature
             print(f"   Iter {iteration}: Removing {max_vif_feature} (VIF={max_vif:.1f})")
@@ -615,8 +610,8 @@ class SmartFeatureSelector:
 # ============================================================================
 
 def run_smart_selection(
-    input_file: str = 'data/features_engineered.csv',
-    output_file: str = 'data/features_reduced.csv',
+    input_file: str = None,  # Will use FEATURES_ENGINEERED_FILE from config
+    output_file: str = None, # Will use FEATURES_REDUCED_FILE from config
     report_file: str = 'outputs/feature_selection/smart_selection_report.csv',
     config: SelectionConfig = None
 ) -> pd.DataFrame:
@@ -624,14 +619,19 @@ def run_smart_selection(
     Run the smart feature selection pipeline
 
     Args:
-        input_file: Path to input features CSV
-        output_file: Path to save selected features
+        input_file: Path to input features CSV (defaults to config.FEATURES_ENGINEERED_FILE)
+        output_file: Path to save selected features (defaults to config.FEATURES_REDUCED_FILE)
         report_file: Path to save selection report
         config: SelectionConfig instance
 
     Returns:
         DataFrame with selected features
     """
+    # Import here to get current config values
+    from config import FEATURES_ENGINEERED_FILE, FEATURES_REDUCED_FILE
+
+    input_file = input_file or str(FEATURES_ENGINEERED_FILE)
+    output_file = output_file or str(FEATURES_REDUCED_FILE)
     config = config or SelectionConfig()
 
     # Load data

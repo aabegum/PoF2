@@ -28,8 +28,8 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-# Import config for input filename
-from config import INPUT_FILE
+# Import config for input and output filenames
+from config import INPUT_FILE, FEATURES_REDUCED_FILE, EQUIPMENT_LEVEL_FILE
 
 print("="*100)
 print("EQUIPMENT ID MISMATCH DIAGNOSTIC")
@@ -50,14 +50,14 @@ print(f"   Columns with 'ID' or 'id': {[col for col in faults.columns if 'id' in
 
 # Equipment-level data (after Step 2)
 print("\n2. Equipment-Level Data (equipment_level_data.csv):")
-equipment = pd.read_csv('data/equipment_level_data.csv')
+equipment = pd.read_csv(EQUIPMENT_LEVEL_FILE)
 print(f"   Total equipment: {len(equipment):,}")
 print(f"   ID column: {[col for col in equipment.columns if 'ID' in col or col == 'Ekipman_ID']}")
 
 # Reduced features (after Step 5)
 print("\n3. Reduced Features (features_reduced.csv):")
 try:
-    features = pd.read_csv('data/features_reduced.csv')
+    features = pd.read_csv(FEATURES_REDUCED_FILE)
     print(f"   Total equipment: {len(features):,}")
     print(f"   ID column: {[col for col in features.columns if 'ID' in col or col == 'Ekipman_ID']}")
 except FileNotFoundError:
