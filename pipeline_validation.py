@@ -28,6 +28,7 @@ from config import (
     EQUIPMENT_LEVEL_FILE,
     FEATURES_ENGINEERED_FILE,
     FEATURES_REDUCED_FILE,
+    DATA_OUTPUTS_DIR,
     PREDICTION_DIR,
     RESULTS_DIR,
     HORIZONS,
@@ -58,9 +59,9 @@ STEP_VALIDATIONS = {
     },
     '2a': {
         'name': 'Healthy Equipment Loader',
-        'outputs': [Path('data/healthy_equipment_prepared.csv')],
+        'outputs': [DATA_OUTPUTS_DIR / 'health_equipment_prepared.csv'],
         'checks': [
-            {'file': Path('data/healthy_equipment_prepared.csv'), 'min_rows': 100,  # At least 100 healthy equipment
+            {'file': DATA_OUTPUTS_DIR / 'health_equipment_prepared.csv', 'min_rows': 100,  # At least 100 healthy equipment
              'required_columns': ['Ekipman_ID', 'Equipment_Class_Primary', 'Ekipman_Yaşı_Yıl', 'Beklenen_Ömür_Yıl']}
         ],
         'optional': True  # Optional - only validates if file exists

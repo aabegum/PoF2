@@ -86,26 +86,28 @@ DEFAULT_LIFE = 25
 
 # Data directories
 DATA_DIR = Path('data')
+DATA_INPUTS_DIR = DATA_DIR / 'inputs'      # NEW: Input files directory
+DATA_OUTPUTS_DIR = DATA_DIR / 'outputs'    # NEW: Intermediate files directory
 OUTPUT_DIR = Path('outputs')
 MODEL_DIR = Path('models')
 PREDICTION_DIR = Path('predictions')
 RESULTS_DIR = Path('results')
 LOG_DIR = Path('logs')
 
-# Input files
-INPUT_FILE = DATA_DIR / 'combined_data_son.xlsx'
-HEALTHY_EQUIPMENT_FILE = DATA_DIR / 'healthy_equipment.xlsx'  # NEW: Healthy equipment data
+# Input files (from data/inputs/ folder)
+INPUT_FILE = DATA_INPUTS_DIR / 'fault_merged_data.xlsx'
+HEALTHY_EQUIPMENT_FILE = DATA_INPUTS_DIR / 'health_merged_data.xlsx'
 
-# Intermediate files
-EQUIPMENT_LEVEL_FILE = DATA_DIR / 'equipment_level_data.csv'
-FEATURES_ENGINEERED_FILE = DATA_DIR / 'features_engineered.csv'
-FEATURES_REDUCED_FILE = DATA_DIR / 'features_reduced.csv'
-FEATURES_WITH_TARGETS_FILE = OUTPUT_DIR / 'features_with_targets.csv'
+# Intermediate files (saved to data/outputs/ folder)
+EQUIPMENT_LEVEL_FILE = DATA_OUTPUTS_DIR / 'equipment_level_data.csv'
+FEATURES_ENGINEERED_FILE = DATA_OUTPUTS_DIR / 'features_engineered.csv'
+FEATURES_REDUCED_FILE = DATA_OUTPUTS_DIR / 'features_reduced.csv'
+FEATURES_WITH_TARGETS_FILE = DATA_OUTPUTS_DIR / 'features_with_targets.csv'
 
-# Output files
-FEATURE_DOCS_FILE = DATA_DIR / 'feature_documentation.csv'
-FEATURE_CATALOG_FILE = DATA_DIR / 'feature_catalog.csv'
-HIGH_RISK_FILE = DATA_DIR / 'high_risk_equipment.csv'
+# Output files (in data/outputs/ folder)
+FEATURE_DOCS_FILE = DATA_OUTPUTS_DIR / 'feature_documentation.csv'
+FEATURE_CATALOG_FILE = DATA_OUTPUTS_DIR / 'feature_catalog.csv'
+HIGH_RISK_FILE = DATA_OUTPUTS_DIR / 'high_risk_equipment.csv'
 
 # ============================================================================
 # MODEL CONFIGURATION

@@ -610,8 +610,8 @@ class SmartFeatureSelector:
 # ============================================================================
 
 def run_smart_selection(
-    input_file: str = 'data/features_engineered.csv',
-    output_file: str = 'data/features_reduced.csv',
+    input_file: str = None,  # Will use FEATURES_ENGINEERED_FILE from config
+    output_file: str = None, # Will use FEATURES_REDUCED_FILE from config
     report_file: str = 'outputs/feature_selection/smart_selection_report.csv',
     config: SelectionConfig = None
 ) -> pd.DataFrame:
@@ -619,14 +619,19 @@ def run_smart_selection(
     Run the smart feature selection pipeline
 
     Args:
-        input_file: Path to input features CSV
-        output_file: Path to save selected features
+        input_file: Path to input features CSV (defaults to config.FEATURES_ENGINEERED_FILE)
+        output_file: Path to save selected features (defaults to config.FEATURES_REDUCED_FILE)
         report_file: Path to save selection report
         config: SelectionConfig instance
 
     Returns:
         DataFrame with selected features
     """
+    # Import here to get current config values
+    from config import FEATURES_ENGINEERED_FILE, FEATURES_REDUCED_FILE
+
+    input_file = input_file or str(FEATURES_ENGINEERED_FILE)
+    output_file = output_file or str(FEATURES_REDUCED_FILE)
     config = config or SelectionConfig()
 
     # Load data
