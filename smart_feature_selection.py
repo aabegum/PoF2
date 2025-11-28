@@ -340,11 +340,12 @@ class SmartFeatureSelector:
         for col in features_to_check:
             is_leaky, pattern_type, is_safe = detect_leakage_pattern(col)
 
-            # PHASE 1.7 FIX (Hybrid Staged Selection - Stage 1: Strict Rules):
-            # Removed: and not is_protected_feature(col) condition
-            # Reason: PROTECTED_FEATURES override defeats purpose of statistical leakage detection
-            # New approach: Apply statistical rules strictly, let domain experts review afterwards
-            if is_leaky:
+            # PHASE 1.8 FIX (Hybrid Staged Selection Refinement):
+            # Keep protection check for leakage detection ONLY
+            # Reason: Some features (Tekrarlayan_Arıza_90gün_Flag) are needed for target creation
+            # Workflow: Feature used to create target → Explicitly excluded before training
+            # Reference: 07_chronic_classifier.py lines 260 (target creation) and 298-300 (exclusion)
+            if is_leaky and not is_protected_feature(col):
                 leaky_features.append((col, pattern_type))
                 self._mark_removed(col, 'LEAKAGE', 2,
                                    f'Leakage pattern detected: {pattern_type}')

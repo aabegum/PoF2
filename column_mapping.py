@@ -203,10 +203,13 @@ PROTECTED_FEATURES_TR = [
     'Gecikme_Faktörü',
     # PHASE 1.2 FIX: Removed 'Yaş_Tekrar_Etkileşimi' - Derived from target (high leakage)
     # Turkish equivalent of 'AgeRatio_Recurrence_Interaction'
-]
 
-# PHASE 1.2 FIX: Removed 'Kronik_Arıza_Bayrağı' from PROTECTED_FEATURES
-# Turkish equivalent of 'Tekrarlayan_Arıza_90gün_Flag' - IS the target definition itself
+    # PHASE 1.8 FIX: Restored 'Kronik_Arıza_Bayrağı' - Needed for target creation
+    # Reason: Feature IS used to CREATE target in 07_chronic_classifier.py (line 260)
+    # Workflow: Keep in features → Chronic classifier reads → Explicitly exclude before training
+    # Reference: 07_chronic_classifier.py lines 253-300 (target creation + exclusion)
+    'Kronik_Arıza_Bayrağı',  # English: 'Tekrarlayan_Arıza_90gün_Flag'
+]
 
 # ============================================================================
 # LEAKAGE PATTERNS (Auto-detection rules)
@@ -504,12 +507,13 @@ PROTECTED_FEATURES_EN = [
     # PHASE 1.2 FIX: Removed 'AgeRatio_Recurrence_Interaction' - Derived from target (high leakage)
     # It shows 63% feature importance in chronic classifier despite being derived from target
     # This must be removed for model to learn actual patterns instead of memorizing target
-]
 
-# PHASE 1.2 FIX: Removed 'Tekrarlayan_Arıza_90gün_Flag' from PROTECTED_FEATURES
-# This column IS the target definition itself - it should never be a feature
-# It must be removed from all feature sets by the feature selection pipeline
-# Having it as a protected feature prevents feature selection from removing it
+    # PHASE 1.8 FIX: Restored 'Tekrarlayan_Arıza_90gün_Flag' - Needed for target creation
+    # Reason: Feature IS used to CREATE target in 07_chronic_classifier.py (line 260)
+    # Workflow: Keep in features → Chronic classifier reads → Explicitly exclude before training
+    # Reference: 07_chronic_classifier.py lines 253-300 (target creation + exclusion)
+    'Tekrarlayan_Arıza_90gün_Flag',  # Turkish: 'Kronik_Arıza_Bayrağı'
+]
 
 
 # ============================================================================
